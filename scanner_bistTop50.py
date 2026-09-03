@@ -23,7 +23,14 @@ Sutunlar:
   Sektor   Hissenin kisa sektor kodu. Bu dosyada hisse listesi dinamik oldugu
            icin sabit bir harita yerine Yahoo'nun canli "sector" alani
            (SECTOR_TRANSLATE ile kisa koda cevrilir) kullanilir.
-  Fiyat(TL) Canli fiyat (Yahoo'nun regularMarketPrice alani)
+  MACD     MACD histogramina (12,26,9) gore SUREKLI AL/SAT/NOTR (histogram
+           farki > 0 = AL). EMA9/21'e ek momentum-gucu teyidi olarak okunur.
+  RSI      Wilder RSI(14) degeri (0-100). >=70 asiri alim, <=30 asiri satim
+           olarak yorumlanabilir; momentum taramasinda 50 uzeri boga teyidi.
+  BB%      Bollinger Bantlari (20,2sigma) icindeki konum (%). 100%=ust bant,
+           0%=alt bant. Bandin disina cikan (>100%/<0%) deger, hacimle
+           birlikteyse aşırı alım degil guclu kirilim/momentum sayilir.
+  Fiyat    Canli fiyat, TL (Yahoo'nun regularMarketPrice alani)
   Hacim    Bugunku islem hacminin 10 gunluk ortalama hacme orani (orn. 2.3x).
            Yuksek oran, fiyat hareketinin gercek katilimla desteklendigini gosterir.
   GunPoz   Fiyatin gunun dip-zirve araligindaki yeri (%). %100=gunun zirvesi
@@ -31,12 +38,14 @@ Sutunlar:
   Gunluk   Canli fiyat ile Yahoo'nun canli "onceki kapanis" alani arasindaki
            yuzde fark (satir rengi buna gore yesil/kirmizi olur, liste bu
            sutuna gore buyukten kucuge siralanir)
-  Haftalik/Aylik  Yahoo'nun kendi haftalik/aylik mum verisindeki (1wk/1mo)
-           donemin acilis fiyatina gore canli fiyatin yuzde farki
+  Haftalik/Aylik  Zaten cekilmis gunluk kapanis serisinden (6 aylik) pandas
+           resample ile turetilen hafta/ay acilisina gore canli fiyatin yuzde
+           farki - ayrica Yahoo'dan haftalik/aylik mum cekilmez, her
+           REFRESH_SECONDS'ta ek istek olmadan guncellenir.
 
-Onbellek: Haftalik/aylik veri 30 dakikada, 5dk sinyali 5 dakikada bir yenilenir
-(WEEKLY_MONTHLY_CACHE_SECONDS / INTRADAY_CACHE_SECONDS) - her REFRESH_SECONDS'ta
-degil, boylece Yahoo'ya gereksiz istek atilmaz.
+Onbellek: Sadece 5dk sinyali INTRADAY_CACHE_SECONDS (5 dakika) boyunca
+onbellekten dondurulur, boylece Yahoo'ya her REFRESH_SECONDS'ta gereksiz
+istek atilmaz. Haftalik/aylik veri onbellek gerektirmez (ek istek atmaz).
 
 Ses: Listede en az bir AL sinyali (5m) varsa al_beep.wav, en az bir SAT
 varsa sat_beep.wav calinir (1d sinyali icin ses yok).
@@ -56,7 +65,6 @@ TOP_N = 50
 CANDIDATE_BUFFER = 30  # eksik hisse kalmamasi icin ihtiyactan fazla aday cekilir
 MAX_RETRIES = 2
 MIN_PRICE = 1  # kurusun altindaki cop kagitlari elemek icin fiyat tabani (TL)
-WEEKLY_MONTHLY_CACHE_SECONDS = 30 * 60  # haftalik/aylik veri 30 dakikada bir yenilenir
 INTRADAY_CACHE_SECONDS = 5 * 60  # 5dk mum verisi 5 dakikada bir yenilenir
 
 SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
@@ -76,6 +84,12 @@ BIST30_TICKERS = [f"{t}.IS" for t in BIST30_TICKERS]
 
 EMA_FAST = 9
 EMA_SLOW = 21
+RSI_PERIOD = 14
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+BB_PERIOD = 20
+BB_STD = 2
 
 # Yahoo'nun standart (Ingilizce) sektor isimlerini kisa Turkce kodlara cevirir.
 # Bu dosyada hisse listesi dinamik oldugu icin (sabit BIST30/100 degil), sabit
@@ -102,36 +116,21 @@ def pct_change(current: float, past: float) -> float:
     return (current - past) / past * 100.0
 
 
-def latest_period_open(hist):
-    """Yahoo'nun kendi haftalik/aylik mumundaki en son GECERLI (NaN olmayan)
-    donemin acilis fiyatini dondurur. Icinde bulunulan hafta/ay tatille
-    basladiysa (ornegin ayin 1'i resmi tatilse) o satir NaN gelebiliyor,
-    bu durumda bir onceki tamamlanmis donemin acilisi kullanilir."""
+def period_open_from_daily(hist, rule: str):
+    """Gunluk mum verisinden (hist) mevcut haftanin/ayin acilis fiyatini pandas
+    resample ile turetir. Boylece Yahoo'dan ayrica haftalik/aylik mum
+    (interval=1wk/1mo) cekmeye gerek kalmaz - zaten cekilmis 6 aylik gunluk
+    veri yeniden kullanilir, ek istek/onbellek gerektirmez ve her REFRESH_SECONDS'ta
+    guncel kalir."""
     if hist.empty:
         return None
-    valid = hist.dropna(subset=["Open"])
-    if valid.empty:
+    opens = hist["Open"].resample(rule).first().dropna()
+    if opens.empty:
         return None
-    return float(valid["Open"].iloc[-1])
+    return float(opens.iloc[-1])
 
 
-_weekly_monthly_cache = {}  # ticker -> (fetched_at, weekly_open, monthly_open)
 _intraday_signal_cache = {}  # ticker -> (fetched_at, signal)
-
-
-def get_weekly_monthly_open(tk, ticker: str):
-    """Haftalik/aylik acilis fiyatlarini WEEKLY_MONTHLY_CACHE_SECONDS boyunca
-    onbellekten dondurur; Yahoo'ya her REFRESH_SECONDS'ta bir degil, 30 dakikada
-    bir istek atilir (bu veri zaten dakikalar icinde degismiyor)."""
-    cached = _weekly_monthly_cache.get(ticker)
-    if cached and time.time() - cached[0] < WEEKLY_MONTHLY_CACHE_SECONDS:
-        return cached[1], cached[2]
-    weekly_hist = tk.history(period="3mo", interval="1wk", auto_adjust=False)
-    weekly_open = latest_period_open(weekly_hist)
-    monthly_hist = tk.history(period="8mo", interval="1mo", auto_adjust=False)
-    monthly_open = latest_period_open(monthly_hist)
-    _weekly_monthly_cache[ticker] = (time.time(), weekly_open, monthly_open)
-    return weekly_open, monthly_open
 
 
 def get_intraday_signal(tk, ticker: str) -> str:
@@ -163,6 +162,56 @@ def ema_trend_signal(closes) -> str:
     return "NOTR"
 
 
+def rsi(closes, period: int = RSI_PERIOD) -> float:
+    """Wilder RSI(14) degerini dondurur (0-100). >=70 asiri alim, <=30 asiri
+    satim olarak yorumlanir; momentum taramasinda RSI'nin 50 uzerinde
+    kalmasi trendin devam ettigine dair ek teyit sayilir."""
+    if closes is None or len(closes) < period + 1:
+        return float("nan")
+    delta = closes.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def macd_signal(closes, fast: int = MACD_FAST, slow: int = MACD_SLOW, signal: int = MACD_SIGNAL) -> str:
+    """MACD histogramin (MACD cizgisi - sinyal cizgisi) isaretine gore
+    surekli AL/SAT/NOTR dondurur (kesisim ani degil, EMA9/21 sinyaliyle
+    ayni mantik)."""
+    if closes is None or len(closes) < slow + signal:
+        return "NOTR"
+    ema_fast = closes.ewm(span=fast, adjust=False).mean()
+    ema_slow = closes.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line.iloc[-1] - signal_line.iloc[-1]
+    if histogram > 0:
+        return "AL"
+    if histogram < 0:
+        return "SAT"
+    return "NOTR"
+
+
+def bollinger_percent_b(closes, period: int = BB_PERIOD, num_std: float = BB_STD) -> float:
+    """Fiyatin Bollinger bantlari icindeki yerini (%B) dondurur: 0%=alt bant,
+    100%=ust bant. Bandin disina cikan deger (>100%/<0%), hacimle destekliyse
+    asiri alim degil guclu kirilim/momentum olarak okunur."""
+    if closes is None or len(closes) < period:
+        return float("nan")
+    sma = closes.rolling(period).mean().iloc[-1]
+    std = closes.rolling(period).std().iloc[-1]
+    if std != std or std == 0:
+        return float("nan")
+    upper = sma + num_std * std
+    lower = sma - num_std * std
+    return (closes.iloc[-1] - lower) / (upper - lower) * 100.0
+
+
 def build_gainers_query():
     # Yahoo'nun BIST (Borsa Istanbul) icin tum piyasayi tarayan sorgusu.
     # region="tr" tum BIST hisselerini kapsar, sabit bir listeyle sinirli degildir.
@@ -190,7 +239,9 @@ def fetch_top_gainer_tickers(top_n: int):
 def fetch_row(ticker: str):
     try:
         tk = yf.Ticker(ticker)
-        hist = tk.history(period="2mo", interval="1d", auto_adjust=False)
+        # MACD(26,9) ve RSI/BB'nin saglikli yakinsamasi icin en az ~35 gunluk
+        # mum gerekir - 2 ay yetersiz kalabildigi icin 6 aya cikarildi.
+        hist = tk.history(period="6mo", interval="1d", auto_adjust=False)
         if hist.empty:
             return None
 
@@ -222,9 +273,11 @@ def fetch_row(ticker: str):
         if daily_pct is None:
             daily_pct = pct_change(current_price, prev_close)
 
-        # Haftalik/aylik degisim, Yahoo'nun kendi haftalik/aylik mum verisindeki
-        # (interval="1wk"/"1mo") donemin acilis fiyatina gore hesaplanir.
-        weekly_open, monthly_open = get_weekly_monthly_open(tk, ticker)
+        # Haftalik/aylik degisim, zaten cekilmis olan gunluk kapanis serisinden
+        # (hist) resample ile turetilen donem acilisina gore hesaplanir - ekstra
+        # Yahoo istegi gerekmez.
+        weekly_open = period_open_from_daily(hist, "W")
+        monthly_open = period_open_from_daily(hist, "MS")
         weekly_pct = pct_change(current_price, weekly_open)
         monthly_pct = pct_change(current_price, monthly_open)
 
@@ -232,6 +285,12 @@ def fetch_row(ticker: str):
         # Gunluk EMA kesisimi: zaten cekilmis olan gunluk kapanis serisi (closes)
         # uzerinden hesaplanir, ekstra Yahoo istegi gerekmez.
         signal_1d = ema_trend_signal(closes)
+
+        # MACD/RSI/Bollinger: gunluk kapanis serisi (closes) uzerinden
+        # hesaplanir, ekstra Yahoo istegi gerekmez.
+        signal_macd = macd_signal(closes)
+        rsi_val = rsi(closes)
+        bb_percent = bollinger_percent_b(closes)
 
         # Hacim orani: bugunku hacmin 10 gunluk ortalama hacme orani.
         # Yuksek oran (>1.5x gibi) sinyalin gercek katilimla desteklendigini gosterir.
@@ -257,6 +316,9 @@ def fetch_row(ticker: str):
             "monthly": monthly_pct,
             "signal_5m": signal_5m,
             "signal_1d": signal_1d,
+            "signal_macd": signal_macd,
+            "rsi": rsi_val,
+            "bb_percent": bb_percent,
             "volume_ratio": volume_ratio,
             "day_range_pos": day_range_pos,
         }
@@ -334,6 +396,12 @@ def fmt_range_pos(val: float) -> str:
     return f"{val:.0f}%"
 
 
+def fmt_rsi(val: float) -> str:
+    if val != val:  # NaN check
+        return " - "
+    return f"{val:.0f}"
+
+
 def sign_color(val: float, fallback: str) -> str:
     """Degerin kendi isaretine gore renk dondurur (NaN ise fallback/satir rengi)."""
     if val != val:  # NaN check
@@ -350,22 +418,24 @@ def render(rows, missing_count: int = 0):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"BIST30 + En Cok Kazandiranlar - Getiri Tablosu ({len(rows)} hisse)   (guncelleme: {now})")
     print(f"Kaynak: BIST30 (daima dahil) + ozel tarama (fiyat/hacim filtresi YOK - DENEME)   |  Siralama: Gunluk yuzde degisime gore (yuksekten dusuge)")
-    print(f"Sinyal: EMA{EMA_FAST}/EMA{EMA_SLOW} kesisimi (5dk mum)   |  her {REFRESH_SECONDS} sn'de bir yenilenir")
+    print(f"Sinyal: EMA{EMA_FAST}/EMA{EMA_SLOW} (1d/5dk) + MACD({MACD_FAST},{MACD_SLOW},{MACD_SIGNAL}) + RSI({RSI_PERIOD}) + BB({BB_PERIOD},{BB_STD}sigma)   |  her {REFRESH_SECONDS} sn'de bir yenilenir")
     if missing_count:
         print(f"Uyari: {missing_count} BIST30 hissesi icin veri alinamadi.")
     print()
 
-    header = f"{'#':>3} {'1d':^3} {'5m':^3} {'Hisse':<6} {'Sektor':<6} {'Fiyat(TL)':>9} {'Hacim':>5} {'GunPoz':>6} {'Gunluk':>8} {'Haftalik':>8} {'Aylik':>8}"
+    header = f"{'#':>3} {'1d':^3} {'5m':^3} {'MACD':^4} {'Hisse':<6} {'Sektor':<6} {'Fiyat':>7} {'Hacim':>5} {'GunPoz':>6} {'RSI':>4} {'BB%':>5} {'Gunluk':>8} {'Haftalik':>8} {'Aylik':>8}"
     print(header)
     print("-" * len(header))
 
     for i, row in enumerate(rows_sorted, start=1):
         symbol_1d = f"{SIGNAL_SYMBOLS.get(row['signal_1d'], row['signal_1d']):^3}"
         symbol_5m = f"{SIGNAL_SYMBOLS.get(row['signal_5m'], row['signal_5m']):^3}"
+        symbol_macd = f"{SIGNAL_SYMBOLS.get(row['signal_macd'], row['signal_macd']):^4}"
         idx = f"{i:>3}"
         prefix = (
-            f"{row['ticker']:<6} {row['sector']:<6} {row['price']:>9.2f} "
+            f"{row['ticker']:<6} {row['sector']:<6} {row['price']:>7.2f} "
             f"{fmt_ratio(row['volume_ratio']):>5} {fmt_range_pos(row['day_range_pos']):>6} "
+            f"{fmt_rsi(row['rsi']):>4} {fmt_range_pos(row['bb_percent']):>5} "
             f"{fmt_pct(row['daily']):>8} "
         )
         weekly_str = f"{fmt_pct(row['weekly']):>8}"
@@ -375,10 +445,11 @@ def render(rows, missing_count: int = 0):
             idx = f"{row_color}{idx}{RESET}"
             symbol_1d = f"{SIGNAL_COLORS.get(row['signal_1d'], YELLOW)}{symbol_1d}{RESET}"
             symbol_5m = f"{SIGNAL_COLORS.get(row['signal_5m'], YELLOW)}{symbol_5m}{RESET}"
+            symbol_macd = f"{SIGNAL_COLORS.get(row['signal_macd'], YELLOW)}{symbol_macd}{RESET}"
             prefix = f"{row_color}{prefix}{RESET}"
             weekly_str = f"{sign_color(row['weekly'], row_color)}{weekly_str}{RESET}"
             monthly_str = f"{sign_color(row['monthly'], row_color)}{monthly_str}{RESET}"
-        print(f"{idx} {symbol_1d} {symbol_5m} {prefix}{weekly_str} {monthly_str}")
+        print(f"{idx} {symbol_1d} {symbol_5m} {symbol_macd} {prefix}{weekly_str} {monthly_str}")
 
     print(f"\nCikmak icin CTRL+C")
     sys.stdout.flush()
