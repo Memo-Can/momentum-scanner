@@ -14,6 +14,12 @@ Yahoo Finance'ten yeniden cekilip terminal yenilenir.
 
 Sutunlar:
   #        Gunluk getiriye gore siralamadaki yeri (1 = en cok kazandiran)
+  Skor     1d/5m EMA, MACD, RSI ve BB%'nin tek bir konfluens skoruna (-5..+5)
+           birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/GUCLU SAT(▼▼).
+           5 ayri sinyale tek tek bakmak yerine tek bakista netlik saglar.
+           ADX(14) ayri bir sutun olarak gosterilmez, GUCLU AL/SAT etiketini
+           teyit eden bir guven filtresi olarak kullanilir: ADX<20 (zayif/
+           yatay piyasa) ise "guclu" etiket otomatik normal AL/SAT'a duser.
   1d       Gunluk mumda EMA9/EMA21'e gore SUREKLI trend durumu (AL/SAT/NOTR)
   5m       5 dakikalik mumda EMA9/EMA21'e gore SUREKLI trend durumu
            (1d ile ayni mantik, farkli zaman dilimi; ikisi de kesisim aninda
@@ -38,17 +44,13 @@ Sutunlar:
   Gunluk   Canli fiyat ile Yahoo'nun canli "onceki kapanis" alani arasindaki
            yuzde fark (satir rengi buna gore yesil/kirmizi olur, liste bu
            sutuna gore buyukten kucuge siralanir)
-  Haftalik/Aylik  Zaten cekilmis gunluk kapanis serisinden (6 aylik) pandas
-           resample ile turetilen hafta/ay acilisina gore canli fiyatin yuzde
-           farki - ayrica Yahoo'dan haftalik/aylik mum cekilmez, her
-           REFRESH_SECONDS'ta ek istek olmadan guncellenir.
 
 Onbellek: Sadece 5dk sinyali INTRADAY_CACHE_SECONDS (5 dakika) boyunca
 onbellekten dondurulur, boylece Yahoo'ya her REFRESH_SECONDS'ta gereksiz
-istek atilmaz. Haftalik/aylik veri onbellek gerektirmez (ek istek atmaz).
+istek atilmaz.
 
-Ses: Listede en az bir AL sinyali (5m) varsa al_beep.wav, en az bir SAT
-varsa sat_beep.wav calinir (1d sinyali icin ses yok).
+Ses: Her basarili yenilemede (REFRESH_SECONDS'ta bir) tek bir bip sesi
+(al_beep.wav) calinir - sinyale bagli degildir.
 """
 
 import os
@@ -58,6 +60,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
+import pandas as pd
 import yfinance as yf
 
 REFRESH_SECONDS = 60
@@ -68,8 +71,7 @@ MIN_PRICE = 1  # kurusun altindaki cop kagitlari elemek icin fiyat tabani (TL)
 INTRADAY_CACHE_SECONDS = 5 * 60  # 5dk mum verisi 5 dakikada bir yenilenir
 
 SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
-AL_BEEP = os.path.join(SOUND_DIR, "al_beep.wav")
-SAT_BEEP = os.path.join(SOUND_DIR, "sat_beep.wav")
+BEEP_SOUND = os.path.join(SOUND_DIR, "al_beep.wav")
 
 # BIST30 endeksindeki hisseler - gunluk % ne olursa olsun listede daima
 # yer alirlar (bkz. dosya basindaki aciklama).
@@ -90,6 +92,8 @@ MACD_SLOW = 26
 MACD_SIGNAL = 9
 BB_PERIOD = 20
 BB_STD = 2
+ADX_PERIOD = 14
+ADX_TREND_THRESHOLD = 20  # bu esigin altinda piyasa zayif/yatay (gurultu) sayilir
 
 # Yahoo'nun standart (Ingilizce) sektor isimlerini kisa Turkce kodlara cevirir.
 # Bu dosyada hisse listesi dinamik oldugu icin (sabit BIST30/100 degil), sabit
@@ -114,20 +118,6 @@ def pct_change(current: float, past: float) -> float:
     if past in (0, None) or current is None:
         return float("nan")
     return (current - past) / past * 100.0
-
-
-def period_open_from_daily(hist, rule: str):
-    """Gunluk mum verisinden (hist) mevcut haftanin/ayin acilis fiyatini pandas
-    resample ile turetir. Boylece Yahoo'dan ayrica haftalik/aylik mum
-    (interval=1wk/1mo) cekmeye gerek kalmaz - zaten cekilmis 6 aylik gunluk
-    veri yeniden kullanilir, ek istek/onbellek gerektirmez ve her REFRESH_SECONDS'ta
-    guncel kalir."""
-    if hist.empty:
-        return None
-    opens = hist["Open"].resample(rule).first().dropna()
-    if opens.empty:
-        return None
-    return float(opens.iloc[-1])
 
 
 _intraday_signal_cache = {}  # ticker -> (fetched_at, signal)
@@ -212,6 +202,83 @@ def bollinger_percent_b(closes, period: int = BB_PERIOD, num_std: float = BB_STD
     return (closes.iloc[-1] - lower) / (upper - lower) * 100.0
 
 
+def adx(hist, period: int = ADX_PERIOD) -> float:
+    """Wilder ADX(14) degerini dondurur (0-100). ADX yonu degil trendin
+    GUCUNU olcer: <20 zayif/yatay piyasa (sinyaller gurultulu olabilir),
+    >=25 gercek/guclu trend sayilir. Skor'un GUCLU AL/SAT etiketini
+    onaylamak icin guven filtresi olarak kullanilir."""
+    if hist is None or len(hist) < period * 2:
+        return float("nan")
+    high = hist["High"]
+    low = hist["Low"]
+    close = hist["Close"]
+    prev_close = close.shift(1)
+
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+    ).max(axis=1)
+
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = ((up_move > down_move) & (up_move > 0)) * up_move
+    minus_dm = ((down_move > up_move) & (down_move > 0)) * down_move
+
+    smoothed_tr = tr.ewm(alpha=1 / period, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / smoothed_tr
+    minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / smoothed_tr
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    adx_val = dx.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
+    return float(adx_val) if adx_val == adx_val else float("nan")
+
+
+def confluence_label(
+    signal_1d: str, signal_5m: str, signal_macd: str, rsi_val: float, bb_percent: float, adx_val: float
+) -> str:
+    """1d/5m EMA, MACD, RSI ve BB% sinyallerini tek bir konfluens skoruna
+    (-5..+5) birlestirir ve GUCLU_AL/AL/NOTR/SAT/GUCLU_SAT etiketine cevirir.
+    Boylece 5 ayri sutuna tek tek bakip kafada birlestirmek yerine, tek
+    sutunda net bir AL/SAT karari gorulur.
+
+    ADX, ayri bir sutun olarak degil, GUCLU_AL/GUCLU_SAT etiketinin
+    guvenilirligini teyit eden bir filtre olarak kullanilir: ADX<20 (zayif/
+    yatay piyasa) veya hesaplanamiyorsa, "guclu" etiket normal AL/SAT'a
+    dusurulur - boyle bir ortamda guclu sinyale guvenmek yaniltici olabilir."""
+
+    def cat(sig: str) -> int:
+        return {"AL": 1, "SAT": -1}.get(sig, 0)
+
+    score = cat(signal_1d) + cat(signal_5m) + cat(signal_macd)
+
+    if rsi_val == rsi_val:  # NaN degil
+        if rsi_val >= 55:
+            score += 1
+        elif rsi_val <= 45:
+            score -= 1
+
+    if bb_percent == bb_percent:  # NaN degil
+        score += 1 if bb_percent >= 50 else -1
+
+    if score >= 4:
+        label = "GUCLU_AL"
+    elif score >= 2:
+        label = "AL"
+    elif score >= -1:
+        label = "NOTR"
+    elif score >= -3:
+        label = "SAT"
+    else:
+        label = "GUCLU_SAT"
+
+    trend_confirmed = adx_val == adx_val and adx_val >= ADX_TREND_THRESHOLD
+    if label == "GUCLU_AL" and not trend_confirmed:
+        label = "AL"
+    elif label == "GUCLU_SAT" and not trend_confirmed:
+        label = "SAT"
+
+    return label
+
+
 def build_gainers_query():
     # Yahoo'nun BIST (Borsa Istanbul) icin tum piyasayi tarayan sorgusu.
     # region="tr" tum BIST hisselerini kapsar, sabit bir listeyle sinirli degildir.
@@ -273,14 +340,6 @@ def fetch_row(ticker: str):
         if daily_pct is None:
             daily_pct = pct_change(current_price, prev_close)
 
-        # Haftalik/aylik degisim, zaten cekilmis olan gunluk kapanis serisinden
-        # (hist) resample ile turetilen donem acilisina gore hesaplanir - ekstra
-        # Yahoo istegi gerekmez.
-        weekly_open = period_open_from_daily(hist, "W")
-        monthly_open = period_open_from_daily(hist, "MS")
-        weekly_pct = pct_change(current_price, weekly_open)
-        monthly_pct = pct_change(current_price, monthly_open)
-
         signal_5m = get_intraday_signal(tk, ticker)
         # Gunluk EMA kesisimi: zaten cekilmis olan gunluk kapanis serisi (closes)
         # uzerinden hesaplanir, ekstra Yahoo istegi gerekmez.
@@ -291,6 +350,8 @@ def fetch_row(ticker: str):
         signal_macd = macd_signal(closes)
         rsi_val = rsi(closes)
         bb_percent = bollinger_percent_b(closes)
+        adx_val = adx(hist)
+        score = confluence_label(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, adx_val)
 
         # Hacim orani: bugunku hacmin 10 gunluk ortalama hacme orani.
         # Yuksek oran (>1.5x gibi) sinyalin gercek katilimla desteklendigini gosterir.
@@ -312,11 +373,10 @@ def fetch_row(ticker: str):
             "sector": sector,
             "price": current_price,
             "daily": daily_pct,
-            "weekly": weekly_pct,
-            "monthly": monthly_pct,
             "signal_5m": signal_5m,
             "signal_1d": signal_1d,
             "signal_macd": signal_macd,
+            "score": score,
             "rsi": rsi_val,
             "bb_percent": bb_percent,
             "volume_ratio": volume_ratio,
@@ -356,10 +416,21 @@ def fetch_with_retry(tickers, max_workers: int = 12, max_retries: int = MAX_RETR
 GREEN = "\033[32m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
+BOLD_GREEN = "\033[1;32m"
+BOLD_RED = "\033[1;31m"
 RESET = "\033[0m"
 
 SIGNAL_SYMBOLS = {"AL": "▲", "SAT": "▼", "NOTR": "–"}
 SIGNAL_COLORS = {"AL": GREEN, "SAT": RED, "NOTR": YELLOW}
+
+SCORE_SYMBOLS = {"GUCLU_AL": "▲▲", "AL": "▲", "NOTR": "–", "SAT": "▼", "GUCLU_SAT": "▼▼"}
+SCORE_COLORS = {
+    "GUCLU_AL": BOLD_GREEN,
+    "AL": GREEN,
+    "NOTR": YELLOW,
+    "SAT": RED,
+    "GUCLU_SAT": BOLD_RED,
+}
 
 
 def play_beep(path: str):
@@ -369,12 +440,8 @@ def play_beep(path: str):
         pass
 
 
-def play_signal_sounds(rows):
-    signals = {row["signal_5m"] for row in rows}
-    if "AL" in signals:
-        play_beep(AL_BEEP)
-    if "SAT" in signals:
-        play_beep(SAT_BEEP)
+def play_refresh_beep():
+    play_beep(BEEP_SOUND)
 
 
 def fmt_pct(val: float) -> str:
@@ -402,13 +469,6 @@ def fmt_rsi(val: float) -> str:
     return f"{val:.0f}"
 
 
-def sign_color(val: float, fallback: str) -> str:
-    """Degerin kendi isaretine gore renk dondurur (NaN ise fallback/satir rengi)."""
-    if val != val:  # NaN check
-        return fallback
-    return GREEN if val >= 0 else RED
-
-
 def render(rows, missing_count: int = 0):
     use_color = sys.stdout.isatty()
     if use_color:
@@ -423,33 +483,31 @@ def render(rows, missing_count: int = 0):
         print(f"Uyari: {missing_count} BIST30 hissesi icin veri alinamadi.")
     print()
 
-    header = f"{'#':>3} {'1d':^3} {'5m':^3} {'MACD':^4} {'Hisse':<6} {'Sektor':<6} {'Fiyat':>7} {'Hacim':>5} {'GunPoz':>6} {'RSI':>4} {'BB%':>5} {'Gunluk':>8} {'Haftalik':>8} {'Aylik':>8}"
+    header = f"{'#':>2} {'Skor':^4} {'1d':^2} {'5m':^2} {'MACD':^4} {'Hisse':<5} {'Sektor':<6} {'Fiyat':>6} {'Hacim':>5} {'GunPoz':>6} {'RSI':>3} {'BB%':>4} {'Gunluk':>8}"
     print(header)
     print("-" * len(header))
 
     for i, row in enumerate(rows_sorted, start=1):
-        symbol_1d = f"{SIGNAL_SYMBOLS.get(row['signal_1d'], row['signal_1d']):^3}"
-        symbol_5m = f"{SIGNAL_SYMBOLS.get(row['signal_5m'], row['signal_5m']):^3}"
+        symbol_score = f"{SCORE_SYMBOLS.get(row['score'], row['score']):^4}"
+        symbol_1d = f"{SIGNAL_SYMBOLS.get(row['signal_1d'], row['signal_1d']):^2}"
+        symbol_5m = f"{SIGNAL_SYMBOLS.get(row['signal_5m'], row['signal_5m']):^2}"
         symbol_macd = f"{SIGNAL_SYMBOLS.get(row['signal_macd'], row['signal_macd']):^4}"
-        idx = f"{i:>3}"
+        idx = f"{i:>2}"
         prefix = (
-            f"{row['ticker']:<6} {row['sector']:<6} {row['price']:>7.2f} "
+            f"{row['ticker']:<5} {row['sector']:<6} {row['price']:>6.2f} "
             f"{fmt_ratio(row['volume_ratio']):>5} {fmt_range_pos(row['day_range_pos']):>6} "
-            f"{fmt_rsi(row['rsi']):>4} {fmt_range_pos(row['bb_percent']):>5} "
-            f"{fmt_pct(row['daily']):>8} "
+            f"{fmt_rsi(row['rsi']):>3} {fmt_range_pos(row['bb_percent']):>4} "
+            f"{fmt_pct(row['daily']):>8}"
         )
-        weekly_str = f"{fmt_pct(row['weekly']):>8}"
-        monthly_str = f"{fmt_pct(row['monthly']):>8}"
         if use_color:
             row_color = GREEN if row["daily"] >= 0 else RED
             idx = f"{row_color}{idx}{RESET}"
+            symbol_score = f"{SCORE_COLORS.get(row['score'], YELLOW)}{symbol_score}{RESET}"
             symbol_1d = f"{SIGNAL_COLORS.get(row['signal_1d'], YELLOW)}{symbol_1d}{RESET}"
             symbol_5m = f"{SIGNAL_COLORS.get(row['signal_5m'], YELLOW)}{symbol_5m}{RESET}"
             symbol_macd = f"{SIGNAL_COLORS.get(row['signal_macd'], YELLOW)}{symbol_macd}{RESET}"
             prefix = f"{row_color}{prefix}{RESET}"
-            weekly_str = f"{sign_color(row['weekly'], row_color)}{weekly_str}{RESET}"
-            monthly_str = f"{sign_color(row['monthly'], row_color)}{monthly_str}{RESET}"
-        print(f"{idx} {symbol_1d} {symbol_5m} {symbol_macd} {prefix}{weekly_str} {monthly_str}")
+        print(f"{idx} {symbol_score} {symbol_1d} {symbol_5m} {symbol_macd} {prefix}")
 
     print(f"\nCikmak icin CTRL+C")
     sys.stdout.flush()
@@ -475,7 +533,7 @@ def main():
 
         if top_rows:
             render(top_rows, missing_count=missing_count)
-            play_signal_sounds(top_rows)
+            play_refresh_beep()
         else:
             print("Veri cekilemedi, tekrar denenecek...")
         try:
