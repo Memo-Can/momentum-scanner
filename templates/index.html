@@ -47,6 +47,7 @@
     flex: 1 1 auto;
     overflow: auto;
     min-width: 0;
+    -webkit-overflow-scrolling: touch;
   }
   table { border-collapse: collapse; width: 100%; white-space: nowrap; }
   thead th {
@@ -85,18 +86,78 @@
     border-left: 1px solid var(--border);
     padding: 16px;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   #side h2 { margin: 0 0 4px; font-size: 16px; }
   #side .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
   #chart { width: 100%; height: 280px; }
-  #signal-list { margin-top: 14px; }
-  #signal-list h3 { font-size: 13px; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
-  .sig-row {
-    display: flex; justify-content: space-between;
-    padding: 6px 0; border-bottom: 1px solid #1d2029; font-size: 12px;
+  #score-history { margin-top: 14px; }
+  #score-history h3 { font-size: 13px; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tab-btn {
+    flex: 1;
+    padding: 6px 4px;
+    background: var(--panel);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
   }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--text); border-color: var(--yellow); }
+  .tab-panel { max-height: 320px; overflow-y: auto; }
+  .hist-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid #1d2029; font-size: 12px; gap: 8px;
+  }
+  .hist-row .hist-label { color: var(--text); white-space: nowrap; }
+  .hist-row .hist-score { min-width: 30px; text-align: center; color: var(--muted); }
+  .hist-row .hist-price { color: var(--muted); white-space: nowrap; }
   .sig-empty { color: var(--muted); font-size: 12px; }
   .placeholder { color: var(--muted); font-size: 13px; margin-top: 40px; text-align: center; }
+
+  /* --- Tablet: yan panel daralir, tablo hala yatayda oturuyor --- */
+  @media (max-width: 1024px) {
+    #side { width: 300px; flex: 0 0 300px; padding: 12px; }
+    #chart { height: 240px; }
+  }
+
+  /* --- Mobil: panel tablonun altina iner, her ikisi de kendi icinde
+     kaydirilir; tablo genisligi korunur (yatay kaydirma), boylece
+     sutunlar sikismaz/okunmaz hale gelmez --- */
+  @media (max-width: 720px) {
+    body { font-size: 13px; }
+    header { padding: 10px 14px; }
+    header h1 { font-size: 16px; }
+    header .meta, .warning { font-size: 11px; }
+    .layout {
+      flex-direction: column;
+      height: auto;
+    }
+    #table-wrap {
+      flex: none;
+      max-height: 55vh;
+      -webkit-overflow-scrolling: touch;
+    }
+    thead th { padding: 7px 8px; font-size: 10px; }
+    tbody td { padding: 6px 8px; font-size: 12px; }
+    #side {
+      width: 100%;
+      flex: none;
+      border-left: none;
+      border-top: 1px solid var(--border);
+      max-height: none;
+      padding: 14px;
+    }
+    #chart { height: 220px; }
+    .sig-row { font-size: 11px; }
+  }
+
+  @media (max-width: 420px) {
+    thead th, tbody td { padding: 5px 6px; }
+    #chart { height: 190px; }
+  }
 </style>
 </head>
 <body>
@@ -116,6 +177,7 @@
         <tr id="head-row">
           <th class="left" data-key="_default" data-type="default">#<span class="arrow"></span></th>
           <th class="left" data-key="ticker" data-type="text">Hisse<span class="arrow"></span></th>
+          <th class="left" data-key="sector" data-type="text">Sektor<span class="arrow"></span></th>
           <th data-key="score" data-type="score">Skor<span class="arrow"></span></th>
           <th data-key="signal_1d" data-type="signal">1d<span class="arrow"></span></th>
           <th data-key="signal_5m" data-type="signal">5m<span class="arrow"></span></th>
@@ -127,8 +189,8 @@
           <th data-key="bb_percent" data-type="num">BB%<span class="arrow"></span></th>
           <th data-key="rel_strength" data-type="num">RS<span class="arrow"></span></th>
           <th data-key="daily" data-type="num">Gunluk<span class="arrow"></span></th>
-          <th data-key="weekly" data-type="num">Haftalik<span class="arrow"></span></th>
-          <th data-key="monthly" data-type="num">Aylik<span class="arrow"></span></th>
+          <th data-key="d5" data-type="num">5D<span class="arrow"></span></th>
+          <th data-key="m1" data-type="num">1M<span class="arrow"></span></th>
           <th data-key="day_stop" data-type="num">GunStop<span class="arrow"></span></th>
           <th data-key="day_target" data-type="num">GunHedef<span class="arrow"></span></th>
           <th data-key="swing_stop" data-type="num">SwStop<span class="arrow"></span></th>
@@ -145,9 +207,16 @@
       <h2 id="side-ticker">-</h2>
       <div class="sub" id="side-sub">3 aylik gunluk mum</div>
       <div id="chart"></div>
-      <div id="signal-list">
-        <h3>Guclu AL/SAT Gecmisi</h3>
-        <div id="signal-rows"></div>
+      <div id="score-history">
+        <h3>Skor Gecmisi</h3>
+        <div class="tabs" id="score-tabs">
+          <button class="tab-btn active" data-tab="daily">Gunluk</button>
+          <button class="tab-btn" data-tab="hourly">Saatlik</button>
+          <button class="tab-btn" data-tab="raw">5 Dakikalik</button>
+        </div>
+        <div id="tab-daily" class="tab-panel"></div>
+        <div id="tab-hourly" class="tab-panel" hidden></div>
+        <div id="tab-raw" class="tab-panel" hidden></div>
       </div>
     </div>
   </div>
@@ -191,6 +260,7 @@ function renderRows(rows) {
     tr.innerHTML = `
       <td class="left">${i + 1}</td>
       <td class="left">${r.ticker}</td>
+      <td class="left">${r.sector || '-'}</td>
       <td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>
       <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
       <td class="sym-${r.signal_5m}">${SIGNAL_SYMBOLS[r.signal_5m] || r.signal_5m}</td>
@@ -200,10 +270,10 @@ function renderRows(rows) {
       <td>${fmtRangePos(r.day_range_pos)}</td>
       <td>${fmtRsi(r.rsi)}</td>
       <td>${fmtRangePos(r.bb_percent)}</td>
-      <td class="${pctClass(r.rel_strength)}">${fmtPct(r.rel_strength)}</td>
+      <td>${fmtPct(r.rel_strength)}</td>
       <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
-      <td class="${pctClass(r.weekly)}">${fmtPct(r.weekly)}</td>
-      <td class="${pctClass(r.monthly)}">${fmtPct(r.monthly)}</td>
+      <td class="${pctClass(r.d5)}">${fmtPct(r.d5)}</td>
+      <td class="${pctClass(r.m1)}">${fmtPct(r.m1)}</td>
       <td class="${r.day_stop === null ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
       <td class="${r.day_target === null ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
       <td class="${r.swing_stop === null ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
@@ -294,7 +364,7 @@ async function refreshRows() {
     document.getElementById('meta').textContent =
       `${latestRows.length} hisse | guncelleme: ${data.updated_at || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
     document.getElementById('warning').textContent =
-      data.missing_count ? `Uyari: ${data.missing_count} BIST30 hissesi icin veri alinamadi.` : '';
+      data.missing_count ? `Uyari: ${data.missing_count} sabit liste hissesi icin veri alinamadi.` : '';
   } catch (e) {
     document.getElementById('meta').textContent = 'Veri alinamadi, tekrar denenecek...';
   }
@@ -321,6 +391,74 @@ function ensureChart() {
   }).observe(document.getElementById('chart'));
 }
 
+// Skor Gecmisi sekmeleri: backend'den TEK bir 5 dakikalik ham skor listesi
+// gelir (score-history), gunluk/saatlik ortalamalar bu tek listeden burada
+// (istemci tarafinda) hesaplanir - ayri API cagrisi gerekmez, sekmeler
+// arasi gecis aninda olur.
+let scoreHistoryRaw = [];
+
+// confluence_label ile AYNI esikler (bkz. scanner_*.py) - ortalama ham skoru
+// (-6..+6) ayni AL/SAT etiketine cevirmek icin burada tekrarlanir. ADX
+// filtresi burada YOK: ADX aninlik bir guven filtresi, ortalamaya uygun degil.
+function scoreLabelFromAvg(avg) {
+  if (avg >= 5) return 'GUCLU_AL';
+  if (avg >= 2) return 'AL';
+  if (avg >= -1) return 'NOTR';
+  if (avg >= -4) return 'SAT';
+  return 'GUCLU_SAT';
+}
+
+function dayKey(t) { return t.slice(0, 10); }
+function hourKey(t) { return t.slice(0, 13) + ':00'; }
+
+function aggregateBy(rows, keyFn) {
+  const order = [];
+  const groups = {};
+  rows.forEach(r => {
+    const k = keyFn(r.time);
+    if (!groups[k]) { groups[k] = { sum: 0, count: 0, price: r.price }; order.push(k); }
+    groups[k].sum += r.score_raw;
+    groups[k].count += 1;
+    groups[k].price = r.price; // satirlar zaman sirali geldigi icin grup icindeki en guncel fiyat kalir
+  });
+  return order.map(k => ({ label: k, avg: groups[k].sum / groups[k].count, price: groups[k].price })).reverse();
+}
+
+function renderHistPanel(panelId, items) {
+  const wrap = document.getElementById(panelId);
+  if (!items.length) {
+    wrap.innerHTML = '<div class="sig-empty">Henuz veri yok.</div>';
+    return;
+  }
+  wrap.innerHTML = items.map(it => {
+    const scoreLabel = scoreLabelFromAvg(it.avg);
+    const avgTxt = (it.avg >= 0 ? '+' : '') + it.avg.toFixed(1);
+    return `
+      <div class="hist-row">
+        <span class="sym-${scoreLabel}">${SCORE_SYMBOLS[scoreLabel] || scoreLabel}</span>
+        <span class="hist-label">${it.label}</span>
+        <span class="hist-score">${avgTxt}</span>
+        <span class="hist-price">${parseFloat(it.price).toFixed(2)}</span>
+      </div>`;
+  }).join('');
+}
+
+function renderScoreHistory() {
+  renderHistPanel('tab-daily', aggregateBy(scoreHistoryRaw, dayKey));
+  renderHistPanel('tab-hourly', aggregateBy(scoreHistoryRaw, hourKey));
+  // 5 dakikalik ham veri: en son 300 kayit (yakl. son 25 saat), en yeni once
+  renderHistPanel('tab-raw', scoreHistoryRaw.slice(-300).slice().reverse().map(r => ({
+    label: r.time, avg: r.score_raw, price: r.price,
+  })));
+}
+
+document.querySelectorAll('#score-tabs .tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#score-tabs .tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== `tab-${btn.dataset.tab}`; });
+  });
+});
+
 async function selectTicker(ticker) {
   selectedTicker = ticker;
   document.getElementById('side-empty').style.display = 'none';
@@ -328,27 +466,15 @@ async function selectTicker(ticker) {
   document.getElementById('side-ticker').textContent = ticker;
 
   ensureChart();
-  const [histRes, sigRes] = await Promise.all([
+  const [histRes, scoreHistRes] = await Promise.all([
     fetch(`/api/history/${ticker}`),
-    fetch(`/api/signals/${ticker}`),
+    fetch(`/api/score-history/${ticker}`),
   ]);
   const candles = await histRes.json();
-  const signals = await sigRes.json();
+  scoreHistoryRaw = await scoreHistRes.json();
 
   candleSeries.setData(candles);
-
-  const sigWrap = document.getElementById('signal-rows');
-  if (!signals.length) {
-    sigWrap.innerHTML = '<div class="sig-empty">Henuz kaydedilmis GUCLU AL/SAT sinyali yok.</div>';
-  } else {
-    sigWrap.innerHTML = signals.slice().reverse().map(s => `
-      <div class="sig-row">
-        <span class="sym-${s.score}">${SCORE_SYMBOLS[s.score] || s.score}</span>
-        <span>${s.time}</span>
-        <span>${parseFloat(s.price).toFixed(2)}</span>
-      </div>
-    `).join('');
-  }
+  renderScoreHistory();
 }
 
 refreshRows();

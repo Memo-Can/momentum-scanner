@@ -56,9 +56,10 @@ Sutunlar:
   SwStop/Hedef  Ayni mantik, ATR(14)*3.0 mesafeli - birkac gun/hafta tasinacak
            swing pozisyonlar icin daha genis stop/hedef.
 
-Onbellek: Sadece 5dk sinyali INTRADAY_CACHE_SECONDS (5 dakika) boyunca,
-BIST100 endeksinin gunluk degisimi ise REFRESH_SECONDS'a yakin bir sure
-onbellekten dondurulur - boylece Yahoo'ya gereksiz istek atilmaz.
+Onbellek: 5dk sinyali ve haftalik/aylik her REFRESH_SECONDS'ta Yahoo'dan
+yeniden cekilir (onbellek yok). Sadece BIST100 endeksi (RS icin) dongu
+basina onbelleklenir - yoksa her hisse icin ayri ayri cekilip 100+ kat
+gereksiz istege yol acardi.
 
 Ses: Her basarili yenilemede (REFRESH_SECONDS'ta bir) tek bir bip sesi
 (al_beep.wav) calinir - sinyale bagli degildir.
@@ -85,7 +86,6 @@ TOP_N = 100
 CANDIDATE_BUFFER = 30  # eksik hisse kalmamasi icin ihtiyactan fazla aday cekilir
 MAX_RETRIES = 2
 MIN_PRICE = 1  # kurusun altindaki cop kagitlari elemek icin fiyat tabani (TL)
-INTRADAY_CACHE_SECONDS = 5 * 60  # 5dk mum verisi 5 dakikada bir yenilenir
 
 SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 BEEP_SOUND = os.path.join(SOUND_DIR, "al_beep.wav")
@@ -95,7 +95,9 @@ BEEP_SOUND = os.path.join(SOUND_DIR, "al_beep.wav")
 # oldu) kendi verinizle degerlendirebilirsiniz. Sadece durum DEGISTIGINDE
 # yazilir (her dongude tekrar tekrar degil), boylece dosya sismez.
 SIGNAL_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_log_bist.csv")
+SCORE_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score_history_bist.csv")
 SIGNAL_LOG_FIELDS = ["timestamp", "ticker", "score", "price", "daily_pct", "rsi", "adx", "rel_strength"]
+SCORE_HISTORY_FIELDS = ["timestamp", "ticker", "score_raw", "score", "price"]
 
 # BIST30 endeksindeki hisseler - gunluk % ne olursa olsun listede daima
 # yer alirlar (bkz. dosya basindaki aciklama).
@@ -124,6 +126,8 @@ ATR_PERIOD = 14
 ATR_DAY_MULT = 1.5  # gunluk (day trade) stop mesafesi = ATR * bu katsayi (dar)
 ATR_SWING_MULT = 3.0  # swing stop mesafesi = ATR * bu katsayi (genis)
 ATR_TARGET_R = 2.0  # hedef mesafesi = stop mesafesi * bu katsayi (risk:odul ~1:2)
+WEEKLY_LOOKBACK_DAYS = 5  # "5D" - kayan pencere, takvim haftasi degil
+MONTHLY_LOOKBACK_DAYS = 21  # "1M" - ~1 aylik islem gunu sayisi, kayan pencere
 
 # Yahoo'nun standart (Ingilizce) sektor isimlerini kisa Turkce kodlara cevirir.
 # Bu dosyada hisse listesi dinamik oldugu icin (sabit BIST30/100 degil), sabit
@@ -150,29 +154,30 @@ def pct_change(current: float, past: float) -> float:
     return (current - past) / past * 100.0
 
 
-def period_open_from_daily(hist, rule: str):
-    """Gunluk mum verisinden (hist) mevcut haftanin/ayin acilis fiyatini pandas
-    resample ile turetir - ayrica Yahoo'dan haftalik/aylik mum cekmeye gerek
-    kalmaz, zaten cekilmis 6 aylik gunluk veri yeniden kullanilir. NOT: terminal
-    tablosunda gosterilmiyor (sadelik icin kaldirilmisti), sadece web arayuzunun
-    Haftalik/Aylik sutunlari icin veri saglar."""
-    if hist.empty:
-        return None
-    opens = hist["Open"].resample(rule).first().dropna()
-    if opens.empty:
-        return None
-    return float(opens.iloc[-1])
+def rolling_pct_change(closes, current_price: float, periods: int) -> float:
+    """N ISLEM GUNU onceki kapanis ile canli fiyat arasindaki yuzde degisimi
+    dondurur - kayan/rolling pencere (Yahoo'nun web sitesindeki '5D'/'1M'
+    gosterimiyle ayni mantik: takvim haftasi/ayi basindan degil, sabit sayida
+    islem gunu geriye gider). Zaten cekilmis gunluk kapanis serisi (closes)
+    uzerinden hesaplanir, ekstra Yahoo istegi gerekmez."""
+    if closes is None or len(closes) <= periods:
+        return float("nan")
+    past = float(closes.iloc[-(periods + 1)])
+    return pct_change(current_price, past)
 
 
-_intraday_signal_cache = {}  # ticker -> (fetched_at, signal)
+
+
 _benchmark_cache = {}  # "pct" -> (fetched_at, daily_pct)
 
 
 def get_benchmark_daily_pct():
     """BIST100 endeksinin gunluk yuzde degisimini REFRESH_SECONDS'a yakin bir
     sure onbellekten dondurur - her hisse icin ayri ayri degil, dongu basina
-    bir kez cekilir. Hisselerin gercekten piyasayla birlikte mi surukendigi
-    yoksa piyasadan bagimsiz mi guclu oldugu (RS) bunun uzerinden hesaplanir."""
+    bir kez cekilir (onbellek olmadan, 100+ hisse icin ayni endeks verisi
+    100+ kez ayri ayri cekilirdi). Hisselerin gercekten piyasayla birlikte mi
+    surukendigi yoksa piyasadan bagimsiz mi guclu oldugu (RS) bunun uzerinden
+    hesaplanir."""
     cached = _benchmark_cache.get("pct")
     if cached and time.time() - cached[0] < REFRESH_SECONDS - 5:
         return cached[1]
@@ -191,17 +196,11 @@ def get_benchmark_daily_pct():
     return pct
 
 
-def get_intraday_signal(tk, ticker: str) -> str:
+def get_intraday_signal(tk) -> str:
     """5dk mum uzerindeki surekli EMA9/EMA21 trend durumunu (kesisim ani degil)
-    INTRADAY_CACHE_SECONDS boyunca onbellekten dondurur; 5dk'lik mumlar zaten
-    5 dakikada bir olustugu icin daha sik cekmenin anlami yok."""
-    cached = _intraday_signal_cache.get(ticker)
-    if cached and time.time() - cached[0] < INTRADAY_CACHE_SECONDS:
-        return cached[1]
+    dondurur."""
     intraday = tk.history(period="5d", interval="5m", auto_adjust=False)
-    signal = ema_trend_signal(intraday["Close"] if not intraday.empty else None)
-    _intraday_signal_cache[ticker] = (time.time(), signal)
-    return signal
+    return ema_trend_signal(intraday["Close"] if not intraday.empty else None)
 
 
 def ema_trend_signal(closes) -> str:
@@ -335,6 +334,42 @@ def stop_target_levels(price: float, atr_val: float, direction: str, stop_mult: 
     return stop, target
 
 
+def confluence_score_raw(
+    signal_1d: str,
+    signal_5m: str,
+    signal_macd: str,
+    rsi_val: float,
+    bb_percent: float,
+    rel_strength: float,
+) -> int:
+    """confluence_label'in ADX filtresi uygulanmadan onceki ham -6..+6
+    toplami. ADX aninlik bir guven filtresi oldugu icin (ortalamasi anlamli
+    degil), Skor Gecmisi sekmelerinde gunluk/saatlik ortalama almak icin bu
+    ham deger ayrica saklanir - bkz. log_score_history."""
+
+    def cat(sig: str) -> int:
+        return {"AL": 1, "SAT": -1}.get(sig, 0)
+
+    score = cat(signal_1d) + cat(signal_5m) + cat(signal_macd)
+
+    if rsi_val == rsi_val:  # NaN degil
+        if rsi_val >= 55:
+            score += 1
+        elif rsi_val <= 45:
+            score -= 1
+
+    if bb_percent == bb_percent:  # NaN degil
+        score += 1 if bb_percent >= 50 else -1
+
+    if rel_strength == rel_strength:  # NaN degil
+        if rel_strength >= RS_THRESHOLD:
+            score += 1
+        elif rel_strength <= -RS_THRESHOLD:
+            score -= 1
+
+    return score
+
+
 def confluence_label(
     signal_1d: str,
     signal_5m: str,
@@ -359,25 +394,7 @@ def confluence_label(
     yatay piyasa) veya hesaplanamiyorsa, "guclu" etiket normal AL/SAT'a
     dusurulur - boyle bir ortamda guclu sinyale guvenmek yaniltici olabilir."""
 
-    def cat(sig: str) -> int:
-        return {"AL": 1, "SAT": -1}.get(sig, 0)
-
-    score = cat(signal_1d) + cat(signal_5m) + cat(signal_macd)
-
-    if rsi_val == rsi_val:  # NaN degil
-        if rsi_val >= 55:
-            score += 1
-        elif rsi_val <= 45:
-            score -= 1
-
-    if bb_percent == bb_percent:  # NaN degil
-        score += 1 if bb_percent >= 50 else -1
-
-    if rel_strength == rel_strength:  # NaN degil
-        if rel_strength >= RS_THRESHOLD:
-            score += 1
-        elif rel_strength <= -RS_THRESHOLD:
-            score -= 1
+    score = confluence_score_raw(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, rel_strength)
 
     if score >= 5:
         label = "GUCLU_AL"
@@ -460,16 +477,13 @@ def fetch_row(ticker: str):
         if daily_pct is None:
             daily_pct = pct_change(current_price, prev_close)
 
-        # Haftalik/aylik degisim: zaten cekilmis olan gunluk kapanis serisinden
-        # (hist) resample ile turetilen donem acilisina gore hesaplanir - ekstra
-        # Yahoo istegi gerekmez. Terminal tablosunda gosterilmiyor, sadece web
-        # arayuzu icin.
-        weekly_open = period_open_from_daily(hist, "W")
-        monthly_open = period_open_from_daily(hist, "MS")
-        weekly_pct = pct_change(current_price, weekly_open)
-        monthly_pct = pct_change(current_price, monthly_open)
+        # Haftalik/aylik degisim, Yahoo'nun kendi haftalik/aylik mum verisindeki
+        # (interval=1wk/1mo) donemin acilis fiyatina gore hesaplanir. Terminal
+        # tablosunda gosterilmiyor, sadece web arayuzu icin.
+        d5_pct = rolling_pct_change(closes, current_price, WEEKLY_LOOKBACK_DAYS)
+        m1_pct = rolling_pct_change(closes, current_price, MONTHLY_LOOKBACK_DAYS)
 
-        signal_5m = get_intraday_signal(tk, ticker)
+        signal_5m = get_intraday_signal(tk)
         # Gunluk EMA kesisimi: zaten cekilmis olan gunluk kapanis serisi (closes)
         # uzerinden hesaplanir, ekstra Yahoo istegi gerekmez.
         signal_1d = ema_trend_signal(closes)
@@ -490,6 +504,7 @@ def fetch_row(ticker: str):
             daily_pct - benchmark_pct if (daily_pct == daily_pct and benchmark_pct is not None) else float("nan")
         )
 
+        score_raw = confluence_score_raw(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, rel_strength)
         score = confluence_label(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
 
         # ATR bazli stop-loss/hedef: sinyalin yonune (AL/SAT) gore, hissenin
@@ -522,12 +537,13 @@ def fetch_row(ticker: str):
             "sector": sector,
             "price": current_price,
             "daily": daily_pct,
-            "weekly": weekly_pct,
-            "monthly": monthly_pct,
+            "d5": d5_pct,
+            "m1": m1_pct,
             "signal_5m": signal_5m,
             "signal_1d": signal_1d,
             "signal_macd": signal_macd,
             "score": score,
+            "score_raw": score_raw,
             "rsi": rsi_val,
             "bb_percent": bb_percent,
             "adx": adx_val,
@@ -654,6 +670,30 @@ def log_signal_changes(rows):
         writer.writerows(new_entries)
 
 
+def log_score_history(rows):
+    """log_signal_changes'in aksine SADECE GUCLU_AL/SAT'a donuste degil, HER
+    dongude TUM hisseler icin bir satir yazar. Web arayuzundeki Skor Gecmisi
+    panelinin 3 sekmesinin (gunluk ortalama / saatlik ortalama / 5 dakikalik
+    ham veri) kaynagi budur - REFRESH_SECONDS zaten 5 dakika oldugu icin her
+    dongu dogal olarak bir "5 dakikalik" ornek temsil eder."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    file_exists = os.path.isfile(SCORE_HISTORY_PATH)
+    with open(SCORE_HISTORY_PATH, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=SCORE_HISTORY_FIELDS)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerows(
+            {
+                "timestamp": now,
+                "ticker": row["ticker"],
+                "score_raw": row["score_raw"],
+                "score": row["score"],
+                "price": row["price"],
+            }
+            for row in rows
+        )
+
+
 def fmt_pct(val: float) -> str:
     if val != val:  # NaN check
         return "   -   "
@@ -764,6 +804,7 @@ def main():
             render(top_rows, missing_count=missing_count)
             play_refresh_beep()
             log_signal_changes(top_rows)
+            log_score_history(top_rows)
         else:
             print("Veri cekilemedi, tekrar denenecek...")
         try:
