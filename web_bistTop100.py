@@ -154,4 +154,8 @@ def api_signals(ticker: str):
 
 if __name__ == "__main__":
     threading.Thread(target=_scan_loop, daemon=True).start()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # NOT: 0.0.0.0 disaridan erisime acar - VPS'te firewall'da 5000 portuna
+    # izin vermeniz gerekir. Sadece kendi makinenizden erismek yeterliyse
+    # (SSH tuneli ile) bunun yerine "127.0.0.1" kullanip firewall'a hic
+    # dokunmamak daha guvenlidir.
+    app.run(host="0.0.0.0", port=5000, debug=False)
