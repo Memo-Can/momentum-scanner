@@ -57,9 +57,14 @@
     font-size: 11px;
     color: var(--muted);
     border-bottom: 1px solid var(--border);
-    cursor: default;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
   }
+  thead th:hover { color: var(--text); }
   thead th.left { text-align: left; }
+  thead th.sorted { color: var(--text); }
+  thead th .arrow { display: inline-block; width: 10px; font-size: 9px; color: var(--yellow); }
   tbody td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #1d2029; }
   tbody td.left { text-align: left; font-weight: 600; }
   tbody tr { cursor: pointer; }
@@ -108,24 +113,26 @@
   <div id="table-wrap">
     <table>
       <thead>
-        <tr>
-          <th class="left">#</th>
-          <th class="left">Hisse</th>
-          <th>Skor</th>
-          <th>1d</th>
-          <th>5m</th>
-          <th>MACD</th>
-          <th>Fiyat</th>
-          <th>Hacim</th>
-          <th>GunPoz</th>
-          <th>RSI</th>
-          <th>BB%</th>
-          <th>RS</th>
-          <th>Gunluk</th>
-          <th>GunStop</th>
-          <th>GunHedef</th>
-          <th>SwStop</th>
-          <th>SwHedef</th>
+        <tr id="head-row">
+          <th class="left" data-key="_default" data-type="default">#<span class="arrow"></span></th>
+          <th class="left" data-key="ticker" data-type="text">Hisse<span class="arrow"></span></th>
+          <th data-key="score" data-type="score">Skor<span class="arrow"></span></th>
+          <th data-key="signal_1d" data-type="signal">1d<span class="arrow"></span></th>
+          <th data-key="signal_5m" data-type="signal">5m<span class="arrow"></span></th>
+          <th data-key="signal_macd" data-type="signal">MACD<span class="arrow"></span></th>
+          <th data-key="price" data-type="num">Fiyat<span class="arrow"></span></th>
+          <th data-key="volume_ratio" data-type="num">Hacim<span class="arrow"></span></th>
+          <th data-key="day_range_pos" data-type="num">GunPoz<span class="arrow"></span></th>
+          <th data-key="rsi" data-type="num">RSI<span class="arrow"></span></th>
+          <th data-key="bb_percent" data-type="num">BB%<span class="arrow"></span></th>
+          <th data-key="rel_strength" data-type="num">RS<span class="arrow"></span></th>
+          <th data-key="daily" data-type="num">Gunluk<span class="arrow"></span></th>
+          <th data-key="weekly" data-type="num">Haftalik<span class="arrow"></span></th>
+          <th data-key="monthly" data-type="num">Aylik<span class="arrow"></span></th>
+          <th data-key="day_stop" data-type="num">GunStop<span class="arrow"></span></th>
+          <th data-key="day_target" data-type="num">GunHedef<span class="arrow"></span></th>
+          <th data-key="swing_stop" data-type="num">SwStop<span class="arrow"></span></th>
+          <th data-key="swing_target" data-type="num">SwHedef<span class="arrow"></span></th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -150,10 +157,18 @@
 const REFRESH_SECONDS = {{ refresh_seconds }};
 const SCORE_SYMBOLS = {GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼", GUCLU_SAT: "▼▼"};
 const SIGNAL_SYMBOLS = {AL: "▲", SAT: "▼", NOTR: "–"};
+// Sembolik sutunlarin sayisal karsiligi - sirala derken "en guclu" once/sonra
+// gelsin diye. Skor icin cift ok, sinyal icin tek ok daha "guclu" sayilir.
+const SCORE_RANK = {GUCLU_AL: 2, AL: 1, NOTR: 0, SAT: -1, GUCLU_SAT: -2};
+const SIGNAL_RANK = {AL: 1, NOTR: 0, SAT: -1};
 
 let selectedTicker = null;
 let chart = null;
 let candleSeries = null;
+let latestRows = [];
+// key=null -> varsayilan siralama (Skor gucu, sonra gunluk % - terminaldeki
+// ile ayni). Bir basliga tiklaninca o sutuna gore siralamaya gecilir.
+let sortState = { key: null, dir: 'desc' };
 
 function fmtPct(v) {
   if (v === null || v === undefined) return '-';
@@ -187,6 +202,8 @@ function renderRows(rows) {
       <td>${fmtRangePos(r.bb_percent)}</td>
       <td class="${pctClass(r.rel_strength)}">${fmtPct(r.rel_strength)}</td>
       <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
+      <td class="${pctClass(r.weekly)}">${fmtPct(r.weekly)}</td>
+      <td class="${pctClass(r.monthly)}">${fmtPct(r.monthly)}</td>
       <td class="${r.day_stop === null ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
       <td class="${r.day_target === null ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
       <td class="${r.swing_stop === null ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
@@ -196,13 +213,86 @@ function renderRows(rows) {
   });
 }
 
+const DEFAULT_SCORE_ORDER = {GUCLU_AL: 0, AL: 1, NOTR: 2, SAT: 3, GUCLU_SAT: 4};
+
+function sortValue(row, key, type) {
+  if (type === 'score') return SCORE_RANK[row[key]] ?? 0;
+  if (type === 'signal') return SIGNAL_RANK[row[key]] ?? 0;
+  if (type === 'text') return (row[key] || '').toString();
+  return row[key];  // num: null'lar asagida ayri ele alinir
+}
+
+function applySort(rows) {
+  const sorted = rows.slice();
+  if (sortState.key === null) {
+    // Varsayilan: once Skor gucu (GUCLU AL en ustte), sonra gunluk % (buyukten kucuge)
+    sorted.sort((a, b) => {
+      const byScore = (DEFAULT_SCORE_ORDER[a.score] ?? 2) - (DEFAULT_SCORE_ORDER[b.score] ?? 2);
+      if (byScore !== 0) return byScore;
+      const ad = a.daily === null ? -Infinity : a.daily;
+      const bd = b.daily === null ? -Infinity : b.daily;
+      return bd - ad;
+    });
+    return sorted;
+  }
+
+  const th = document.querySelector(`th[data-key="${sortState.key}"]`);
+  const type = th ? th.dataset.type : 'num';
+  const dirMult = sortState.dir === 'asc' ? 1 : -1;
+
+  sorted.sort((a, b) => {
+    let va = sortValue(a, sortState.key, type);
+    let vb = sortValue(b, sortState.key, type);
+    if (type === 'text') return dirMult * va.localeCompare(vb);
+    // null/undefined degerler siralama yonunden bagimsiz her zaman en sona
+    const aNull = va === null || va === undefined;
+    const bNull = vb === null || vb === undefined;
+    if (aNull && bNull) return 0;
+    if (aNull) return 1;
+    if (bNull) return -1;
+    return dirMult * (va - vb);
+  });
+  return sorted;
+}
+
+function updateHeaderIndicators() {
+  document.querySelectorAll('#head-row th').forEach(th => {
+    const arrow = th.querySelector('.arrow');
+    const isActive = th.dataset.key === (sortState.key === null ? '_default' : sortState.key);
+    th.classList.toggle('sorted', isActive);
+    if (!arrow) return;
+    arrow.textContent = isActive ? (sortState.dir === 'asc' ? '▲' : '▼') : '';
+  });
+}
+
+function renderTable() {
+  renderRows(applySort(latestRows));
+  updateHeaderIndicators();
+}
+
+document.querySelectorAll('#head-row th').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.key;
+    if (key === '_default') {
+      sortState = { key: null, dir: 'desc' };
+    } else if (sortState.key === key) {
+      sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      // Metin sutunu varsayilan A->Z, sayisal/sembolik sutun varsayilan buyukten kucuge
+      sortState = { key, dir: th.dataset.type === 'text' ? 'asc' : 'desc' };
+    }
+    renderTable();
+  });
+});
+
 async function refreshRows() {
   try {
     const res = await fetch('/api/rows');
     const data = await res.json();
-    renderRows(data.rows || []);
+    latestRows = data.rows || [];
+    renderTable();
     document.getElementById('meta').textContent =
-      `${(data.rows || []).length} hisse | guncelleme: ${data.updated_at || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
+      `${latestRows.length} hisse | guncelleme: ${data.updated_at || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
     document.getElementById('warning').textContent =
       data.missing_count ? `Uyari: ${data.missing_count} BIST30 hissesi icin veri alinamadi.` : '';
   } catch (e) {

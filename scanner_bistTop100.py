@@ -150,6 +150,20 @@ def pct_change(current: float, past: float) -> float:
     return (current - past) / past * 100.0
 
 
+def period_open_from_daily(hist, rule: str):
+    """Gunluk mum verisinden (hist) mevcut haftanin/ayin acilis fiyatini pandas
+    resample ile turetir - ayrica Yahoo'dan haftalik/aylik mum cekmeye gerek
+    kalmaz, zaten cekilmis 6 aylik gunluk veri yeniden kullanilir. NOT: terminal
+    tablosunda gosterilmiyor (sadelik icin kaldirilmisti), sadece web arayuzunun
+    Haftalik/Aylik sutunlari icin veri saglar."""
+    if hist.empty:
+        return None
+    opens = hist["Open"].resample(rule).first().dropna()
+    if opens.empty:
+        return None
+    return float(opens.iloc[-1])
+
+
 _intraday_signal_cache = {}  # ticker -> (fetched_at, signal)
 _benchmark_cache = {}  # "pct" -> (fetched_at, daily_pct)
 
@@ -446,6 +460,15 @@ def fetch_row(ticker: str):
         if daily_pct is None:
             daily_pct = pct_change(current_price, prev_close)
 
+        # Haftalik/aylik degisim: zaten cekilmis olan gunluk kapanis serisinden
+        # (hist) resample ile turetilen donem acilisina gore hesaplanir - ekstra
+        # Yahoo istegi gerekmez. Terminal tablosunda gosterilmiyor, sadece web
+        # arayuzu icin.
+        weekly_open = period_open_from_daily(hist, "W")
+        monthly_open = period_open_from_daily(hist, "MS")
+        weekly_pct = pct_change(current_price, weekly_open)
+        monthly_pct = pct_change(current_price, monthly_open)
+
         signal_5m = get_intraday_signal(tk, ticker)
         # Gunluk EMA kesisimi: zaten cekilmis olan gunluk kapanis serisi (closes)
         # uzerinden hesaplanir, ekstra Yahoo istegi gerekmez.
@@ -499,6 +522,8 @@ def fetch_row(ticker: str):
             "sector": sector,
             "price": current_price,
             "daily": daily_pct,
+            "weekly": weekly_pct,
+            "monthly": monthly_pct,
             "signal_5m": signal_5m,
             "signal_1d": signal_1d,
             "signal_macd": signal_macd,

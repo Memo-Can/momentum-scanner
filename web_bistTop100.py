@@ -8,7 +8,7 @@ basit bir JSON API + HTML sayfasi uzerinden sunuyoruz. Tarama mantigi
 degismedi, sadece terminal yerine tarayicida gosteriliyor.
 
 Calistirmak icin:
-    python3 web_bist.py
+    python3 web_bistTop100.py
 Sonra tarayicida: http://127.0.0.1:5000
 
 Sayfa acikken tablo REFRESH_SECONDS'a yakin bir surede kendiliginden
