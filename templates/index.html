@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e6e6e6;
+    --muted: #8b93a3;
+    --green: #2ecc71;
+    --green-strong: #17c964;
+    --red: #ff5c5c;
+    --red-strong: #ff2d2d;
+    --yellow: #e8c547;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  .warning { color: var(--yellow); font-size: 12px; margin-top: 4px; }
+  .layout {
+    display: flex;
+    gap: 0;
+    height: calc(100vh - 58px);
+  }
+  #table-wrap {
+    flex: 1 1 auto;
+    overflow: auto;
+    min-width: 0;
+  }
+  table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+  thead th {
+    position: sticky; top: 0;
+    background: var(--panel);
+    text-align: right;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    cursor: default;
+  }
+  thead th.left { text-align: left; }
+  tbody td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #1d2029; }
+  tbody td.left { text-align: left; font-weight: 600; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #1b1f29; }
+  tbody tr.selected { background: #21283a; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .sym-AL { color: var(--green); }
+  .sym-SAT { color: var(--red); }
+  .sym-NOTR { color: var(--yellow); }
+  .sym-GUCLU_AL { color: var(--green-strong); font-weight: 700; }
+  .sym-GUCLU_SAT { color: var(--red-strong); font-weight: 700; }
+  .dash { color: var(--muted); }
+
+  #side {
+    width: 420px;
+    flex: 0 0 420px;
+    border-left: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  #side h2 { margin: 0 0 4px; font-size: 16px; }
+  #side .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  #chart { width: 100%; height: 280px; }
+  #signal-list { margin-top: 14px; }
+  #signal-list h3 { font-size: 13px; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  .sig-row {
+    display: flex; justify-content: space-between;
+    padding: 6px 0; border-bottom: 1px solid #1d2029; font-size: 12px;
+  }
+  .sig-empty { color: var(--muted); font-size: 12px; }
+  .placeholder { color: var(--muted); font-size: 13px; margin-top: 40px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>{{ title }}</h1>
+    <div class="meta" id="meta">Yukleniyor...</div>
+    <div class="warning" id="warning"></div>
+  </div>
+</header>
+
+<div class="layout">
+  <div id="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">#</th>
+          <th class="left">Hisse</th>
+          <th>Skor</th>
+          <th>1d</th>
+          <th>5m</th>
+          <th>MACD</th>
+          <th>Fiyat</th>
+          <th>Hacim</th>
+          <th>GunPoz</th>
+          <th>RSI</th>
+          <th>BB%</th>
+          <th>RS</th>
+          <th>Gunluk</th>
+          <th>GunStop</th>
+          <th>GunHedef</th>
+          <th>SwStop</th>
+          <th>SwHedef</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div id="side">
+    <div id="side-empty" class="placeholder">Grafik ve sinyal gecmisi icin<br>bir hisseye tiklayin</div>
+    <div id="side-content" style="display:none">
+      <h2 id="side-ticker">-</h2>
+      <div class="sub" id="side-sub">3 aylik gunluk mum</div>
+      <div id="chart"></div>
+      <div id="signal-list">
+        <h3>Guclu AL/SAT Gecmisi</h3>
+        <div id="signal-rows"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REFRESH_SECONDS = {{ refresh_seconds }};
+const SCORE_SYMBOLS = {GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼", GUCLU_SAT: "▼▼"};
+const SIGNAL_SYMBOLS = {AL: "▲", SAT: "▼", NOTR: "–"};
+
+let selectedTicker = null;
+let chart = null;
+let candleSeries = null;
+
+function fmtPct(v) {
+  if (v === null || v === undefined) return '-';
+  const sign = v >= 0 ? '+' : '';
+  return `${sign}${v.toFixed(2)}%`;
+}
+function fmtRatio(v) { return (v === null || v === undefined) ? '-' : `${v.toFixed(1)}x`; }
+function fmtRangePos(v) { return (v === null || v === undefined) ? '-' : `${v.toFixed(0)}%`; }
+function fmtRsi(v) { return (v === null || v === undefined) ? '-' : v.toFixed(0); }
+function fmtPrice(v) { return (v === null || v === undefined) ? '-' : v.toFixed(2); }
+function pctClass(v) { if (v === null || v === undefined) return ''; return v >= 0 ? 'pos' : 'neg'; }
+
+function renderRows(rows) {
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = '';
+  rows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    if (r.ticker === selectedTicker) tr.classList.add('selected');
+    tr.onclick = () => selectTicker(r.ticker);
+    tr.innerHTML = `
+      <td class="left">${i + 1}</td>
+      <td class="left">${r.ticker}</td>
+      <td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>
+      <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
+      <td class="sym-${r.signal_5m}">${SIGNAL_SYMBOLS[r.signal_5m] || r.signal_5m}</td>
+      <td class="sym-${r.signal_macd}">${SIGNAL_SYMBOLS[r.signal_macd] || r.signal_macd}</td>
+      <td>${fmtPrice(r.price)}</td>
+      <td>${fmtRatio(r.volume_ratio)}</td>
+      <td>${fmtRangePos(r.day_range_pos)}</td>
+      <td>${fmtRsi(r.rsi)}</td>
+      <td>${fmtRangePos(r.bb_percent)}</td>
+      <td class="${pctClass(r.rel_strength)}">${fmtPct(r.rel_strength)}</td>
+      <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
+      <td class="${r.day_stop === null ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
+      <td class="${r.day_target === null ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
+      <td class="${r.swing_stop === null ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
+      <td class="${r.swing_target === null ? 'dash' : ''}">${fmtPrice(r.swing_target)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function refreshRows() {
+  try {
+    const res = await fetch('/api/rows');
+    const data = await res.json();
+    renderRows(data.rows || []);
+    document.getElementById('meta').textContent =
+      `${(data.rows || []).length} hisse | guncelleme: ${data.updated_at || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
+    document.getElementById('warning').textContent =
+      data.missing_count ? `Uyari: ${data.missing_count} BIST30 hissesi icin veri alinamadi.` : '';
+  } catch (e) {
+    document.getElementById('meta').textContent = 'Veri alinamadi, tekrar denenecek...';
+  }
+}
+
+function ensureChart() {
+  if (chart) return;
+  chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
+    grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
+    timeScale: { borderColor: '#2a2e38' },
+    rightPriceScale: { borderColor: '#2a2e38' },
+    height: 280,
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#2ecc71', downColor: '#ff5c5c',
+    borderVisible: false,
+    wickUpColor: '#2ecc71', wickDownColor: '#ff5c5c',
+  });
+  new ResizeObserver(entries => {
+    for (const entry of entries) {
+      chart.applyOptions({ width: entry.contentRect.width });
+    }
+  }).observe(document.getElementById('chart'));
+}
+
+async function selectTicker(ticker) {
+  selectedTicker = ticker;
+  document.getElementById('side-empty').style.display = 'none';
+  document.getElementById('side-content').style.display = 'block';
+  document.getElementById('side-ticker').textContent = ticker;
+
+  ensureChart();
+  const [histRes, sigRes] = await Promise.all([
+    fetch(`/api/history/${ticker}`),
+    fetch(`/api/signals/${ticker}`),
+  ]);
+  const candles = await histRes.json();
+  const signals = await sigRes.json();
+
+  candleSeries.setData(candles);
+
+  const sigWrap = document.getElementById('signal-rows');
+  if (!signals.length) {
+    sigWrap.innerHTML = '<div class="sig-empty">Henuz kaydedilmis GUCLU AL/SAT sinyali yok.</div>';
+  } else {
+    sigWrap.innerHTML = signals.slice().reverse().map(s => `
+      <div class="sig-row">
+        <span class="sym-${s.score}">${SCORE_SYMBOLS[s.score] || s.score}</span>
+        <span>${s.time}</span>
+        <span>${parseFloat(s.price).toFixed(2)}</span>
+      </div>
+    `).join('');
+  }
+}
+
+refreshRows();
+setInterval(refreshRows, REFRESH_SECONDS * 1000);
+</script>
+</body>
+</html>

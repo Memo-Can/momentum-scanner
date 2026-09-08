@@ -1,34 +1,45 @@
 #!/usr/bin/env python3
-"""BIST genelinde gunun en cok kazandiran hisseleri gunluk yuzde degisime
-gore siralayip listeler (toplam TOP_N=50 hisse). Hisse listesi iki kaynaktan
-olusur:
-1) BIST30 endeksindeki 30 hisse - GUNLUK % NE OLURSA OLSUN her zaman listede
-   yer alir (buyuk/likit hisseler nadiren %3 esigini gectigi icin salt
-   "en cok kazandiran" taramasinda kaybolabiliyorlardi, bu yuzden sabitlendi).
-2) Yahoo Finance'in ozel taramasindan (percentchange > 3, region = tr)
-   dinamik olarak cekilen, BIST30 disindaki en cok kazandiran ek hisseler -
-   toplam goruntu sayisi TOP_N'e tamamlanana kadar (50-30=20 ek hisse).
+"""ABD'de gunun en cok kazandiran hisseleri gunluk yuzde degisime gore
+siralayip listeler (toplam TOP_N=100 hisse). Calisma mantigi scanner_bistTop100
+ile birebir aynidir - hisse listesi iki kaynaktan olusur:
+1) ABD'nin en buyuk 30 hissesi (sabit liste, TOP_US_TICKERS) - GUNLUK % NE
+   OLURSA OLSUN her zaman listede yer alir (NVDA gibi buyuk/likit hisseler
+   nadiren %3 esigini gectigi icin salt "en cok kazandiran" taramasinda
+   kaybolabiliyorlardi, bu yuzden sabitlendi).
+2) Yahoo Finance'in ozel taramasindan (percentchange > 3, region = US,
+   fiyat >= MIN_PRICE, dayvolume > 15000) dinamik olarak cekilen, sabit
+   listenin disindaki en cok kazandiran ek hisseler - toplam goruntu sayisi
+   TOP_N'e tamamlanana kadar (50-30=20 ek hisse).
 
-Her REFRESH_SECONDS (60sn) saniyede bir hem tarayici listesi hem de getiriler
-Yahoo Finance'ten yeniden cekilip terminal yenilenir.
+NOT: Yahoo'nun hazir "day_gainers" taramasi 5$ fiyat siniri kullanir ve bu
+GPRO, SSM gibi 5$ altindaki gercek gainer'lari disarida birakir. Burada
+MIN_PRICE = 1$ kullanilir: bu esik hem GPRO/SSM gibi hisseleri listeye
+dahil eder hem de kurusun altinda fiyatlanan, hacmi/verisi guvenilir
+olmayan OTC/warrant kagitlarini (ornegin tek islemle %1000+ gorunen
+fiyatlari) disarida tutar. Fiyat siniri tamamen kaldirildiginda liste bu
+tur cop kagitlarla doluyor ve GPRO/SSM yine de ust siralara giremiyor
+(test edildi).
 
 Sutunlar:
-  #        Gunluk getiriye gore siralamadaki yeri (1 = en cok kazandiran)
-  Skor     1d/5m EMA, MACD, RSI ve BB%'nin tek bir konfluens skoruna (-5..+5)
-           birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/GUCLU SAT(▼▼).
-           5 ayri sinyale tek tek bakmak yerine tek bakista netlik saglar.
-           ADX(14) ayri bir sutun olarak gosterilmez, GUCLU AL/SAT etiketini
-           teyit eden bir guven filtresi olarak kullanilir: ADX<20 (zayif/
-           yatay piyasa) ise "guclu" etiket otomatik normal AL/SAT'a duser.
+  #        Siralamadaki yeri: once Skor gucu (GUCLU AL en ustte, GUCLU SAT en
+           altta), ayni skor grubu icinde gunluk getiriye gore buyukten kucuge
+  Skor     1d/5m EMA, MACD, RSI, BB% ve RS'nin tek bir konfluens skoruna
+           (-6..+6) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/
+           GUCLU SAT(▼▼). 6 ayri sinyale tek tek bakmak yerine tek bakista
+           netlik saglar. ADX(14) ayri bir sutun olarak gosterilmez, GUCLU
+           AL/SAT etiketini teyit eden bir guven filtresi olarak kullanilir:
+           ADX<20 (zayif/yatay piyasa) ise "guclu" etiket otomatik normal
+           AL/SAT'a duser.
   1d       Gunluk mumda EMA9/EMA21'e gore SUREKLI trend durumu (AL/SAT/NOTR)
   5m       5 dakikalik mumda EMA9/EMA21'e gore SUREKLI trend durumu
            (1d ile ayni mantik, farkli zaman dilimi; ikisi de kesisim aninda
            degil, EMA9'un EMA21'e gore o anki konumuna gore surekli AL/SAT
            gosterir). Renk: AL=yesil, SAT=kirmizi, NOTR=sari - satirin genel
            renginden (Gunluk +/-'ye gore) bagimsizdir.
-  Sektor   Hissenin kisa sektor kodu. Bu dosyada hisse listesi dinamik oldugu
-           icin sabit bir harita yerine Yahoo'nun canli "sector" alani
-           (SECTOR_TRANSLATE ile kisa koda cevrilir) kullanilir.
+  Sektor   Hissenin kisa sektor kodu. Hisse listesi dinamik oldugu icin sabit
+           bir harita yerine Yahoo'nun canli "sector" alani (SECTOR_TRANSLATE
+           ile kisa koda cevrilir) kullanilir; sektor degismedigi icin
+           ticker basina suresiz onbelleklenir (_sector_cache).
   MACD     MACD histogramina (12,26,9) gore SUREKLI AL/SAT/NOTR (histogram
            farki > 0 = AL). EMA9/21'e ek momentum-gucu teyidi olarak okunur.
   RSI      Wilder RSI(14) degeri (0-100). >=70 asiri alim, <=30 asiri satim
@@ -36,23 +47,38 @@ Sutunlar:
   BB%      Bollinger Bantlari (20,2sigma) icindeki konum (%). 100%=ust bant,
            0%=alt bant. Bandin disina cikan (>100%/<0%) deger, hacimle
            birlikteyse aşırı alım degil guclu kirilim/momentum sayilir.
-  Fiyat    Canli fiyat, TL (Yahoo'nun regularMarketPrice alani)
+  Fiyat    Canli fiyat (Yahoo'nun regularMarketPrice alani)
   Hacim    Bugunku islem hacminin 10 gunluk ortalama hacme orani (orn. 2.3x).
            Yuksek oran, fiyat hareketinin gercek katilimla desteklendigini gosterir.
   GunPoz   Fiyatin gunun dip-zirve araligindaki yeri (%). %100=gunun zirvesi
            (alici baskin), %0=gunun dibi (satici baskin).
+  RS       Goreceli guc: hissenin gunluk % degisimi eksi S&P500 endeksinin
+           (^GSPC) gunluk % degisimi. Endeks +%1 oldugu bir gunde hissenin
+           +%3 olmasi, endeksin duz oldugu bir gunde +%3 olmasindan cok daha
+           az anlamlidir - RS bu ayrimi sayisallastirir. |RS| < 0.5 NOTR.
   Gunluk   Canli fiyat ile Yahoo'nun canli "onceki kapanis" alani arasindaki
            yuzde fark (satir rengi buna gore yesil/kirmizi olur, liste bu
            sutuna gore buyukten kucuge siralanir)
+  GunStop/Hedef  ATR(14)*1.5 mesafeli, sinyal yonune (Skor'un AL/SAT egilimine)
+           gore gunluk (day trade) stop-loss/hedef fiyat cifti. Hedef mesafesi
+           stop mesafesinin 2 kati (risk:odul ~1:2). Skor NOTR ise "-".
+  SwStop/Hedef  Ayni mantik, ATR(14)*3.0 mesafeli - birkac gun/hafta tasinacak
+           swing pozisyonlar icin daha genis stop/hedef.
 
-Onbellek: Sadece 5dk sinyali INTRADAY_CACHE_SECONDS (5 dakika) boyunca
-onbellekten dondurulur, boylece Yahoo'ya her REFRESH_SECONDS'ta gereksiz
-istek atilmaz.
+Onbellek: Sadece 5dk sinyali INTRADAY_CACHE_SECONDS (5 dakika) boyunca,
+S&P500 endeksinin gunluk degisimi ise REFRESH_SECONDS'a yakin bir sure
+onbellekten dondurulur - boylece Yahoo'ya gereksiz istek atilmaz.
 
 Ses: Her basarili yenilemede (REFRESH_SECONDS'ta bir) tek bir bip sesi
 (al_beep.wav) calinir - sinyale bagli degildir.
+
+Sinyal gecmisi: Skoru GUCLU_AL/GUCLU_SAT'a DONEN hisseler signal_log_us.csv
+dosyasina eklenir (sadece durum degistiginde, spam onlenir). Zamanla bu
+kayitlara bakip Skor'un gercekte ise yarayip yaramadigini (sinyalden sonra
+fiyat ne oldu) kendi verinizle degerlendirebilirsiniz.
 """
 
+import csv
 import os
 import subprocess
 import sys
@@ -63,25 +89,31 @@ from datetime import datetime
 import pandas as pd
 import yfinance as yf
 
-REFRESH_SECONDS = 60
-TOP_N = 50
+REFRESH_SECONDS = 300  # 5 dakika
+TOP_N = 100
 CANDIDATE_BUFFER = 30  # eksik hisse kalmamasi icin ihtiyactan fazla aday cekilir
 MAX_RETRIES = 2
-MIN_PRICE = 1  # kurusun altindaki cop kagitlari elemek icin fiyat tabani (TL)
+MIN_PRICE = 1  # kurusun altindaki OTC/cop kagitlari elemek icin fiyat tabani ($)
 INTRADAY_CACHE_SECONDS = 5 * 60  # 5dk mum verisi 5 dakikada bir yenilenir
 
 SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 BEEP_SOUND = os.path.join(SOUND_DIR, "al_beep.wav")
 
-# BIST30 endeksindeki hisseler - gunluk % ne olursa olsun listede daima
-# yer alirlar (bkz. dosya basindaki aciklama).
-BIST30_TICKERS = [
-    "AKBNK", "ALARK", "ARCLK", "ASELS", "BIMAS", "EKGYO", "ENKAI", "EREGL",
-    "FROTO", "GARAN", "HALKB", "ISCTR", "KCHOL", "KONTR", "KRDMD", "MGROS",
-    "OYAKC", "PETKM", "PGSUS", "SAHOL", "SASA", "SISE", "TAVHL", "TCELL",
-    "THYAO", "TOASO", "TTKOM", "TUPRS", "VAKBN", "YKBNK",
+# GUCLU_AL/GUCLU_SAT sinyallerinin gecmisini kaydeder - zamanla bu kayitlara
+# bakip Skor'un gercekte ise yarayip yaramadigini (sinyalden sonra fiyat ne
+# oldu) kendi verinizle degerlendirebilirsiniz. Sadece durum DEGISTIGINDE
+# yazilir (her dongude tekrar tekrar degil), boylece dosya sismez.
+SIGNAL_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_log_us.csv")
+SIGNAL_LOG_FIELDS = ["timestamp", "ticker", "score", "price", "daily_pct", "rsi", "adx", "rel_strength"]
+
+# ABD'nin (yaklasik) piyasa degerine gore en buyuk 30 hissesi - gunluk % ne
+# olursa olsun listede daima yer alirlar (bkz. dosya basindaki aciklama).
+TOP_US_TICKERS = [
+    "NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "AVGO", "TSLA", "BRK-B",
+    "LLY", "WMT", "JPM", "V", "ORCL", "MA", "NFLX", "XOM", "COST", "PG",
+    "JNJ", "HD", "ABBV", "BAC", "CVX", "KO", "AMD", "PLTR", "GE", "CSCO",
+    "TMUS",
 ]
-BIST30_TICKERS = [f"{t}.IS" for t in BIST30_TICKERS]
 
 
 EMA_FAST = 9
@@ -94,11 +126,17 @@ BB_PERIOD = 20
 BB_STD = 2
 ADX_PERIOD = 14
 ADX_TREND_THRESHOLD = 20  # bu esigin altinda piyasa zayif/yatay (gurultu) sayilir
+BENCHMARK_TICKER = "^GSPC"  # S&P500 endeksi - goreceli guc (RS) karsilastirma bazı
+RS_THRESHOLD = 0.5  # bu esigin altindaki fark (yuzde puan) NOTR sayilir
+ATR_PERIOD = 14
+ATR_DAY_MULT = 1.5  # gunluk (day trade) stop mesafesi = ATR * bu katsayi (dar)
+ATR_SWING_MULT = 3.0  # swing stop mesafesi = ATR * bu katsayi (genis)
+ATR_TARGET_R = 2.0  # hedef mesafesi = stop mesafesi * bu katsayi (risk:odul ~1:2)
 
 # Yahoo'nun standart (Ingilizce) sektor isimlerini kisa Turkce kodlara cevirir.
-# Bu dosyada hisse listesi dinamik oldugu icin (sabit BIST30/100 degil), sabit
-# bir ticker->sektor haritasi yerine Yahoo'nun her hisse icin dondurdugu genel
-# "sector" alani kullanilir - boylece tum BIST evreni kapsanmis olur.
+# Hisse listesi dinamik oldugu icin (gunun kazandiranlari surekli degisir),
+# sabit bir ticker->sektor haritasi yerine Yahoo'nun her hisse icin dondurdugu
+# genel "sector" alani kullanilir.
 SECTOR_TRANSLATE = {
     "Technology": "TEKN",
     "Financial Services": "FINN",
@@ -121,6 +159,30 @@ def pct_change(current: float, past: float) -> float:
 
 
 _intraday_signal_cache = {}  # ticker -> (fetched_at, signal)
+_benchmark_cache = {}  # "pct" -> (fetched_at, daily_pct)
+
+
+def get_benchmark_daily_pct():
+    """S&P500 endeksinin gunluk yuzde degisimini REFRESH_SECONDS'a yakin bir
+    sure onbellekten dondurur - her hisse icin ayri ayri degil, dongu basina
+    bir kez cekilir. Hisselerin gercekten piyasayla birlikte mi surukendigi
+    yoksa piyasadan bagimsiz mi guclu oldugu (RS) bunun uzerinden hesaplanir."""
+    cached = _benchmark_cache.get("pct")
+    if cached and time.time() - cached[0] < REFRESH_SECONDS - 5:
+        return cached[1]
+    pct = None
+    try:
+        tk = yf.Ticker(BENCHMARK_TICKER)
+        info = tk.get_info()
+        pct = info.get("regularMarketChangePercent")
+        if pct is None:
+            hist = tk.history(period="5d", interval="1d", auto_adjust=False)
+            if len(hist) >= 2:
+                pct = pct_change(float(hist["Close"].iloc[-1]), float(hist["Close"].iloc[-2]))
+    except Exception:
+        pct = None
+    _benchmark_cache["pct"] = (time.time(), pct)
+    return pct
 
 
 def get_intraday_signal(tk, ticker: str) -> str:
@@ -232,13 +294,59 @@ def adx(hist, period: int = ADX_PERIOD) -> float:
     return float(adx_val) if adx_val == adx_val else float("nan")
 
 
+def atr(hist, period: int = ATR_PERIOD) -> float:
+    """Wilder ATR(14) - ortalama gercek aralik (Average True Range), fiyatin
+    ortalama gunluk oynakligini olcer. Stop-loss/hedef mesafesini oynakliga
+    gore olceklemek icin kullanilir (sabit %X yerine, hissenin kendi
+    karakterine uyarlanmis bir mesafe)."""
+    if hist is None or len(hist) < period + 1:
+        return float("nan")
+    high = hist["High"]
+    low = hist["Low"]
+    close = hist["Close"]
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+    ).max(axis=1)
+    val = tr.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
+    return float(val) if val == val else float("nan")
+
+
+def stop_target_levels(price: float, atr_val: float, direction: str, stop_mult: float, target_r: float):
+    """Verilen ATR mesafesine gore stop-loss ve hedef fiyat seviyelerini
+    dondurur. direction 'AL' ise stop asagida/hedef yukarida, 'SAT' ise
+    tam tersi (kisa pozisyon varsayimi). NOTR ya da veri yoksa (None, None)
+    dondurur - net bir yon olmadan stop/hedef onermenin anlami yok."""
+    if price != price or atr_val != atr_val or direction not in ("AL", "SAT"):
+        return None, None
+    distance = atr_val * stop_mult
+    if direction == "AL":
+        stop = price - distance
+        target = price + distance * target_r
+    else:
+        stop = price + distance
+        target = price - distance * target_r
+    return stop, target
+
+
 def confluence_label(
-    signal_1d: str, signal_5m: str, signal_macd: str, rsi_val: float, bb_percent: float, adx_val: float
+    signal_1d: str,
+    signal_5m: str,
+    signal_macd: str,
+    rsi_val: float,
+    bb_percent: float,
+    adx_val: float,
+    rel_strength: float,
 ) -> str:
-    """1d/5m EMA, MACD, RSI ve BB% sinyallerini tek bir konfluens skoruna
-    (-5..+5) birlestirir ve GUCLU_AL/AL/NOTR/SAT/GUCLU_SAT etiketine cevirir.
-    Boylece 5 ayri sutuna tek tek bakip kafada birlestirmek yerine, tek
-    sutunda net bir AL/SAT karari gorulur.
+    """1d/5m EMA, MACD, RSI, BB% ve endekse gore goreceli guc (RS) sinyallerini
+    tek bir konfluens skoruna (-6..+6) birlestirir ve GUCLU_AL/AL/NOTR/SAT/
+    GUCLU_SAT etiketine cevirir. Boylece 6 ayri sutuna tek tek bakip kafada
+    birlestirmek yerine, tek sutunda net bir AL/SAT karari gorulur.
+
+    RS (rel_strength = hissenin gunluk% - endeksin gunluk%): hisse piyasayla
+    birlikte mi surukleniyor yoksa piyasadan bagimsiz gercekten guclu mu
+    oldugunu ayirt eder - endeksin +%1 oldugu bir gunde hissenin +%3 olmasi,
+    endeksin duz oldugu bir gunde +%3 olmasindan cok daha az anlamlidir.
 
     ADX, ayri bir sutun olarak degil, GUCLU_AL/GUCLU_SAT etiketinin
     guvenilirligini teyit eden bir filtre olarak kullanilir: ADX<20 (zayif/
@@ -259,13 +367,19 @@ def confluence_label(
     if bb_percent == bb_percent:  # NaN degil
         score += 1 if bb_percent >= 50 else -1
 
-    if score >= 4:
+    if rel_strength == rel_strength:  # NaN degil
+        if rel_strength >= RS_THRESHOLD:
+            score += 1
+        elif rel_strength <= -RS_THRESHOLD:
+            score -= 1
+
+    if score >= 5:
         label = "GUCLU_AL"
     elif score >= 2:
         label = "AL"
     elif score >= -1:
         label = "NOTR"
-    elif score >= -3:
+    elif score >= -4:
         label = "SAT"
     else:
         label = "GUCLU_SAT"
@@ -280,15 +394,16 @@ def confluence_label(
 
 
 def build_gainers_query():
-    # Yahoo'nun BIST (Borsa Istanbul) icin tum piyasayi tarayan sorgusu.
-    # region="tr" tum BIST hisselerini kapsar, sabit bir listeyle sinirli degildir.
-    # DENEME: hacim/fiyat filtreleri (dayvolume>15000, intradayprice>=MIN_PRICE)
-    # gecici olarak kaldirildi.
+    # Yahoo'nun "day_gainers" taramasiyla ayni kriterler, ancak 5$ yerine
+    # MIN_PRICE (1$) fiyat tabani kullanilir -> GPRO/SSM gibi hisseler
+    # listeye girebilirken kurusun altindaki cop kagitlar elenir.
     return yf.EquityQuery(
         "and",
         [
             yf.EquityQuery("gt", ["percentchange", 3]),
-            yf.EquityQuery("eq", ["region", "tr"]),
+            yf.EquityQuery("eq", ["region", "us"]),
+            yf.EquityQuery("gt", ["dayvolume", 15000]),
+            yf.EquityQuery("gte", ["intradayprice", MIN_PRICE]),
         ],
     )
 
@@ -315,10 +430,11 @@ def fetch_row(ticker: str):
         closes = hist["Close"]
         last_close = float(closes.iloc[-1])
 
-        # NOT: BIST (.IS) hisselerinde tk.fast_info donuk/bayat deger dondurebiliyor
-        # (Yahoo'nun bu uc noktasi Istanbul borsasinda guncellenmiyor). Bunun yerine
-        # tk.get_info()'nun regularMarketPrice/regularMarketPreviousClose alanlari
-        # kullanilir, bu alanlar gercekten canli fiyati yansitiyor.
+        # NOT: tk.fast_info bazen donuk/bayat deger dondurebiliyor (BIST
+        # tarafinda da ayni sebeple terk edilmisti). Fiyat/gunluk degisimin
+        # her REFRESH_SECONDS'ta gercekten canli olmasi icin bunun yerine
+        # tk.get_info()'nun regularMarketPrice/regularMarketPreviousClose
+        # alanlari kullanilir.
         info = tk.get_info()
         sector_en = info.get("sector")
         sector = SECTOR_TRANSLATE.get(sector_en, sector_en[:4].upper() if sector_en else "-")
@@ -351,7 +467,27 @@ def fetch_row(ticker: str):
         rsi_val = rsi(closes)
         bb_percent = bollinger_percent_b(closes)
         adx_val = adx(hist)
-        score = confluence_label(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, adx_val)
+
+        # Goreceli guc (RS): hissenin gunluk % degisimi ile S&P500 endeksinin
+        # gunluk % degisimi arasindaki fark. Endeks +%1 oldugu bir gunde hisse
+        # +%3 ise bu, endeksin duz oldugu bir gunde +%3 olmasindan cok daha az
+        # anlamlidir - RS bu ayrimi yapar.
+        benchmark_pct = get_benchmark_daily_pct()
+        rel_strength = (
+            daily_pct - benchmark_pct if (daily_pct == daily_pct and benchmark_pct is not None) else float("nan")
+        )
+
+        score = confluence_label(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
+
+        # ATR bazli stop-loss/hedef: sinyalin yonune (AL/SAT) gore, hissenin
+        # kendi oynakligina (ATR) olceklenmis gunluk (dar) ve swing (genis)
+        # seviyeler. NOTR sinyalde net yon olmadigi icin (None, None) doner.
+        atr_val = atr(hist)
+        trade_direction = "AL" if score in ("AL", "GUCLU_AL") else "SAT" if score in ("SAT", "GUCLU_SAT") else None
+        day_stop, day_target = stop_target_levels(current_price, atr_val, trade_direction, ATR_DAY_MULT, ATR_TARGET_R)
+        swing_stop, swing_target = stop_target_levels(
+            current_price, atr_val, trade_direction, ATR_SWING_MULT, ATR_TARGET_R
+        )
 
         # Hacim orani: bugunku hacmin 10 gunluk ortalama hacme orani.
         # Yuksek oran (>1.5x gibi) sinyalin gercek katilimla desteklendigini gosterir.
@@ -369,7 +505,7 @@ def fetch_row(ticker: str):
             day_range_pos = float("nan")
 
         return {
-            "ticker": ticker.removesuffix(".IS"),
+            "ticker": ticker,
             "sector": sector,
             "price": current_price,
             "daily": daily_pct,
@@ -379,6 +515,12 @@ def fetch_row(ticker: str):
             "score": score,
             "rsi": rsi_val,
             "bb_percent": bb_percent,
+            "adx": adx_val,
+            "rel_strength": rel_strength,
+            "day_stop": day_stop,
+            "day_target": day_target,
+            "swing_stop": swing_stop,
+            "swing_target": swing_target,
             "volume_ratio": volume_ratio,
             "day_range_pos": day_range_pos,
         }
@@ -432,6 +574,10 @@ SCORE_COLORS = {
     "GUCLU_SAT": BOLD_RED,
 }
 
+# Siralama onceligi: en guclu AL en ustte, en guclu SAT en altta - ayni
+# skor grubunun icinde gunluk % buyukten kucuge sıralanir (asagida sort_key).
+SCORE_ORDER = {"GUCLU_AL": 0, "AL": 1, "NOTR": 2, "SAT": 3, "GUCLU_SAT": 4}
+
 
 def play_beep(path: str):
     try:
@@ -442,6 +588,45 @@ def play_beep(path: str):
 
 def play_refresh_beep():
     play_beep(BEEP_SOUND)
+
+
+_last_logged_score = {}  # ticker -> log dosyasina en son yazilan skor
+
+
+def log_signal_changes(rows):
+    """Skoru GUCLU_AL/GUCLU_SAT'a DONEN (onceki dongude farkli olan) hisseleri
+    SIGNAL_LOG_PATH'e ekler. Her dongude ayni sinyali tekrar tekrar yazmaz -
+    sadece durum degistiginde kaydeder, boylece log dosyasi anlamli kalir ve
+    her satir gercekten "yeni bir sinyal aninı" temsil eder."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    new_entries = []
+    for row in rows:
+        ticker = row["ticker"]
+        score = row["score"]
+        prev = _last_logged_score.get(ticker)
+        if score != prev and score in ("GUCLU_AL", "GUCLU_SAT"):
+            new_entries.append(
+                {
+                    "timestamp": now,
+                    "ticker": ticker,
+                    "score": score,
+                    "price": row["price"],
+                    "daily_pct": row["daily"],
+                    "rsi": row["rsi"],
+                    "adx": row["adx"],
+                    "rel_strength": row["rel_strength"],
+                }
+            )
+        _last_logged_score[ticker] = score
+
+    if not new_entries:
+        return
+    file_exists = os.path.isfile(SIGNAL_LOG_PATH)
+    with open(SIGNAL_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=SIGNAL_LOG_FIELDS)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerows(new_entries)
 
 
 def fmt_pct(val: float) -> str:
@@ -469,21 +654,38 @@ def fmt_rsi(val: float) -> str:
     return f"{val:.0f}"
 
 
+def fmt_stop_target(stop, target) -> str:
+    """Stop-loss/hedef ciftini 'stop/hedef' seklinde tek bir kompakt metne
+    cevirir. Yon belirsizse (NOTR sinyal) ikisi de None olur, '-' gosterilir."""
+    if stop is None or target is None:
+        return "-"
+    return f"{stop:.2f}/{target:.2f}"
+
+
 def render(rows, missing_count: int = 0):
     use_color = sys.stdout.isatty()
     if use_color:
         os.system("cls" if os.name == "nt" else "clear")
-    rows_sorted = sorted(rows, key=lambda r: r["daily"], reverse=True)
+    def _sort_key(row):
+        daily = row["daily"]
+        daily_sort = -daily if daily == daily else float("inf")  # NaN'lari sona at
+        return (SCORE_ORDER.get(row["score"], 2), daily_sort)
+
+    rows_sorted = sorted(rows, key=_sort_key)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"BIST30 + En Cok Kazandiranlar - Getiri Tablosu ({len(rows)} hisse)   (guncelleme: {now})")
-    print(f"Kaynak: BIST30 (daima dahil) + ozel tarama (fiyat/hacim filtresi YOK - DENEME)   |  Siralama: Gunluk yuzde degisime gore (yuksekten dusuge)")
+    print(f"ABD Buyuk 30 + En Cok Kazandiranlar - Getiri Tablosu ({len(rows)} hisse)   (guncelleme: {now})")
+    print(f"Kaynak: ABD'nin en buyuk 30 hissesi (daima dahil) + ozel tarama (fiyat>={MIN_PRICE}$, hacim>15000)   |  Siralama: Once Skor gucu (GUCLU AL->AL->NOTR->SAT->GUCLU SAT), ayni grup icinde gunluk % (yuksekten dusuge)")
     print(f"Sinyal: EMA{EMA_FAST}/EMA{EMA_SLOW} (1d/5dk) + MACD({MACD_FAST},{MACD_SLOW},{MACD_SIGNAL}) + RSI({RSI_PERIOD}) + BB({BB_PERIOD},{BB_STD}sigma)   |  her {REFRESH_SECONDS} sn'de bir yenilenir")
     if missing_count:
-        print(f"Uyari: {missing_count} BIST30 hissesi icin veri alinamadi.")
+        print(f"Uyari: {missing_count} buyuk ABD hissesi icin veri alinamadi.")
     print()
 
-    header = f"{'#':>2} {'Skor':^4} {'1d':^2} {'5m':^2} {'MACD':^4} {'Hisse':<5} {'Sektor':<6} {'Fiyat':>6} {'Hacim':>5} {'GunPoz':>6} {'RSI':>3} {'BB%':>4} {'Gunluk':>8}"
+    header = (
+        f"{'#':>2} {'Skor':^4} {'1d':^2} {'5m':^2} {'MACD':^4} {'Hisse':<5} {'Sektor':<6} {'Fiyat':>6} "
+        f"{'Hacim':>5} {'GunPoz':>6} {'RSI':>3} {'BB%':>4} {'RS':>8} {'Gunluk':>8} "
+        f"{'GunStop/Hedef':>13} {'SwStop/Hedef':>13}"
+    )
     print(header)
     print("-" * len(header))
 
@@ -497,7 +699,9 @@ def render(rows, missing_count: int = 0):
             f"{row['ticker']:<5} {row['sector']:<6} {row['price']:>6.2f} "
             f"{fmt_ratio(row['volume_ratio']):>5} {fmt_range_pos(row['day_range_pos']):>6} "
             f"{fmt_rsi(row['rsi']):>3} {fmt_range_pos(row['bb_percent']):>4} "
-            f"{fmt_pct(row['daily']):>8}"
+            f"{fmt_pct(row['rel_strength']):>8} {fmt_pct(row['daily']):>8} "
+            f"{fmt_stop_target(row['day_stop'], row['day_target']):>13} "
+            f"{fmt_stop_target(row['swing_stop'], row['swing_target']):>13}"
         )
         if use_color:
             row_color = GREEN if row["daily"] >= 0 else RED
@@ -514,26 +718,28 @@ def render(rows, missing_count: int = 0):
 
 
 def main():
-    bist30_symbols = {t.removesuffix(".IS") for t in BIST30_TICKERS}
+    pinned_symbols = set(TOP_US_TICKERS)
     while True:
         gainer_tickers = fetch_top_gainer_tickers(TOP_N + CANDIDATE_BUFFER)
-        # BIST30 her zaman aday havuzunda - gunluk % esigini gecmese bile
-        # (ornegin buyuk/likit bir hisse) listeden hic dislanmasin diye.
-        candidate_tickers = list(dict.fromkeys(BIST30_TICKERS + gainer_tickers))
+        # ABD'nin en buyuk 30 hissesi her zaman aday havuzunda - gunluk % esigini
+        # gecmese bile (ornegin NVDA gibi buyuk/likit bir hisse) listeden hic
+        # dislanmasin diye.
+        candidate_tickers = list(dict.fromkeys(TOP_US_TICKERS + gainer_tickers))
         rows_by_ticker, still_missing = fetch_with_retry(candidate_tickers) if candidate_tickers else ({}, [])
 
-        bist30_rows = [r for r in rows_by_ticker.values() if r["ticker"] in bist30_symbols]
-        other_rows = [r for r in rows_by_ticker.values() if r["ticker"] not in bist30_symbols]
+        pinned_rows = [r for r in rows_by_ticker.values() if r["ticker"] in pinned_symbols]
+        other_rows = [r for r in rows_by_ticker.values() if r["ticker"] not in pinned_symbols]
         other_rows_sorted = sorted(other_rows, key=lambda r: r["daily"], reverse=True)
 
-        # BIST30 her zaman dahil; kalan yerler en cok kazandiran diger hisselerle doldurulur.
-        extra_slots = max(0, TOP_N - len(bist30_rows))
-        top_rows = bist30_rows + other_rows_sorted[:extra_slots]
-        missing_count = max(0, len(BIST30_TICKERS) - len(bist30_rows))
+        # Sabit 30 hisse her zaman dahil; kalan yerler en cok kazandiran diger hisselerle doldurulur.
+        extra_slots = max(0, TOP_N - len(pinned_rows))
+        top_rows = pinned_rows + other_rows_sorted[:extra_slots]
+        missing_count = max(0, len(TOP_US_TICKERS) - len(pinned_rows))
 
         if top_rows:
             render(top_rows, missing_count=missing_count)
             play_refresh_beep()
+            log_signal_changes(top_rows)
         else:
             print("Veri cekilemedi, tekrar denenecek...")
         try:
