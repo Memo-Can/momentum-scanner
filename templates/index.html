@@ -19,14 +19,18 @@
     --yellow: #e8c547;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 14px;
+    display: flex;
+    flex-direction: column;
   }
   header {
+    flex: 0 0 auto;
     padding: 14px 20px;
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -66,7 +70,12 @@
   .layout {
     display: flex;
     gap: 0;
-    height: calc(100vh - 58px - 37px);
+    /* Sabit piksel hesaplari (calc(100vh - Xpx - Ypx)) yerine flex ile dolduruyor -
+       header/footer gercek yuksekligi ne olursa olsun (arama kutusu satir
+       kaydiginda, uyari mesaji goründugunde vb.) kalan alani otomatik ve
+       dogru dolduruyor, footer asla viewport disina taşmiyor. */
+    flex: 1 1 auto;
+    min-height: 0;
   }
   #table-wrap {
     flex: 1 1 auto;
@@ -182,7 +191,8 @@
   .placeholder { color: var(--muted); font-size: 13px; margin-top: 40px; text-align: center; }
 
   footer {
-    height: 37px;
+    flex: 0 0 auto;
+    min-height: 37px;
     box-sizing: border-box;
     border-top: 1px solid var(--border);
     display: flex;
@@ -217,7 +227,7 @@
     #search-input { width: 100%; }
     .layout {
       flex-direction: column;
-      height: auto;
+      flex: 0 0 auto;
     }
     #table-wrap {
       flex: none;

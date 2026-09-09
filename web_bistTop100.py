@@ -177,8 +177,9 @@ def api_score_history(ticker: str):
 
 if __name__ == "__main__":
     threading.Thread(target=_scan_loop, daemon=True).start()
-    # NOT: 0.0.0.0 disaridan erisime acar - VPS'te firewall'da 5000 portuna
-    # izin vermeniz gerekir. Sadece kendi makinenizden erismek yeterliyse
-    # (SSH tuneli ile) bunun yerine "127.0.0.1" kullanip firewall'a hic
-    # dokunmamak daha guvenlidir.
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    # 127.0.0.1: bu Flask gelistirme sunucusu dogrudan disariya acik degil -
+    # VPS'te nginx bir reverse proxy olarak 80/443'ten 5000'e yonlendiriyor
+    # (bkz. /etc/nginx/sites-available/momentum-scanner), SSL sonlandirma da
+    # orada yapiliyor. Port 5000'in disaridan hic erisilememesi (sadece
+    # nginx uzerinden gecmesi) guvenlik icin onemli.
+    app.run(host="127.0.0.1", port=5000, debug=False)
