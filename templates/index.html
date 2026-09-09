@@ -38,10 +38,35 @@
   header h1 { font-size: 18px; margin: 0; }
   header .meta { color: var(--muted); font-size: 12px; }
   .warning { color: var(--yellow); font-size: 12px; margin-top: 4px; }
+  #search-wrap { position: relative; }
+  #search-input {
+    width: 220px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 30px 7px 10px;
+    font-size: 13px;
+    outline: none;
+  }
+  #search-input::placeholder { color: var(--muted); }
+  #search-input:focus { border-color: var(--yellow); }
+  #search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    display: none;
+    user-select: none;
+  }
+  #search-clear:hover { color: var(--text); }
   .layout {
     display: flex;
     gap: 0;
-    height: calc(100vh - 58px);
+    height: calc(100vh - 58px - 37px);
   }
   #table-wrap {
     flex: 1 1 auto;
@@ -63,6 +88,45 @@
     white-space: nowrap;
   }
   thead th:hover { color: var(--text); }
+
+  /* Sutun basligi hint'i: dogal tarayici title yerine tema ile uyumlu, ok
+     isaretli ozel bir kucuk popup - hover'da th'nin hemen altinda belirir. */
+  thead th[data-tip] { position: sticky; }
+  thead th[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    width: 220px;
+    max-width: 60vw;
+    white-space: normal;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: var(--text);
+    background: #1c2029;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.45);
+    z-index: 60;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .12s ease;
+    pointer-events: none;
+  }
+  thead th[data-tip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+  }
+  /* En sagdaki sutunlarda popup ekran disina taşmasin diye saga yasla */
+  thead th[data-tip]:nth-last-child(-n+3)::after {
+    left: auto;
+    right: 0;
+    transform: translateY(4px);
+  }
   thead th.left { text-align: left; }
   thead th.sorted { color: var(--text); }
   thead th .arrow { display: inline-block; width: 10px; font-size: 9px; color: var(--yellow); }
@@ -117,6 +181,24 @@
   .sig-empty { color: var(--muted); font-size: 12px; }
   .placeholder { color: var(--muted); font-size: 13px; margin-top: 40px; text-align: center; }
 
+  footer {
+    height: 37px;
+    box-sizing: border-box;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 0 16px;
+    color: var(--muted);
+    font-size: 11px;
+    text-align: center;
+  }
+  footer .dot { color: var(--border); }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--text); }
+
   /* --- Tablet: yan panel daralir, tablo hala yatayda oturuyor --- */
   @media (max-width: 1024px) {
     #side { width: 300px; flex: 0 0 300px; padding: 12px; }
@@ -131,6 +213,8 @@
     header { padding: 10px 14px; }
     header h1 { font-size: 16px; }
     header .meta, .warning { font-size: 11px; }
+    #search-wrap { width: 100%; }
+    #search-input { width: 100%; }
     .layout {
       flex-direction: column;
       height: auto;
@@ -168,6 +252,10 @@
     <div class="meta" id="meta">Yukleniyor...</div>
     <div class="warning" id="warning"></div>
   </div>
+  <div id="search-wrap">
+    <input type="text" id="search-input" placeholder="Hisse veya sektor ara..." autocomplete="off">
+    <span id="search-clear">&times;</span>
+  </div>
 </header>
 
 <div class="layout">
@@ -175,26 +263,26 @@
     <table>
       <thead>
         <tr id="head-row">
-          <th class="left" data-key="_default" data-type="default">#<span class="arrow"></span></th>
-          <th class="left" data-key="ticker" data-type="text">Hisse<span class="arrow"></span></th>
-          <th class="left" data-key="sector" data-type="text">Sektor<span class="arrow"></span></th>
-          <th data-key="score" data-type="score">Skor<span class="arrow"></span></th>
-          <th data-key="signal_1d" data-type="signal">1d<span class="arrow"></span></th>
-          <th data-key="signal_5m" data-type="signal">5m<span class="arrow"></span></th>
-          <th data-key="signal_macd" data-type="signal">MACD<span class="arrow"></span></th>
-          <th data-key="price" data-type="num">Fiyat<span class="arrow"></span></th>
-          <th data-key="volume_ratio" data-type="num">Hacim<span class="arrow"></span></th>
-          <th data-key="day_range_pos" data-type="num">GunPoz<span class="arrow"></span></th>
-          <th data-key="rsi" data-type="num">RSI<span class="arrow"></span></th>
-          <th data-key="bb_percent" data-type="num">BB%<span class="arrow"></span></th>
-          <th data-key="rel_strength" data-type="num">RS<span class="arrow"></span></th>
-          <th data-key="daily" data-type="num">Gunluk<span class="arrow"></span></th>
-          <th data-key="d5" data-type="num">5D<span class="arrow"></span></th>
-          <th data-key="m1" data-type="num">1M<span class="arrow"></span></th>
-          <th data-key="day_stop" data-type="num">GunStop<span class="arrow"></span></th>
-          <th data-key="day_target" data-type="num">GunHedef<span class="arrow"></span></th>
-          <th data-key="swing_stop" data-type="num">SwStop<span class="arrow"></span></th>
-          <th data-key="swing_target" data-type="num">SwHedef<span class="arrow"></span></th>
+          <th class="left" data-key="_default" data-type="default" data-tip="Siralamadaki yeri: once Skor gucu (GUCLU AL en ustte, GUCLU SAT en altta), ayni skor grubu icinde gunluk % degisime gore buyukten kucuge.">#<span class="arrow"></span></th>
+          <th class="left" data-key="ticker" data-type="text" data-tip="Hisse sembolu (ticker).">Hisse<span class="arrow"></span></th>
+          <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kisa sektor kodu - Yahoo Finance'in canli 'sector' alanindan turetilir.">Sektor<span class="arrow"></span></th>
+          <th data-key="score" data-type="score" data-tip="1d, 5m, MACD, RSI, BB% ve RS sinyallerinin tek bir konfluens puaninda (-6..+6) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/GUCLU SAT(▼▼). ADX(14), GUCLU AL/SAT etiketini teyit eden bir guven filtresidir - ADX<20 ise 'guclu' etiket normal AL/SAT'a duser.">Skor<span class="arrow"></span></th>
+          <th data-key="signal_1d" data-type="signal" data-tip="Gunluk mumda EMA9/EMA21'e gore surekli trend yonu (AL/SAT/NOTR).">1d<span class="arrow"></span></th>
+          <th data-key="signal_5m" data-type="signal" data-tip="5 dakikalik mumda EMA9/EMA21'e gore surekli trend yonu (1d ile ayni mantik, farkli zaman dilimi).">5m<span class="arrow"></span></th>
+          <th data-key="signal_macd" data-type="signal" data-tip="MACD histogramina (12,26,9) gore surekli AL/SAT/NOTR - histogram farki > 0 ise AL. EMA sinyaline ek momentum teyidi.">MACD<span class="arrow"></span></th>
+          <th data-key="price" data-type="num" data-tip="Canli fiyat (Yahoo Finance'in regularMarketPrice alani).">Fiyat<span class="arrow"></span></th>
+          <th data-key="volume_ratio" data-type="num" data-tip="Bugunku islem hacminin, 10 gunluk ortalama hacme orani (orn. 2.3x). Yuksek oran, fiyat hareketinin gercek katilimla desteklendigini gosterir.">Hacim<span class="arrow"></span></th>
+          <th data-key="day_range_pos" data-type="num" data-tip="Fiyatin, gunun dip-zirve araligindaki yeri (%). %100 = gunun zirvesi (alici baskin), %0 = gunun dibi (satici baskin).">GunPoz<span class="arrow"></span></th>
+          <th data-key="rsi" data-type="num" data-tip="Wilder RSI(14) degeri (0-100). >=70 asiri alim, <=30 asiri satim sayilir; momentum taramasinda 50 uzeri boga teyidi.">RSI<span class="arrow"></span></th>
+          <th data-key="bb_percent" data-type="num" data-tip="Bollinger Bantlari (20, 2 sigma) icindeki konum (%). 100% = ust bant, 0% = alt bant. Bandin disina cikan deger (>100%/<0%), hacimle birlikteyse guclu kirilim sayilabilir.">BB%<span class="arrow"></span></th>
+          <th data-key="rel_strength" data-type="num" data-tip="Goreceli guc: hissenin gunluk % degisimi eksi karsilastirilan endeksin (BIST100/S&P500/BTC, piyasaya gore) gunluk % degisimi. |RS| < 0.5 NOTR sayilir.">RS<span class="arrow"></span></th>
+          <th data-key="daily" data-type="num" data-tip="Canli fiyat ile Yahoo'nun canli 'onceki kapanis' alani arasindaki yuzde fark. Liste varsayilan olarak (Skor grubu icinde) bu sutuna gore buyukten kucuge siralanir.">Gunluk<span class="arrow"></span></th>
+          <th data-key="d5" data-type="num" data-tip="Son 5 islem gunundeki yuzde degisim - kayan pencere (takvim haftasi degil), Yahoo'nun web sitesindeki '5D' ile ayni mantik.">5D<span class="arrow"></span></th>
+          <th data-key="m1" data-type="num" data-tip="Son 21 islem gunundeki (~1 aylik) yuzde degisim - kayan pencere (takvim ayi degil), Yahoo'nun web sitesindeki '1M' ile ayni mantik.">1M<span class="arrow"></span></th>
+          <th data-key="day_stop" data-type="num" data-tip="ATR(14)x1.5 mesafeli, Skor'un yonune (AL/SAT) gore gun ici (day trade) stop-loss fiyati. Skor NOTR ise gosterilmez.">GunStop<span class="arrow"></span></th>
+          <th data-key="day_target" data-type="num" data-tip="Gun ici hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">GunHedef<span class="arrow"></span></th>
+          <th data-key="swing_stop" data-type="num" data-tip="ATR(14)x3.0 mesafeli, birkac gun/hafta tasinacak swing pozisyonlar icin stop-loss fiyati.">SwStop<span class="arrow"></span></th>
+          <th data-key="swing_target" data-type="num" data-tip="Swing pozisyon icin hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">SwHedef<span class="arrow"></span></th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -222,6 +310,14 @@
   </div>
 </div>
 
+<footer>
+  <span>Veri kaynagi: Yahoo Finance</span>
+  <span class="dot">&bull;</span>
+  <span>Yatirim tavsiyesi degildir, yalnizca bilgilendirme amaclidir</span>
+  <span class="dot">&bull;</span>
+  <span>&copy; 2026 Momentum Scanner</span>
+</footer>
+
 <script>
 const REFRESH_SECONDS = {{ refresh_seconds }};
 const SCORE_SYMBOLS = {GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼", GUCLU_SAT: "▼▼"};
@@ -238,6 +334,20 @@ let latestRows = [];
 // key=null -> varsayilan siralama (Skor gucu, sonra gunluk % - terminaldeki
 // ile ayni). Bir basliga tiklaninca o sutuna gore siralamaya gecilir.
 let sortState = { key: null, dir: 'desc' };
+let searchQuery = '';
+let lastUpdatedAt = null;
+let lastMissingCount = 0;
+
+// Arama kutusu: hisse sembolu VEYA sektor koduna gore anlik filtreler
+// (buyuk/kucuk harf duyarsiz, "icerir" eslesmesi).
+function applySearch(rows) {
+  if (!searchQuery) return rows;
+  const q = searchQuery.toLowerCase();
+  return rows.filter(r =>
+    (r.ticker || '').toLowerCase().includes(q) ||
+    (r.sector || '').toLowerCase().includes(q)
+  );
+}
 
 function fmtPct(v) {
   if (v === null || v === undefined) return '-';
@@ -336,9 +446,32 @@ function updateHeaderIndicators() {
 }
 
 function renderTable() {
-  renderRows(applySort(latestRows));
+  const filtered = applySearch(latestRows);
+  renderRows(applySort(filtered));
   updateHeaderIndicators();
+
+  const countText = searchQuery
+    ? `${filtered.length}/${latestRows.length} hisse (filtrelendi)`
+    : `${latestRows.length} hisse`;
+  document.getElementById('meta').textContent =
+    `${countText} | guncelleme: ${lastUpdatedAt || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
+  document.getElementById('warning').textContent =
+    lastMissingCount ? `Uyari: ${lastMissingCount} sabit liste hissesi icin veri alinamadi.` : '';
 }
+
+document.getElementById('search-input').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim();
+  document.getElementById('search-clear').style.display = searchQuery ? 'block' : 'none';
+  renderTable();
+});
+document.getElementById('search-clear').addEventListener('click', () => {
+  const input = document.getElementById('search-input');
+  input.value = '';
+  searchQuery = '';
+  document.getElementById('search-clear').style.display = 'none';
+  renderTable();
+  input.focus();
+});
 
 document.querySelectorAll('#head-row th').forEach(th => {
   th.addEventListener('click', () => {
@@ -360,11 +493,9 @@ async function refreshRows() {
     const res = await fetch('/api/rows');
     const data = await res.json();
     latestRows = data.rows || [];
+    lastUpdatedAt = data.updated_at || null;
+    lastMissingCount = data.missing_count || 0;
     renderTable();
-    document.getElementById('meta').textContent =
-      `${latestRows.length} hisse | guncelleme: ${data.updated_at || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
-    document.getElementById('warning').textContent =
-      data.missing_count ? `Uyari: ${data.missing_count} sabit liste hissesi icin veri alinamadi.` : '';
   } catch (e) {
     document.getElementById('meta').textContent = 'Veri alinamadi, tekrar denenecek...';
   }
@@ -372,23 +503,30 @@ async function refreshRows() {
 
 function ensureChart() {
   if (chart) return;
-  chart = LightweightCharts.createChart(document.getElementById('chart'), {
+  const container = document.getElementById('chart');
+  // Yukseklik container'in GERCEK (CSS media query'lerin belirledigi) yuksekligi
+  // ile aliniyor - sabit bir sayi (orn. 280) verilirse mobilde CSS #chart'i
+  // kucultse bile grafik sabit boyutta kalir ve alttaki "Skor Gecmisi"
+  // basligiyla cakisir/onune gecer.
+  chart = LightweightCharts.createChart(container, {
     layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
     grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
     timeScale: { borderColor: '#2a2e38' },
     rightPriceScale: { borderColor: '#2a2e38' },
-    height: 280,
+    height: container.clientHeight,
   });
   candleSeries = chart.addCandlestickSeries({
     upColor: '#2ecc71', downColor: '#ff5c5c',
     borderVisible: false,
     wickUpColor: '#2ecc71', wickDownColor: '#ff5c5c',
   });
+  // Container boyutu degistiginde (viewport genislik/yukseklik degisimi,
+  // ekran donmesi vb.) hem genislik hem yukseklik grafige yansitilir.
   new ResizeObserver(entries => {
     for (const entry of entries) {
-      chart.applyOptions({ width: entry.contentRect.width });
+      chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
     }
-  }).observe(document.getElementById('chart'));
+  }).observe(container);
 }
 
 // Skor Gecmisi sekmeleri: backend'den TEK bir 5 dakikalik ham skor listesi
