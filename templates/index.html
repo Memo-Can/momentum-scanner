@@ -370,6 +370,17 @@ function fmtRsi(v) { return (v === null || v === undefined) ? '-' : v.toFixed(0)
 function fmtPrice(v) { return (v === null || v === undefined) ? '-' : v.toFixed(2); }
 function pctClass(v) { if (v === null || v === undefined) return ''; return v >= 0 ? 'pos' : 'neg'; }
 
+// ticker/sector Yahoo Finance'in dinamik tarama sonuclarindan geliyor (ozellikle
+// gainer taramasindaki ek hisseler) - bizim kontrolumuzde olmayan bir kaynak.
+// innerHTML'e dogrudan yazmadan once kacislanir, boylece Yahoo bir gun
+// beklenmedik (HTML/script iceren) bir sembol/sektor donduse bile DOM'a
+// enjekte edilemez.
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s ?? '';
+  return div.innerHTML;
+}
+
 function renderRows(rows) {
   const tbody = document.getElementById('rows');
   tbody.innerHTML = '';
@@ -379,8 +390,8 @@ function renderRows(rows) {
     tr.onclick = () => selectTicker(r.ticker);
     tr.innerHTML = `
       <td class="left">${i + 1}</td>
-      <td class="left">${r.ticker}</td>
-      <td class="left">${r.sector || '-'}</td>
+      <td class="left">${escapeHtml(r.ticker)}</td>
+      <td class="left">${escapeHtml(r.sector || '-')}</td>
       <td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>
       <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
       <td class="sym-${r.signal_5m}">${SIGNAL_SYMBOLS[r.signal_5m] || r.signal_5m}</td>
