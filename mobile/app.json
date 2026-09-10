@@ -17,7 +17,9 @@
       },
       "predictiveBackGestureEnabled": false,
       "googleServicesFile": "./google-services.json",
-      "permissions": ["android.permission.POST_NOTIFICATIONS"]
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -34,8 +36,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+        "projectId": "b40201f7-ff06-4118-8afb-0d90be816898"
       }
-    }
+    },
+    "owner": "memo-can"
   }
 }
