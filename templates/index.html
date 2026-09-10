@@ -97,45 +97,6 @@
     white-space: nowrap;
   }
   thead th:hover { color: var(--text); }
-
-  /* Sutun basligi hint'i: dogal tarayici title yerine tema ile uyumlu, ok
-     isaretli ozel bir kucuk popup - hover'da th'nin hemen altinda belirir. */
-  thead th[data-tip] { position: sticky; }
-  thead th[data-tip]::after {
-    content: attr(data-tip);
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%) translateY(4px);
-    width: 220px;
-    max-width: 60vw;
-    white-space: normal;
-    text-align: left;
-    font-size: 11px;
-    font-weight: 400;
-    line-height: 1.4;
-    color: var(--text);
-    background: #1c2029;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.45);
-    z-index: 60;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity .12s ease;
-    pointer-events: none;
-  }
-  thead th[data-tip]:hover::after {
-    opacity: 1;
-    visibility: visible;
-  }
-  /* En sagdaki sutunlarda popup ekran disina taşmasin diye saga yasla */
-  thead th[data-tip]:nth-last-child(-n+3)::after {
-    left: auto;
-    right: 0;
-    transform: translateY(4px);
-  }
   thead th.left { text-align: left; }
   thead th.sorted { color: var(--text); }
   thead th .arrow { display: inline-block; width: 10px; font-size: 9px; color: var(--yellow); }
@@ -293,26 +254,26 @@
     <table>
       <thead>
         <tr id="head-row">
-          <th class="left" data-key="_default" data-type="default" data-tip="Siralamadaki yeri: once Skor gucu (GUCLU AL en ustte, GUCLU SAT en altta), ayni skor grubu icinde gunluk % degisime gore buyukten kucuge.">#<span class="arrow"></span></th>
-          <th class="left" data-key="ticker" data-type="text" data-tip="Hisse sembolu (ticker).">Hisse<span class="arrow"></span></th>
-          <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kisa sektor kodu - Yahoo Finance'in canli 'sector' alanindan turetilir.">Sektor<span class="arrow"></span></th>
-          <th data-key="score" data-type="score" data-tip="1d, 5m, MACD, RSI, BB% ve RS sinyallerinin tek bir konfluens puaninda (-6..+6) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/GUCLU SAT(▼▼). ADX(14), GUCLU AL/SAT etiketini teyit eden bir guven filtresidir - ADX<20 ise 'guclu' etiket normal AL/SAT'a duser.">Skor<span class="arrow"></span></th>
-          <th data-key="signal_1d" data-type="signal" data-tip="Gunluk mumda EMA9/EMA21'e gore surekli trend yonu (AL/SAT/NOTR).">1d<span class="arrow"></span></th>
-          <th data-key="signal_5m" data-type="signal" data-tip="5 dakikalik mumda EMA9/EMA21'e gore surekli trend yonu (1d ile ayni mantik, farkli zaman dilimi).">5m<span class="arrow"></span></th>
-          <th data-key="signal_macd" data-type="signal" data-tip="MACD histogramina (12,26,9) gore surekli AL/SAT/NOTR - histogram farki > 0 ise AL. EMA sinyaline ek momentum teyidi.">MACD<span class="arrow"></span></th>
-          <th data-key="price" data-type="num" data-tip="Canli fiyat (Yahoo Finance'in regularMarketPrice alani).">Fiyat<span class="arrow"></span></th>
-          <th data-key="volume_ratio" data-type="num" data-tip="Bugunku islem hacminin, 10 gunluk ortalama hacme orani (orn. 2.3x). Yuksek oran, fiyat hareketinin gercek katilimla desteklendigini gosterir.">Hacim<span class="arrow"></span></th>
-          <th data-key="day_range_pos" data-type="num" data-tip="Fiyatin, gunun dip-zirve araligindaki yeri (%). %100 = gunun zirvesi (alici baskin), %0 = gunun dibi (satici baskin).">GunPoz<span class="arrow"></span></th>
-          <th data-key="rsi" data-type="num" data-tip="Wilder RSI(14) degeri (0-100). >=70 asiri alim, <=30 asiri satim sayilir; momentum taramasinda 50 uzeri boga teyidi.">RSI<span class="arrow"></span></th>
-          <th data-key="bb_percent" data-type="num" data-tip="Bollinger Bantlari (20, 2 sigma) icindeki konum (%). 100% = ust bant, 0% = alt bant. Bandin disina cikan deger (>100%/<0%), hacimle birlikteyse guclu kirilim sayilabilir.">BB%<span class="arrow"></span></th>
-          <th data-key="rel_strength" data-type="num" data-tip="Goreceli guc: hissenin gunluk % degisimi eksi karsilastirilan endeksin (BIST100/S&P500/BTC, piyasaya gore) gunluk % degisimi. |RS| < 0.5 NOTR sayilir.">RS<span class="arrow"></span></th>
-          <th data-key="daily" data-type="num" data-tip="Canli fiyat ile Yahoo'nun canli 'onceki kapanis' alani arasindaki yuzde fark. Liste varsayilan olarak (Skor grubu icinde) bu sutuna gore buyukten kucuge siralanir.">Gunluk<span class="arrow"></span></th>
-          <th data-key="d5" data-type="num" data-tip="Son 5 islem gunundeki yuzde degisim - kayan pencere (takvim haftasi degil), Yahoo'nun web sitesindeki '5D' ile ayni mantik.">5D<span class="arrow"></span></th>
-          <th data-key="m1" data-type="num" data-tip="Son 21 islem gunundeki (~1 aylik) yuzde degisim - kayan pencere (takvim ayi degil), Yahoo'nun web sitesindeki '1M' ile ayni mantik.">1M<span class="arrow"></span></th>
-          <th data-key="day_stop" data-type="num" data-tip="ATR(14)x1.5 mesafeli, Skor'un yonune (AL/SAT) gore gun ici (day trade) stop-loss fiyati. Skor NOTR ise gosterilmez.">GunStop<span class="arrow"></span></th>
-          <th data-key="day_target" data-type="num" data-tip="Gun ici hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">GunHedef<span class="arrow"></span></th>
-          <th data-key="swing_stop" data-type="num" data-tip="ATR(14)x3.0 mesafeli, birkac gun/hafta tasinacak swing pozisyonlar icin stop-loss fiyati.">SwStop<span class="arrow"></span></th>
-          <th data-key="swing_target" data-type="num" data-tip="Swing pozisyon icin hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">SwHedef<span class="arrow"></span></th>
+          <th class="left" data-key="_default" data-type="default">#<span class="arrow"></span></th>
+          <th class="left" data-key="ticker" data-type="text">Hisse<span class="arrow"></span></th>
+          <th class="left" data-key="sector" data-type="text">Sektor<span class="arrow"></span></th>
+          <th data-key="score" data-type="score">Skor<span class="arrow"></span></th>
+          <th data-key="signal_1d" data-type="signal">1d<span class="arrow"></span></th>
+          <th data-key="signal_5m" data-type="signal">5m<span class="arrow"></span></th>
+          <th data-key="signal_macd" data-type="signal">MACD<span class="arrow"></span></th>
+          <th data-key="price" data-type="num">Fiyat<span class="arrow"></span></th>
+          <th data-key="volume_ratio" data-type="num">Hacim<span class="arrow"></span></th>
+          <th data-key="day_range_pos" data-type="num">GunPoz<span class="arrow"></span></th>
+          <th data-key="rsi" data-type="num">RSI<span class="arrow"></span></th>
+          <th data-key="bb_percent" data-type="num">BB%<span class="arrow"></span></th>
+          <th data-key="rel_strength" data-type="num">RS<span class="arrow"></span></th>
+          <th data-key="daily" data-type="num">Gunluk<span class="arrow"></span></th>
+          <th data-key="d5" data-type="num">5D<span class="arrow"></span></th>
+          <th data-key="m1" data-type="num">1M<span class="arrow"></span></th>
+          <th data-key="day_stop" data-type="num">GunStop<span class="arrow"></span></th>
+          <th data-key="day_target" data-type="num">GunHedef<span class="arrow"></span></th>
+          <th data-key="swing_stop" data-type="num">SwStop<span class="arrow"></span></th>
+          <th data-key="swing_target" data-type="num">SwHedef<span class="arrow"></span></th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
