@@ -175,6 +175,51 @@ def api_score_history(ticker: str):
     return jsonify(events)
 
 
+@app.route("/api/indicators/<ticker>")
+def api_indicators(ticker: str):
+    """Verilen (soneksiz) ticker icin EMA9/21, MACD, RSI ve Bollinger
+    Bantlarinin TAM zaman serisini dondurur - grafikte istege bagli
+    acilir/kapanir indikator katmanlari icin. Skorlamayla (fetch_row) ayni
+    6 aylik isinma penceresi uzerinden hesaplanir (tutarlilik icin), ama
+    yanit gorunen mum araligiyla (son ~3 ay) hizali kalsin diye kirpilir."""
+    yahoo_ticker = f"{ticker}.IS"
+    try:
+        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+    if hist.empty:
+        return jsonify({})
+
+    closes = hist["Close"]
+    ema9, ema21 = scanner.ema_series_pair(closes)
+    rsi_vals = scanner.rsi_series(closes)
+    macd_line, macd_sig, macd_hist = scanner.macd_series(closes)
+    bb_upper, bb_mid, bb_lower = scanner.bollinger_bands_series(closes)
+    dates = [idx.strftime("%Y-%m-%d") for idx in hist.index]
+
+    def _series(values):
+        trimmed = values.tail(65)
+        trimmed_dates = dates[-len(trimmed):]
+        return [
+            {"time": t, "value": None if v != v else float(v)}
+            for t, v in zip(trimmed_dates, trimmed)
+        ]
+
+    return jsonify(
+        {
+            "ema9": _series(ema9),
+            "ema21": _series(ema21),
+            "rsi": _series(rsi_vals),
+            "macd": _series(macd_line),
+            "macd_signal": _series(macd_sig),
+            "macd_hist": _series(macd_hist),
+            "bb_upper": _series(bb_upper),
+            "bb_mid": _series(bb_mid),
+            "bb_lower": _series(bb_lower),
+        }
+    )
+
+
 if __name__ == "__main__":
     threading.Thread(target=_scan_loop, daemon=True).start()
     # 127.0.0.1: bu Flask gelistirme sunucusu dogrudan disariya acik degil -

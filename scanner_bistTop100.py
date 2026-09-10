@@ -269,6 +269,46 @@ def bollinger_percent_b(closes, period: int = BB_PERIOD, num_std: float = BB_STD
     return (closes.iloc[-1] - lower) / (upper - lower) * 100.0
 
 
+def ema_series_pair(closes, fast: int = EMA_FAST, slow: int = EMA_SLOW):
+    """ema_trend_signal'in TAM zaman serisi hali - grafikte EMA9/21 cizgilerini
+    cizebilmek icin. Ayni ewm formulu, sadece son deger yerine tum seri doner."""
+    ema_fast = closes.ewm(span=fast, adjust=False).mean()
+    ema_slow = closes.ewm(span=slow, adjust=False).mean()
+    return ema_fast, ema_slow
+
+
+def rsi_series(closes, period: int = RSI_PERIOD):
+    """rsi()'nin TAM zaman serisi hali - grafikte RSI cizgisini cizebilmek icin."""
+    delta = closes.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def macd_series(closes, fast: int = MACD_FAST, slow: int = MACD_SLOW, signal: int = MACD_SIGNAL):
+    """macd_signal()'in TAM zaman serisi hali - grafikte MACD/sinyal/histogram
+    cizgilerini cizebilmek icin."""
+    ema_fast = closes.ewm(span=fast, adjust=False).mean()
+    ema_slow = closes.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def bollinger_bands_series(closes, period: int = BB_PERIOD, num_std: float = BB_STD):
+    """bollinger_percent_b()'nin TAM zaman serisi hali - grafikte ust/orta/alt
+    bant cizgilerini cizebilmek icin."""
+    sma = closes.rolling(period).mean()
+    std = closes.rolling(period).std()
+    upper = sma + num_std * std
+    lower = sma - num_std * std
+    return upper, sma, lower
+
+
 def adx(hist, period: int = ADX_PERIOD) -> float:
     """Wilder ADX(14) degerini dondurur (0-100). ADX yonu degil trendin
     GUCUNU olcer: <20 zayif/yatay piyasa (sinyaller gurultulu olabilir),

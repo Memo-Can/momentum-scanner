@@ -143,7 +143,7 @@
   tbody td.left { text-align: left; font-weight: 600; }
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: #1b1f29; }
-  tbody tr.selected { background: #21283a; }
+  tbody tr.selected { background: #2a2f45; box-shadow: inset 3px 0 0 var(--yellow); }
   .pos { color: var(--green); }
   .neg { color: var(--red); }
   .sym-AL { color: var(--green); }
@@ -163,7 +163,27 @@
   }
   #side h2 { margin: 0 0 4px; font-size: 16px; }
   #side .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
-  #chart { width: 100%; height: 280px; }
+  #chart { width: 100%; height: 280px; position: relative; }
+  .chart-status {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; background: rgba(23, 26, 33, 0.88);
+    font-size: 12px; color: var(--muted); text-align: center; padding: 16px;
+  }
+  .chart-status.error { color: var(--red); }
+  .chart-spinner {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 3px solid var(--border); border-top-color: var(--yellow);
+    animation: chart-spin .8s linear infinite;
+  }
+  @keyframes chart-spin { to { transform: rotate(360deg); } }
+  #indicator-toggles {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    margin-bottom: 8px; font-size: 11px; color: var(--muted);
+  }
+  #indicator-toggles label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #indicator-toggles input { cursor: pointer; accent-color: var(--yellow); }
+  #macd-chart, #rsi-chart { width: 100%; height: 110px; margin-top: 6px; }
   #score-history { margin-top: 14px; }
   #score-history h3 { font-size: 13px; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
   .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
@@ -304,7 +324,17 @@
     <div id="side-content" style="display:none">
       <h2 id="side-ticker">-</h2>
       <div class="sub" id="side-sub">3 aylik gunluk mum</div>
-      <div id="chart"></div>
+      <div id="indicator-toggles">
+        <label><input type="checkbox" id="ind-ema" checked> EMA 9/21</label>
+        <label><input type="checkbox" id="ind-bb" checked> Bollinger</label>
+        <label><input type="checkbox" id="ind-macd" checked> MACD</label>
+        <label><input type="checkbox" id="ind-rsi" checked> RSI</label>
+      </div>
+      <div id="chart">
+        <div id="chart-status" class="chart-status" hidden></div>
+      </div>
+      <div id="macd-chart"></div>
+      <div id="rsi-chart"></div>
       <div id="score-history">
         <h3>Skor Gecmisi</h3>
         <div class="tabs" id="score-tabs">
@@ -340,6 +370,13 @@ const SIGNAL_RANK = {AL: 1, NOTR: 0, SAT: -1};
 let selectedTicker = null;
 let chart = null;
 let candleSeries = null;
+// Istege bagli indikator katmanlari - hepsi lazy olusturulur (ilk toggle
+// acildiginda ya da ana grafikle birlikte), asagida ensureChart/ensureMacdChart/
+// ensureRsiChart icinde atanir.
+let ema9Series = null, ema21Series = null;
+let bbUpperSeries = null, bbMidSeries = null, bbLowerSeries = null;
+let macdChart = null, macdHistSeries = null, macdLineSeries = null, macdSignalSeries = null;
+let rsiChart = null, rsiSeries = null;
 let latestRows = [];
 // key=null -> varsayilan siralama (Skor gucu, sonra gunluk % - terminaldeki
 // ile ayni). Bir basliga tiklaninca o sutuna gore siralamaya gecilir.
@@ -548,7 +585,105 @@ function ensureChart() {
       chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
     }
   }).observe(container);
+
+  // EMA9/21 ve Bollinger bantlari - ana fiyat grafiginin USTUNE binen katmanlar
+  // (ayni fiyat olcegi). Bir kere olusturulur, acilir/kapanir toggle'lar sadece
+  // visible: true/false yapar - veri her selectTicker'da tekrar setData edilir.
+  ema9Series = chart.addLineSeries({ color: '#e8c547', lineWidth: 1, visible: true, priceLineVisible: false, lastValueVisible: false });
+  ema21Series = chart.addLineSeries({ color: '#ff9f43', lineWidth: 1, visible: true, priceLineVisible: false, lastValueVisible: false });
+  bbUpperSeries = chart.addLineSeries({ color: '#5b9bd5', lineWidth: 1, lineStyle: 2, visible: true, priceLineVisible: false, lastValueVisible: false });
+  bbMidSeries = chart.addLineSeries({ color: '#8b93a3', lineWidth: 1, lineStyle: 2, visible: true, priceLineVisible: false, lastValueVisible: false });
+  bbLowerSeries = chart.addLineSeries({ color: '#5b9bd5', lineWidth: 1, lineStyle: 2, visible: true, priceLineVisible: false, lastValueVisible: false });
 }
+
+function ensureMacdChart() {
+  if (macdChart) return;
+  const container = document.getElementById('macd-chart');
+  macdChart = LightweightCharts.createChart(container, {
+    layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
+    grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
+    timeScale: { borderColor: '#2a2e38' },
+    rightPriceScale: { borderColor: '#2a2e38' },
+    height: container.clientHeight,
+  });
+  macdHistSeries = macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
+  macdLineSeries = macdChart.addLineSeries({ color: '#5b9bd5', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  macdSignalSeries = macdChart.addLineSeries({ color: '#ff9f43', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  new ResizeObserver(entries => {
+    for (const entry of entries) {
+      macdChart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+    }
+  }).observe(container);
+}
+
+function ensureRsiChart() {
+  if (rsiChart) return;
+  const container = document.getElementById('rsi-chart');
+  rsiChart = LightweightCharts.createChart(container, {
+    layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
+    grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
+    timeScale: { borderColor: '#2a2e38' },
+    rightPriceScale: { borderColor: '#2a2e38' },
+    height: container.clientHeight,
+  });
+  rsiSeries = rsiChart.addLineSeries({ color: '#e8c547', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  // Asiri alim/satim referans cizgileri (70/30) - RSI'nin standart okunma esikleri.
+  rsiSeries.createPriceLine({ price: 70, color: '#8b93a3', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+  rsiSeries.createPriceLine({ price: 30, color: '#8b93a3', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+  new ResizeObserver(entries => {
+    for (const entry of entries) {
+      rsiChart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+    }
+  }).observe(container);
+}
+
+// Backend'den gelen [{time, value}] dizisini lightweight-charts'in bekledigi
+// formata cevirir - null value'lu (NaN kaynakli, orn. isinma donemi) satirlar
+// atlanir, cizgi bos noktadan basliyormus gibi dogal gorunur.
+function toSeriesData(arr) {
+  return (arr || []).filter(p => p.value !== null).map(p => ({ time: p.time, value: p.value }));
+}
+
+let indicatorData = null;
+
+function applyIndicatorData() {
+  if (!indicatorData) return;
+  ema9Series.setData(toSeriesData(indicatorData.ema9));
+  ema21Series.setData(toSeriesData(indicatorData.ema21));
+  bbUpperSeries.setData(toSeriesData(indicatorData.bb_upper));
+  bbMidSeries.setData(toSeriesData(indicatorData.bb_mid));
+  bbLowerSeries.setData(toSeriesData(indicatorData.bb_lower));
+  if (macdHistSeries) {
+    macdHistSeries.setData(toSeriesData(indicatorData.macd_hist).map(p => ({
+      time: p.time, value: p.value, color: p.value >= 0 ? '#2ecc71' : '#ff5c5c',
+    })));
+    macdLineSeries.setData(toSeriesData(indicatorData.macd));
+    macdSignalSeries.setData(toSeriesData(indicatorData.macd_signal));
+    macdChart.timeScale().fitContent();
+  }
+  if (rsiSeries) {
+    rsiSeries.setData(toSeriesData(indicatorData.rsi));
+    rsiChart.timeScale().fitContent();
+  }
+}
+
+document.getElementById('ind-ema').addEventListener('change', (e) => {
+  ema9Series.applyOptions({ visible: e.target.checked });
+  ema21Series.applyOptions({ visible: e.target.checked });
+});
+document.getElementById('ind-bb').addEventListener('change', (e) => {
+  bbUpperSeries.applyOptions({ visible: e.target.checked });
+  bbMidSeries.applyOptions({ visible: e.target.checked });
+  bbLowerSeries.applyOptions({ visible: e.target.checked });
+});
+document.getElementById('ind-macd').addEventListener('change', (e) => {
+  document.getElementById('macd-chart').hidden = !e.target.checked;
+  if (e.target.checked) { ensureMacdChart(); applyIndicatorData(); }
+});
+document.getElementById('ind-rsi').addEventListener('change', (e) => {
+  document.getElementById('rsi-chart').hidden = !e.target.checked;
+  if (e.target.checked) { ensureRsiChart(); applyIndicatorData(); }
+});
 
 // Skor Gecmisi sekmeleri: backend'den TEK bir 5 dakikalik ham skor listesi
 // gelir (score-history), gunluk/saatlik ortalamalar bu tek listeden burada
@@ -618,22 +753,56 @@ document.querySelectorAll('#score-tabs .tab-btn').forEach(btn => {
   });
 });
 
+// Grafik alaninin uzerine binen durum katmani: yukleniyor spinner'i veya
+// veri gelmedi/hata mesaji. mode: 'loading' | 'error' | 'hidden'.
+function setChartStatus(mode, message) {
+  const el = document.getElementById('chart-status');
+  if (mode === 'hidden') { el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.toggle('error', mode === 'error');
+  el.innerHTML = mode === 'loading'
+    ? '<div class="chart-spinner"></div><div>Grafik yukleniyor...</div>'
+    : `<div>${message}</div>`;
+}
+
 async function selectTicker(ticker) {
   selectedTicker = ticker;
   document.getElementById('side-empty').style.display = 'none';
   document.getElementById('side-content').style.display = 'block';
   document.getElementById('side-ticker').textContent = ticker;
+  // Secili satirin vurgusu bir sonraki 5 dakikalik yenilemeyi beklemeden
+  // aninda gorunsun diye tabloyu hemen yeniden ciziyoruz.
+  renderTable();
 
   ensureChart();
-  const [histRes, scoreHistRes] = await Promise.all([
-    fetch(`/api/history/${ticker}`),
-    fetch(`/api/score-history/${ticker}`),
-  ]);
-  const candles = await histRes.json();
-  scoreHistoryRaw = await scoreHistRes.json();
+  // Checkbox'lar defaultta isaretli oldugu icin MACD/RSI panelleri de ilk
+  // hisse secildiginde (checkbox'a dokunulmadan) hazir olmali.
+  ensureMacdChart();
+  ensureRsiChart();
+  setChartStatus('loading');
 
-  candleSeries.setData(candles);
-  renderScoreHistory();
+  try {
+    const [histRes, scoreHistRes, indRes] = await Promise.all([
+      fetch(`/api/history/${ticker}`),
+      fetch(`/api/score-history/${ticker}`),
+      fetch(`/api/indicators/${ticker}`),
+    ]);
+    const candles = await histRes.json();
+    scoreHistoryRaw = await scoreHistRes.json();
+    indicatorData = await indRes.json();
+
+    if (!Array.isArray(candles) || candles.length === 0) {
+      candleSeries.setData([]);
+      setChartStatus('error', 'Bu hisse icin grafik verisi bulunamadi.');
+    } else {
+      candleSeries.setData(candles);
+      setChartStatus('hidden');
+    }
+    applyIndicatorData();
+    renderScoreHistory();
+  } catch (e) {
+    setChartStatus('error', 'Grafik yuklenemedi. Tekrar deneyin.');
+  }
 }
 
 refreshRows();
