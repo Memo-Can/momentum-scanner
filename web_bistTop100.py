@@ -13,12 +13,11 @@ Sonra tarayicida: http://127.0.0.1:5000
 
 Sayfa acikken tablo REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
-sag panelde 3 aylik mum grafigi + GUCLU_AL/GUCLU_SAT sinyal gecmisi
-(signal_log_bist.csv'den) gosterilir.
+sag panelde 3 aylik mum grafigi + istege bagli indikator katmanlari
+(EMA/Bollinger/MACD/RSI) + Skor Gecmisi (gunluk/saatlik/5 dakikalik) gosterilir.
 """
 
 import csv
-import json
 import os
 import threading
 import time
@@ -26,7 +25,7 @@ from datetime import datetime
 
 import scanner_bistTop100 as scanner
 import yfinance as yf
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, jsonify, render_template
 
 app = Flask(__name__)
 
@@ -48,6 +47,28 @@ def _sanitize(value):
 
 def _row_to_json(row: dict) -> dict:
     return {k: _sanitize(v) for k, v in row.items()}
+
+
+# Grafik/indikator/skor-gecmisi endpoint'leri icin onbellek - scanner_bistTop100.py'deki
+# _benchmark_cache ile AYNI desen (TTL = REFRESH_SECONDS-5). Bir hisse zaten
+# secilip verisi cekildiyse, ayni hisseye kisa surede tekrar tiklandiginda
+# (ya da farkli bir tarayicidan ayni hisseye bakildiginda) Yahoo'ya tekrar
+# istek atmak yerine onbellekten donulur - tarama zaten 5 dakikada bir
+# yenilendigi icin daha sik bir veriye ihtiyac yok.
+_chart_cache = {}  # (endpoint_adi, ticker) -> (fetched_at, json'lanabilir deger)
+CHART_CACHE_TTL = scanner.REFRESH_SECONDS - 5
+
+
+def _cache_get(cache_key):
+    cached = _chart_cache.get(cache_key)
+    if cached and time.time() - cached[0] < CHART_CACHE_TTL:
+        return cached[1]
+    return None
+
+
+def _cache_set(cache_key, value):
+    _chart_cache[cache_key] = (time.time(), value)
+    return value
 
 
 def _scan_once():
@@ -113,13 +134,18 @@ def api_rows():
 def api_history(ticker: str):
     """Verilen (soneksiz) ticker icin 3 aylik gunluk mum verisini dondurur.
     orn. /api/history/AKBNK -> AKBNK.IS icin OHLC."""
+    cache_key = ("history", ticker)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
     yahoo_ticker = f"{ticker}.IS"
     try:
         hist = yf.Ticker(yahoo_ticker).history(period="3mo", interval="1d", auto_adjust=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
-        return jsonify([])
+        return jsonify(_cache_set(cache_key, []))
     candles = [
         {
             "time": idx.strftime("%Y-%m-%d"),
@@ -130,27 +156,7 @@ def api_history(ticker: str):
         }
         for idx, row in hist.iterrows()
     ]
-    return jsonify(candles)
-
-
-@app.route("/api/signals/<ticker>")
-def api_signals(ticker: str):
-    """Verilen ticker icin signal_log_bist.csv'deki GUCLU_AL/GUCLU_SAT
-    gecmisini dondurur - grafikte isaretci olarak gosterilir."""
-    if not os.path.isfile(scanner.SIGNAL_LOG_PATH):
-        return jsonify([])
-    events = []
-    with open(scanner.SIGNAL_LOG_PATH, "r", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if row.get("ticker") == ticker:
-                events.append(
-                    {
-                        "time": row["timestamp"],
-                        "score": row["score"],
-                        "price": row["price"],
-                    }
-                )
-    return jsonify(events)
+    return jsonify(_cache_set(cache_key, candles))
 
 
 @app.route("/api/score-history/<ticker>")
@@ -158,8 +164,13 @@ def api_score_history(ticker: str):
     """Verilen ticker icin score_history_bist.csv'deki HER dongudeki (5 dk)
     ham skor kaydini dondurur. Gunluk/saatlik ortalama ve 5 dakikalik ham
     veri sekmeleri bu tek listeden istemci tarafinda hesaplanir."""
+    cache_key = ("score-history", ticker)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
     if not os.path.isfile(scanner.SCORE_HISTORY_PATH):
-        return jsonify([])
+        return jsonify(_cache_set(cache_key, []))
     events = []
     with open(scanner.SCORE_HISTORY_PATH, "r", newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -172,7 +183,7 @@ def api_score_history(ticker: str):
                         "price": row["price"],
                     }
                 )
-    return jsonify(events)
+    return jsonify(_cache_set(cache_key, events))
 
 
 @app.route("/api/indicators/<ticker>")
@@ -182,13 +193,18 @@ def api_indicators(ticker: str):
     acilir/kapanir indikator katmanlari icin. Skorlamayla (fetch_row) ayni
     6 aylik isinma penceresi uzerinden hesaplanir (tutarlilik icin), ama
     yanit gorunen mum araligiyla (son ~3 ay) hizali kalsin diye kirpilir."""
+    cache_key = ("indicators", ticker)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
     yahoo_ticker = f"{ticker}.IS"
     try:
         hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
-        return jsonify({})
+        return jsonify(_cache_set(cache_key, {}))
 
     closes = hist["Close"]
     ema9, ema21 = scanner.ema_series_pair(closes)
@@ -206,17 +222,20 @@ def api_indicators(ticker: str):
         ]
 
     return jsonify(
-        {
-            "ema9": _series(ema9),
-            "ema21": _series(ema21),
-            "rsi": _series(rsi_vals),
-            "macd": _series(macd_line),
-            "macd_signal": _series(macd_sig),
-            "macd_hist": _series(macd_hist),
-            "bb_upper": _series(bb_upper),
-            "bb_mid": _series(bb_mid),
-            "bb_lower": _series(bb_lower),
-        }
+        _cache_set(
+            cache_key,
+            {
+                "ema9": _series(ema9),
+                "ema21": _series(ema21),
+                "rsi": _series(rsi_vals),
+                "macd": _series(macd_line),
+                "macd_signal": _series(macd_sig),
+                "macd_hist": _series(macd_hist),
+                "bb_upper": _series(bb_upper),
+                "bb_mid": _series(bb_mid),
+                "bb_lower": _series(bb_lower),
+            },
+        )
     )
 
 

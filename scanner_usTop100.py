@@ -38,8 +38,8 @@ Sutunlar:
            renginden (Gunluk +/-'ye gore) bagimsizdir.
   Sektor   Hissenin kisa sektor kodu. Hisse listesi dinamik oldugu icin sabit
            bir harita yerine Yahoo'nun canli "sector" alani (SECTOR_TRANSLATE
-           ile kisa koda cevrilir) kullanilir; sektor degismedigi icin
-           ticker basina suresiz onbelleklenir (_sector_cache).
+           ile kisa koda cevrilir) kullanilir - her dongude tk.get_info()
+           uzerinden dogrudan cekilir, ayrica onbelleklenmez.
   MACD     MACD histogramina (12,26,9) gore SUREKLI AL/SAT/NOTR (histogram
            farki > 0 = AL). EMA9/21'e ek momentum-gucu teyidi olarak okunur.
   RSI      Wilder RSI(14) degeri (0-100). >=70 asiri alim, <=30 asiri satim

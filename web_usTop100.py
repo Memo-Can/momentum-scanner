@@ -16,12 +16,11 @@ makinede aynı anda calisabilirler, cakisma olmaz.
 
 Sayfa acikken tablo REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
-sag panelde 3 aylik mum grafigi + GUCLU_AL/GUCLU_SAT sinyal gecmisi
-(signal_log_us.csv'den) gosterilir.
+sag panelde 3 aylik mum grafigi + Skor Gecmisi (gunluk/saatlik/5 dakikalik)
+gosterilir.
 """
 
 import csv
-import json
 import os
 import threading
 import time
@@ -29,7 +28,7 @@ from datetime import datetime
 
 import scanner_usTop100 as scanner
 import yfinance as yf
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, jsonify, render_template
 
 app = Flask(__name__)
 
@@ -134,26 +133,6 @@ def api_history(ticker: str):
         for idx, row in hist.iterrows()
     ]
     return jsonify(candles)
-
-
-@app.route("/api/signals/<ticker>")
-def api_signals(ticker: str):
-    """Verilen ticker icin signal_log_us.csv'deki GUCLU_AL/GUCLU_SAT
-    gecmisini dondurur - grafikte isaretci olarak gosterilir."""
-    if not os.path.isfile(scanner.SIGNAL_LOG_PATH):
-        return jsonify([])
-    events = []
-    with open(scanner.SIGNAL_LOG_PATH, "r", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if row.get("ticker") == ticker:
-                events.append(
-                    {
-                        "time": row["timestamp"],
-                        "score": row["score"],
-                        "price": row["price"],
-                    }
-                )
-    return jsonify(events)
 
 
 @app.route("/api/score-history/<ticker>")
