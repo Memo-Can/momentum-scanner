@@ -784,6 +784,11 @@ async function selectTicker(ticker) {
   document.getElementById('side-empty').style.display = 'none';
   document.getElementById('side-content').style.display = 'block';
   document.getElementById('side-ticker').textContent = ticker;
+  // URL'nin sonuna secili hisseyi kucuk harfle ekler (orn. #thyao) - sayfa
+  // yeniden yuklendiginde ayni hisseyi otomatik acabilmek icin (asagida) ve
+  // linki paylasilabilir/yer imine eklenebilir yapmak icin. replaceState
+  // kullanilir, her tiklamada tarayici gecmisine yeni bir kayit eklenmez.
+  history.replaceState(null, '', '#' + ticker.toLowerCase());
   // Secili satirin vurgusu bir sonraki 5 dakikalik yenilemeyi beklemeden
   // aninda gorunsun diye tabloyu hemen yeniden ciziyoruz.
   renderTable();
@@ -835,7 +840,13 @@ async function selectTicker(ticker) {
   }
 }
 
-refreshRows();
+// Sayfa acilirken URL'de bir hisse varsa (orn. #thyao, selectTicker'in
+// kendisinin ekledigi) tablo ilk kez dolduktan sonra o hisse otomatik
+// secilir - boylece bir hissenin linki paylasilinca dogrudan o grafikle acilir.
+refreshRows().then(() => {
+  const hashTicker = location.hash.slice(1);
+  if (hashTicker) selectTicker(hashTicker.toUpperCase());
+});
 setInterval(refreshRows, REFRESH_SECONDS * 1000);
 </script>
 </body>
