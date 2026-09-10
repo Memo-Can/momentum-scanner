@@ -71,6 +71,7 @@ fiyat ne oldu) kendi verinizle degerlendirebilirsiniz.
 """
 
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -80,6 +81,15 @@ from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
+
+# firebase-admin henuz kurulu olmayabilir (requirements.txt'e yeni eklendi) -
+# import basarisiz olursa push bildirimleri sessizce devre disi kalir, geri
+# kalan tum tarama/skor mantigi normal calismaya devam eder.
+try:
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+except ImportError:
+    firebase_admin = None
 
 REFRESH_SECONDS = 300  # 5 dakika
 TOP_N = 100
@@ -96,8 +106,18 @@ BEEP_SOUND = os.path.join(SOUND_DIR, "al_beep.wav")
 # yazilir (her dongude tekrar tekrar degil), boylece dosya sismez.
 SIGNAL_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_log_bist.csv")
 SCORE_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score_history_bist.csv")
+DEVICE_TOKENS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_tokens_bist.json")
 SIGNAL_LOG_FIELDS = ["timestamp", "ticker", "score", "price", "daily_pct", "rsi", "adx", "rel_strength"]
 SCORE_HISTORY_FIELDS = ["timestamp", "ticker", "score_raw", "score", "price"]
+
+# Firebase kimlik dosyasi (servis hesabi JSON'u) commit'lenmez - VPS'te
+# systemd servis dosyasinda FIREBASE_CREDENTIALS_PATH env degiskeniyle
+# gosterilir. Dosya yoksa (henuz Firebase projesi kurulmadiysa) push
+# bildirimleri sessizce devre disi kalir, scanner normal calismaya devam eder.
+if firebase_admin is not None:
+    _firebase_cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH")
+    if _firebase_cred_path and os.path.isfile(_firebase_cred_path) and not firebase_admin._apps:
+        firebase_admin.initialize_app(credentials.Certificate(_firebase_cred_path))
 
 # BIST30 endeksindeki hisseler - gunluk % ne olursa olsun listede daima
 # yer alirlar (bkz. dosya basindaki aciklama).
@@ -674,6 +694,91 @@ def play_refresh_beep():
 _last_logged_score = {}  # ticker -> log dosyasina en son yazilan skor
 
 
+def load_device_tokens() -> dict:
+    """Kayitli mobil cihaz push token'larini okur. Dosya yoksa (henuz kimse
+    kayit olmadiysa) bos sozluk doner."""
+    if not os.path.isfile(DEVICE_TOKENS_PATH):
+        return {}
+    try:
+        with open(DEVICE_TOKENS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_device_tokens(tokens: dict) -> None:
+    """Token sozlugunu atomik olarak yazar - once .tmp dosyasina yazip
+    os.replace() ile degistirir, yazma sirasinda surec olursa (orn. servis
+    restart) yarim/bozuk bir JSON dosyasi kalmasin diye."""
+    tmp_path = DEVICE_TOKENS_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(tokens, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, DEVICE_TOKENS_PATH)
+
+
+def register_device_token(token: str, platform: str) -> None:
+    """Bir mobil cihazin push token'ini kaydeder/gunceller (upsert) - uygulama
+    her acildiginda ayni token tekrar gelebilir, sorun degil."""
+    tokens = load_device_tokens()
+    tokens[token] = {
+        "platform": platform,
+        "registered_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_device_tokens(tokens)
+
+
+def prune_device_tokens(dead_tokens: set) -> None:
+    """FCM'in 'artik gecersiz' dedigi token'lari (uygulama silinmis, bildirim
+    izni kaldirilmis vb.) kayitlardan temizler."""
+    if not dead_tokens:
+        return
+    tokens = load_device_tokens()
+    for t in dead_tokens:
+        tokens.pop(t, None)
+    save_device_tokens(tokens)
+
+
+def _send_push_notifications(entries) -> None:
+    """entries (log_signal_changes'in az once tespit ettigi GUCLU_AL/SAT
+    gecisleri) icin kayitli tum cihazlara Firebase Cloud Messaging (FCM)
+    uzerinden push bildirimi gonderir. Firebase henuz kurulmadiysa (paket
+    kurulu degil ya da kimlik dosyasi yoksa) sessizce hicbir sey yapmaz -
+    push, tarama dongusunun basarisi icin gerekli degildir."""
+    if firebase_admin is None or not firebase_admin._apps:
+        return
+    tokens = load_device_tokens()
+    if not tokens:
+        return
+
+    try:
+        messages = []
+        for entry in entries:
+            label = "GUCLU AL" if entry["score"] == "GUCLU_AL" else "GUCLU SAT"
+            title = f"{entry['ticker']} -> {label}"
+            body = f"{entry['price']:.2f} TL ({entry['daily_pct']:+.2f}%)"
+            for token in tokens:
+                messages.append(
+                    messaging.Message(
+                        notification=messaging.Notification(title=title, body=body),
+                        data={"ticker": entry["ticker"], "score": entry["score"]},
+                        token=token,
+                    )
+                )
+        if not messages:
+            return
+
+        response = messaging.send_each(messages)
+        dead_tokens = set()
+        for msg, result in zip(messages, response.responses):
+            if not result.success and isinstance(
+                result.exception, (messaging.UnregisteredError, messaging.SenderIdMismatchError)
+            ):
+                dead_tokens.add(msg.token)
+        prune_device_tokens(dead_tokens)
+    except Exception as e:
+        print("Push bildirimi gonderilemedi:", e)
+
+
 def log_signal_changes(rows):
     """Skoru GUCLU_AL/GUCLU_SAT'a DONEN (onceki dongude farkli olan) hisseleri
     SIGNAL_LOG_PATH'e ekler. Her dongude ayni sinyali tekrar tekrar yazmaz -
@@ -708,6 +813,10 @@ def log_signal_changes(rows):
         if not file_exists:
             writer.writeheader()
         writer.writerows(new_entries)
+
+    # CSV yazimindan SONRA cagirilir - push gonderimi basarisiz olsa bile
+    # CSV log (tarihsel kayit) her zaman yazilmis olur.
+    _send_push_notifications(new_entries)
 
 
 def log_score_history(rows):

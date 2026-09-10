@@ -4,3 +4,5 @@ __pycache__/
 .claude/
 signal_log_*.csv
 score_history_*.csv
+device_tokens_*.json
+firebase-service-account.json
