@@ -227,4 +227,8 @@ if __name__ == "__main__":
     # (bkz. /etc/nginx/sites-available/momentum-scanner), SSL sonlandirma da
     # orada yapiliyor. Port 5000'in disaridan hic erisilememesi (sadece
     # nginx uzerinden gecmesi) guvenlik icin onemli.
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # threaded=True: bu olmadan Flask'in gelistirme sunucusu istekleri TEK TEK
+    # isler - bir hisseye tiklandiginda ayni anda atilan 3 istek (history/
+    # score-history/indicators) birbirini bloklardi, grafik "hic yuklenmiyor"
+    # gibi hissettirebilirdi (ozellikle Yahoo yavas/rate-limit yaptiginda).
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

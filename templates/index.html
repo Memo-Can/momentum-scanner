@@ -170,13 +170,13 @@
     gap: 8px; background: rgba(23, 26, 33, 0.88);
     font-size: 12px; color: var(--muted); text-align: center; padding: 16px;
   }
+  /* "display: flex" yukarida, yazar stil sayfasi olarak tarayicinin
+     varsayilan "[hidden] { display: none }" kuralini her zaman ezer -
+     hidden ozelligi olsa bile div flex kutusu olarak render edilip koyu
+     arka plani grafigin ustunde gorunur kalirdi. Bu kural ozgunlukle
+     kazanip hidden iken gercekten gizler. */
+  .chart-status[hidden] { display: none; }
   .chart-status.error { color: var(--red); }
-  .chart-spinner {
-    width: 22px; height: 22px; border-radius: 50%;
-    border: 3px solid var(--border); border-top-color: var(--yellow);
-    animation: chart-spin .8s linear infinite;
-  }
-  @keyframes chart-spin { to { transform: rotate(360deg); } }
   #indicator-toggles {
     display: flex; flex-wrap: wrap; gap: 10px;
     margin-bottom: 8px; font-size: 11px; color: var(--muted);
@@ -753,17 +753,31 @@ document.querySelectorAll('#score-tabs .tab-btn').forEach(btn => {
   });
 });
 
-// Grafik alaninin uzerine binen durum katmani: yukleniyor spinner'i veya
-// veri gelmedi/hata mesaji. mode: 'loading' | 'error' | 'hidden'.
+// Grafik alaninin uzerine binen durum katmani: sadece veri gelmedi/hata
+// mesaji icin kullanilir. mode: 'error' | 'hidden'.
 function setChartStatus(mode, message) {
   const el = document.getElementById('chart-status');
   if (mode === 'hidden') { el.hidden = true; return; }
   el.hidden = false;
-  el.classList.toggle('error', mode === 'error');
-  el.innerHTML = mode === 'loading'
-    ? '<div class="chart-spinner"></div><div>Grafik yukleniyor...</div>'
-    : `<div>${message}</div>`;
+  el.classList.add('error');
+  el.innerHTML = `<div>${message}</div>`;
 }
+
+// fetch()'in varsayilan davranisinda ZAMAN ASIMI YOK - Yahoo Finance yavas
+// yanit verirse (bu projede sikca yasandigi gibi) istek sonsuza kadar
+// bekleyip hic sonuclanmayabilir. AbortController ile sabit bir sure sonra
+// istek iptal edilip hata durumuna dusuluyor.
+function fetchWithTimeout(url, ms = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+// Hizli art arda farkli hisselere tiklandiginda, gec gelen ESKI bir cevabin
+// az once secilen YENI hisseyi ezmesini onlemek icin her selectTicker
+// cagrisina artan bir kimlik verilir - sonuc uygulanmadan once hala "guncel
+// secim" olup olmadigi kontrol edilir.
+let chartRequestId = 0;
 
 async function selectTicker(ticker) {
   selectedTicker = ticker;
@@ -779,20 +793,35 @@ async function selectTicker(ticker) {
   // hisse secildiginde (checkbox'a dokunulmadan) hazir olmali.
   ensureMacdChart();
   ensureRsiChart();
-  setChartStatus('loading');
+
+  const myRequestId = ++chartRequestId;
+  // Onceki hissenin grafigi/indikatorleri hemen temizlenir, yeni veri gelene
+  // kadar eski hissenin mumlari arkada asili kalmaz.
+  candleSeries.setData([]);
+  ema9Series.setData([]); ema21Series.setData([]);
+  bbUpperSeries.setData([]); bbMidSeries.setData([]); bbLowerSeries.setData([]);
+  if (macdHistSeries) { macdHistSeries.setData([]); macdLineSeries.setData([]); macdSignalSeries.setData([]); }
+  if (rsiSeries) rsiSeries.setData([]);
+  // Onceki secimden kalmis olabilecek hata mesaji varsa temizlenir - yukleme
+  // sirasinda herhangi bir gostergemiz yok, sadece hata olursa gorunur.
+  setChartStatus('hidden');
 
   try {
     const [histRes, scoreHistRes, indRes] = await Promise.all([
-      fetch(`/api/history/${ticker}`),
-      fetch(`/api/score-history/${ticker}`),
-      fetch(`/api/indicators/${ticker}`),
+      fetchWithTimeout(`/api/history/${ticker}`),
+      fetchWithTimeout(`/api/score-history/${ticker}`),
+      fetchWithTimeout(`/api/indicators/${ticker}`),
     ]);
     const candles = await histRes.json();
-    scoreHistoryRaw = await scoreHistRes.json();
-    indicatorData = await indRes.json();
+    const scoreHist = await scoreHistRes.json();
+    const indData = await indRes.json();
+
+    if (myRequestId !== chartRequestId) return; // bu arada baska bir hisse secildi, bu sonuc artik eski
+
+    scoreHistoryRaw = scoreHist;
+    indicatorData = indData;
 
     if (!Array.isArray(candles) || candles.length === 0) {
-      candleSeries.setData([]);
       setChartStatus('error', 'Bu hisse icin grafik verisi bulunamadi.');
     } else {
       candleSeries.setData(candles);
@@ -801,6 +830,7 @@ async function selectTicker(ticker) {
     applyIndicatorData();
     renderScoreHistory();
   } catch (e) {
+    if (myRequestId !== chartRequestId) return;
     setChartStatus('error', 'Grafik yuklenemedi. Tekrar deneyin.');
   }
 }
