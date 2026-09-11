@@ -7,12 +7,16 @@ sadece bu veriyi bir arka plan thread'inde REFRESH_SECONDS'ta bir tazeleyip
 basit bir JSON API + HTML sayfasi uzerinden sunuyoruz. Tarama mantigi
 degismedi, sadece terminal yerine tarayicida gosteriliyor.
 
-Calistirmak icin:
-    python3 web_usTop100.py
+Calistirmak icin (proje kok dizininden):
+    python3 diger-piyasalar/web_usTop100.py
 Sonra tarayicida: http://127.0.0.1:5001
 
 NOT: Port 5000 degil 5001 kullanilir - boylece web_bistTop100.py ile ayni
 makinede aynı anda calisabilirler, cakisma olmaz.
+
+NOT: Aktif gelistirme artik sadece BIST tarafinda (bkz. proje kok dizini) -
+bu dosya diger-piyasalar/ altinda, templates/ ve static/ paylasilan
+klasorleri bir ust dizinden (proje koku) kullanacak sekilde ayarlanmistir.
 
 Sayfa acikken tablo REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
@@ -30,7 +34,12 @@ import scanner_usTop100 as scanner
 import yfinance as yf
 from flask import Flask, jsonify, render_template
 
-app = Flask(__name__)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+app = Flask(
+    __name__,
+    template_folder=os.path.join(_PROJECT_ROOT, "templates"),
+    static_folder=os.path.join(_PROJECT_ROOT, "static"),
+)
 
 _state_lock = threading.Lock()
 _state = {

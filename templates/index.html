@@ -481,7 +481,7 @@ function renderTable() {
   document.getElementById('meta').textContent =
     `${countText} | guncelleme: ${lastUpdatedAt || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
   document.getElementById('warning').textContent =
-    lastMissingCount ? `Uyari: ${lastMissingCount} sabit liste hissesi icin veri alinamadi.` : '';
+    lastMissingCount ? `Uyari: ${lastMissingCount} hisse icin veri alinamadi, hedeflenen sayiya ulasilamadi.` : '';
 }
 
 document.getElementById('search-input').addEventListener('input', (e) => {

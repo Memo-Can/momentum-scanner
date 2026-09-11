@@ -72,22 +72,15 @@ def _cache_set(cache_key, value):
 
 
 def _scan_once():
-    """scanner_bistTop100.main() ile birebir ayni secim/siralama mantigi -
+    """terminal_bistTop100.main() ile birebir ayni secim/siralama mantigi -
     sadece render()/play_refresh_beep() yerine sonucu _state'e yazar."""
-    bist30_symbols = {t.removesuffix(".IS") for t in scanner.BIST30_TICKERS}
-    gainer_tickers = scanner.fetch_top_gainer_tickers(scanner.TOP_N + scanner.CANDIDATE_BUFFER)
-    candidate_tickers = list(dict.fromkeys(scanner.BIST30_TICKERS + gainer_tickers))
+    candidate_tickers = scanner.fetch_bist_tickers(scanner.TOP_N + scanner.CANDIDATE_BUFFER)
     rows_by_ticker, _still_missing = (
         scanner.fetch_with_retry(candidate_tickers) if candidate_tickers else ({}, [])
     )
 
-    bist30_rows = [r for r in rows_by_ticker.values() if r["ticker"] in bist30_symbols]
-    other_rows = [r for r in rows_by_ticker.values() if r["ticker"] not in bist30_symbols]
-    other_rows_sorted = sorted(other_rows, key=lambda r: r["daily"], reverse=True)
-
-    extra_slots = max(0, scanner.TOP_N - len(bist30_rows))
-    top_rows = bist30_rows + other_rows_sorted[:extra_slots]
-    missing_count = max(0, len(scanner.BIST30_TICKERS) - len(bist30_rows))
+    top_rows = sorted(rows_by_ticker.values(), key=lambda r: r["daily"], reverse=True)[: scanner.TOP_N]
+    missing_count = max(0, scanner.TOP_N - len(top_rows))
 
     def _sort_key(row):
         daily = row["daily"]
