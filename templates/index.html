@@ -45,6 +45,18 @@
   .app-logo { width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0; }
   header .meta { color: var(--muted); font-size: 12px; }
   .warning { color: var(--yellow); font-size: 12px; margin-top: 4px; }
+  #header-controls { display: flex; align-items: center; gap: 10px; }
+  #notify-toggle {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #notify-toggle:hover { color: var(--text); }
+  #notify-toggle.active { border-color: var(--green); color: var(--green); }
   #search-wrap { position: relative; }
   #search-input {
     width: 220px;
@@ -207,6 +219,7 @@
     header { padding: 10px 14px; }
     header h1 { font-size: 16px; }
     header .meta, .warning { font-size: 11px; }
+    #header-controls { width: 100%; }
     #search-wrap { width: 100%; }
     #search-input { width: 100%; }
     .layout {
@@ -249,9 +262,12 @@
       <div class="warning" id="warning"></div>
     </div>
   </div>
-  <div id="search-wrap">
-    <input type="text" id="search-input" placeholder="Hisse veya sektor ara..." autocomplete="off">
-    <span id="search-clear">&times;</span>
+  <div id="header-controls">
+    <button id="notify-toggle" type="button" title="Guclu Al/Sat sinyallerinde bildirim ve ses">Bildirimler: Kapali</button>
+    <div id="search-wrap">
+      <input type="text" id="search-input" placeholder="Hisse veya sektor ara..." autocomplete="off">
+      <span id="search-clear">&times;</span>
+    </div>
   </div>
 </header>
 
@@ -329,6 +345,78 @@
 const REFRESH_SECONDS = {{ refresh_seconds }};
 const SCORE_SYMBOLS = {GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼", GUCLU_SAT: "▼▼"};
 const SIGNAL_SYMBOLS = {AL: "▲", SAT: "▼", NOTR: "–"};
+
+// Guclu Al/Sat sinyal bildirimleri: hisse skoru GUCLU_AL/GUCLU_SAT'a
+// GECTIGINDE (onceki taramaya gore farkliysa) bir kez bildirim+ses tetiklenir -
+// backend'deki log_signal_changes()'in "sadece durum degistiginde kaydet"
+// mantiginin istemci tarafindaki karsiligi. lastKnownScores sayfa acikken
+// bellekte tutulur (sayfa yenilenince sifirlanir); bu yuzden ilk yuklemede
+// zaten GUCLU_AL/SAT olan hisseler icin spam bildirim atilmaz (asagida
+// notifyBootstrapped ile).
+const AL_SOUND = "{{ url_for('static', filename='al_beep.wav') }}";
+const SAT_SOUND = "{{ url_for('static', filename='sat_beep.wav') }}";
+let notifyEnabled = false;
+try { notifyEnabled = localStorage.getItem('notifyEnabled') === '1' && Notification.permission === 'granted'; } catch (e) {}
+let notifyBootstrapped = false;
+const lastKnownScores = new Map(); // ticker -> son bilinen skor
+
+function updateNotifyButton() {
+  const btn = document.getElementById('notify-toggle');
+  btn.textContent = notifyEnabled ? 'Bildirimler: Acik' : 'Bildirimler: Kapali';
+  btn.classList.toggle('active', notifyEnabled);
+}
+
+function playSignalSound(score) {
+  try {
+    new Audio(score === 'GUCLU_SAT' ? SAT_SOUND : AL_SOUND).play().catch(() => {});
+  } catch (e) {}
+}
+
+function fireSignalNotification(row) {
+  playSignalSound(row.score);
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const label = row.score === 'GUCLU_SAT' ? 'GUCLU SAT' : 'GUCLU AL';
+  try {
+    new Notification(`${row.ticker} -> ${label}`, {
+      body: `${row.price != null ? row.price.toFixed(2) : '-'} TL (${row.daily != null ? (row.daily >= 0 ? '+' : '') + row.daily.toFixed(2) : '-'}%)`,
+      icon: "{{ url_for('static', filename='favicon.png') }}",
+      tag: `signal-${row.ticker}`,
+    });
+  } catch (e) {}
+}
+
+function checkSignalTransitions(rows) {
+  if (!notifyBootstrapped) {
+    // Ilk yukleme: mevcut durumu sessizce kaydet, bildirim atma - aksi halde
+    // sayfa her acildiginda o an GUCLU_AL/SAT olan tum hisseler icin spam olur.
+    rows.forEach(r => lastKnownScores.set(r.ticker, r.score));
+    notifyBootstrapped = true;
+    return;
+  }
+  rows.forEach(row => {
+    const prev = lastKnownScores.get(row.ticker);
+    const isNewStrongSignal =
+      (row.score === 'GUCLU_AL' || row.score === 'GUCLU_SAT') && prev !== row.score;
+    lastKnownScores.set(row.ticker, row.score);
+    if (isNewStrongSignal && notifyEnabled) fireSignalNotification(row);
+  });
+}
+
+document.getElementById('notify-toggle').addEventListener('click', () => {
+  if (notifyEnabled) {
+    notifyEnabled = false;
+    try { localStorage.setItem('notifyEnabled', '0'); } catch (e) {}
+    updateNotifyButton();
+    return;
+  }
+  if (typeof Notification === 'undefined') return;
+  Notification.requestPermission().then(perm => {
+    notifyEnabled = perm === 'granted';
+    try { localStorage.setItem('notifyEnabled', notifyEnabled ? '1' : '0'); } catch (e) {}
+    updateNotifyButton();
+  });
+});
+updateNotifyButton();
 // Sembolik sutunlarin sayisal karsiligi - sirala derken "en guclu" once/sonra
 // gelsin diye. Skor icin cift ok, sinyal icin tek ok daha "guclu" sayilir.
 const SCORE_RANK = {GUCLU_AL: 2, AL: 1, NOTR: 0, SAT: -1, GUCLU_SAT: -2};
@@ -520,6 +608,7 @@ async function refreshRows() {
     latestRows = data.rows || [];
     lastUpdatedAt = data.updated_at || null;
     lastMissingCount = data.missing_count || 0;
+    checkSignalTransitions(latestRows);
     renderTable();
   } catch (e) {
     document.getElementById('meta').textContent = 'Veri alinamadi, tekrar denenecek...';
@@ -797,6 +886,10 @@ async function selectTicker(ticker) {
       setChartStatus('error', 'Bu hisse icin grafik verisi bulunamadi.');
     } else {
       candleSeries.setData(candles);
+      // Onceki hissede yapilmis olabilecek zoom/pan yeni hisseye tasinmasin -
+      // her hisse secildiginde grafik varsayilan (tum veriyi gosteren) goruntuye
+      // doner. Checkbox secimleri (EMA/BB/MACD/RSI acik/kapali) bundan etkilenmez.
+      chart.timeScale().fitContent();
       setChartStatus('hidden');
     }
     applyIndicatorData();
