@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""BIST is katmani (sunum icermez). BIST genelinde tum piyasayi (Yahoo
-Finance taramasi, region=tr, filtresiz) gunluk yuzde degisime gore siralayip
-ilk TOP_N=100 hisseyi secer; her hisse icin EMA/MACD/RSI/Bollinger/ADX/ATR
-indikatorlerini hesaplayip tek bir Skor'a (-6..+6, GUCLU_AL..GUCLU_SAT)
-birlestirir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
+"""BIST is katmani (sunum icermez). Web/terminal arayuzlerinin BIST 30 / BIST
+100 / BIST 300 sekmelerini besleyen TEK BIRLESIK havuzu hesaplar:
+  - BIST 30 / BIST 100: resmi endeks uyeligi (sabit liste - BIST30_TICKERS/
+    BIST100_TICKERS). BIST30, BIST100'un bir alt kumesi oldugu icin
+    BIST100'u taramak otomatik olarak BIST30'u da kapsar.
+  - BIST 300: gunluk % degisime gore (yuksekten dusuge) dinamik ilk 300
+    hisse (fetch_top_gainers) - resmi bir endeks degil.
+Havuz = BIST100_TICKERS UNION fetch_top_gainers(TOP300_SIZE) (cakisanlar
+TEKRAR CEKILMEZ) - boylece TUM piyasayi (~600+ hisse) taramak yerine en
+fazla ~100+300=400 farklı hisse cekilir, Yahoo'nun resmi olmayan API'sinin
+rate-limit riskini azaltir. Her hisse icin EMA/MACD/RSI/Bollinger/ADX/ATR
+indikatorleri hesaplanip tek bir Skor'a (-6..+6, GUCLU_AL..GUCLU_SAT)
+birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
 (terminal arayuzu) ve web_bistTop100.py (web arayuzu) bu modulu
 `import scanner_bistTop100 as scanner` ile kullanip kendi sunumlarini yapar.
 
@@ -42,9 +50,41 @@ except ImportError:
     firebase_admin = None
 
 REFRESH_SECONDS = 300  # 5 dakika
-TOP_N = 100
-CANDIDATE_BUFFER = 30  # eksik hisse kalmamasi icin ihtiyactan fazla aday cekilir
 MAX_RETRIES = 2
+TOP300_SIZE = 300  # BIST 300 sekmesi: gunluk % degisime gore ilk N (dinamik, endeks degil)
+
+# Resmi BIST 30 Endeksi'nin (XU030) sabit uye listesi - 2026-09 itibariyla
+# dogrulanmis (Midas + Yahoo region=tr evreniyle capraz kontrol edildi).
+# BIST30, BIST100_TICKERS'in bir ALT KUMESIDIR (dogrulandi) - bu yuzden
+# BIST100 taramasi otomatik olarak BIST30'u da kapsar, ayri bir istek
+# gerekmez.
+BIST30_TICKERS = [
+    "AEFES", "AKBNK", "ASELS", "ASTOR", "BIMAS", "DSTKF", "EKGYO", "ENKAI",
+    "EREGL", "FROTO", "GARAN", "GUBRF", "ISCTR", "KCHOL", "KRDMD", "MGROS",
+    "PETKM", "PGSUS", "SAHOL", "SASA", "SISE", "TAVHL", "TCELL", "THYAO",
+    "TOASO", "TRALT", "TTKOM", "TUPRS", "VAKBN", "YKBNK",
+]
+BIST30_TICKERS = [f"{t}.IS" for t in BIST30_TICKERS]
+
+# Resmi BIST 100 Endeksi'nin (XU100) sabit uye listesi - 2026-09 itibariyla
+# dogrulanmis (Midas + Yahoo region=tr evreniyle capraz kontrol edildi);
+# endeks ceyreklik yeniden dengelendigi icin zamanla guncellenmesi gerekebilir.
+BIST100_TICKERS = [
+    "AEFES", "AKBNK", "AKSA", "AKSEN", "ALARK", "ALTNY", "ANSGR", "ARCLK",
+    "ASELS", "ASTOR", "BALSU", "BERA", "BIMAS", "BRSAN", "BRYAT", "BSOKE",
+    "BTCIM", "CANTE", "CCOLA", "CIMSA", "CVKMD", "CWENE", "DAPGM", "DOAS",
+    "DOHOL", "DSTKF", "ECILC", "EFOR", "EKGYO", "ENERY", "ENJSA", "ENKAI",
+    "EREGL", "ESEN", "EUPWR", "EUREN", "FENER", "FROTO", "GARAN", "GENIL",
+    "GESAN", "GLRMK", "GRSEL", "GRTHO", "GSRAY", "GUBRF", "HALKB", "HEKTS",
+    "IEYHO", "ISCTR", "ISMEN", "IZENR", "KCHOL", "KLRHO", "KRDMD", "KTLEV",
+    "KUYAS", "MAGEN", "MAVI", "MGROS", "MIATK", "MPARK", "OBAMS", "ODAS",
+    "ODINE", "OTKAR", "OYAKC", "PAHOL", "PASEU", "PATEK", "PETKM", "PGSUS",
+    "PSGYO", "QUAGR", "RALYH", "REEDR", "SAHOL", "SARKY", "SASA", "SISE",
+    "SKBNK", "SOKM", "TAVHL", "TCELL", "THYAO", "TKFEN", "TOASO", "TRALT",
+    "TRENJ", "TRMET", "TSKB", "TTKOM", "TUKAS", "TUPRS", "TURSG", "ULKER",
+    "VAKBN", "VESTL", "YKBNK", "ZOREN",
+]
+BIST100_TICKERS = [f"{t}.IS" for t in BIST100_TICKERS]
 
 # GUCLU_AL/GUCLU_SAT sinyallerinin gecmisini kaydeder - zamanla bu kayitlara
 # bakip Skor'un gercekte ise yarayip yaramadigini (sinyalden sonra fiyat ne
@@ -52,6 +92,12 @@ MAX_RETRIES = 2
 # yazilir (her dongude tekrar tekrar degil), boylece dosya sismez.
 SIGNAL_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_log_bist.csv")
 SCORE_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score_history_bist.csv")
+# backfill_daily_bist.py'nin ürettigi GECMISE DONUK gunluk skor dosyasi -
+# canli SCORE_HISTORY_PATH'in kapsamadigi (scanner'in henuz calismadigi)
+# eski tarihleri doldurmak icin web_bistTop100.py'de canli veriyle birlestirilir.
+SCORE_HISTORY_BACKFILL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "score_history_bist_backfill.csv"
+)
 DEVICE_TOKENS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_tokens_bist.json")
 SIGNAL_LOG_FIELDS = ["timestamp", "ticker", "score", "price", "daily_pct", "rsi", "adx", "rel_strength"]
 SCORE_HISTORY_FIELDS = ["timestamp", "ticker", "score_raw", "score", "price"]
@@ -264,13 +310,10 @@ def bollinger_bands_series(closes, period: int = BB_PERIOD, num_std: float = BB_
     return upper, sma, lower
 
 
-def adx(hist, period: int = ADX_PERIOD) -> float:
-    """Wilder ADX(14) degerini dondurur (0-100). ADX yonu degil trendin
-    GUCUNU olcer: <20 zayif/yatay piyasa (sinyaller gurultulu olabilir),
-    >=25 gercek/guclu trend sayilir. Skor'un GUCLU AL/SAT etiketini
-    onaylamak icin guven filtresi olarak kullanilir."""
-    if hist is None or len(hist) < period * 2:
-        return float("nan")
+def adx_series(hist, period: int = ADX_PERIOD):
+    """adx()'in TAM zaman serisi hali - gecmise donuk (backfill) her gun
+    icin ADX degerini hesaplamak amaciyla. Ayni Wilder formulu, sadece son
+    deger yerine tum seri doner."""
     high = hist["High"]
     low = hist["Low"]
     close = hist["Close"]
@@ -290,7 +333,17 @@ def adx(hist, period: int = ADX_PERIOD) -> float:
     minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / smoothed_tr
 
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    adx_val = dx.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
+    return dx.ewm(alpha=1 / period, adjust=False).mean()
+
+
+def adx(hist, period: int = ADX_PERIOD) -> float:
+    """Wilder ADX(14) degerini dondurur (0-100). ADX yonu degil trendin
+    GUCUNU olcer: <20 zayif/yatay piyasa (sinyaller gurultulu olabilir),
+    >=25 gercek/guclu trend sayilir. Skor'un GUCLU AL/SAT etiketini
+    onaylamak icin guven filtresi olarak kullanilir."""
+    if hist is None or len(hist) < period * 2:
+        return float("nan")
+    adx_val = adx_series(hist, period).iloc[-1]
     return float(adx_val) if adx_val == adx_val else float("nan")
 
 
@@ -412,19 +465,62 @@ def confluence_label(
 
 
 def build_bist_query():
-    # Yahoo'nun BIST (Borsa Istanbul) icin tum piyasayi tarayan sorgusu.
-    # region="tr" tum BIST hisselerini kapsar, herhangi bir esik/filtre yoktur.
+    """Yahoo'nun BIST (Borsa Istanbul) icin TUM piyasayi tarayan sorgusu -
+    region="tr" butun BIST hisselerini kapsar, endeks uyeligi ayrimi/esik
+    yoktur."""
     return yf.EquityQuery("eq", ["region", "tr"])
 
 
-def fetch_bist_tickers(top_n: int):
+SCREEN_PAGE_SIZE = 250  # Yahoo'nun yf.screen() tek istekte donduregi maksimum sonuc sayisi
+
+
+def fetch_all_bist_tickers():
+    """Yahoo'nun region=tr taramasindaki TUM hisseleri sayfalama ile (tek
+    istek max SCREEN_PAGE_SIZE donduruyor) toplar - hem canli tarama
+    (terminal_bistTop100.py/web_bistTop100.py) hem de backfill_daily_bist.py
+    tarafindan kullanilir."""
+    query = build_bist_query()
+    symbols = []
+    offset = 0
     try:
-        query = build_bist_query()
-        result = yf.screen(query, sortField="percentchange", sortAsc=False, size=top_n)
-        quotes = result.get("quotes", [])
-        return [q["symbol"] for q in quotes if q.get("symbol")][:top_n]
+        while True:
+            result = yf.screen(query, sortField="percentchange", sortAsc=False, size=SCREEN_PAGE_SIZE, offset=offset)
+            quotes = result.get("quotes", [])
+            if not quotes:
+                break
+            symbols.extend(q["symbol"] for q in quotes if q.get("symbol"))
+            offset += len(quotes)
+            if offset >= result.get("total", 0):
+                break
     except Exception:
-        return []
+        pass
+    return symbols
+
+
+def fetch_top_gainers(n: int):
+    """Yahoo'nun region=tr taramasindan gunluk % degisime gore (yuksekten
+    dusuge) ilk n hisseyi sayfalayarak dondurur - BIST 300 sekmesi icin.
+    fetch_all_bist_tickers()'in aksine TUM piyasayi degil, sadece istenen
+    kadarini ceker (n=300 icin 2 sayfa yeter, 628 degil) - hem daha az Yahoo
+    istegi hem de sonuc zaten gunluk % sirali geldigi icin ekstra siralama
+    gerekmez."""
+    query = build_bist_query()
+    symbols = []
+    offset = 0
+    try:
+        while len(symbols) < n:
+            page_size = min(SCREEN_PAGE_SIZE, n - len(symbols))
+            result = yf.screen(query, sortField="percentchange", sortAsc=False, size=page_size, offset=offset)
+            quotes = result.get("quotes", [])
+            if not quotes:
+                break
+            symbols.extend(q["symbol"] for q in quotes if q.get("symbol"))
+            offset += len(quotes)
+            if offset >= result.get("total", 0):
+                break
+    except Exception:
+        pass
+    return symbols[:n]
 
 
 def fetch_row(ticker: str):

@@ -149,7 +149,8 @@ def render(rows, missing_count: int = 0):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"BIST 100 - Getiri Tablosu ({len(rows)} hisse)   (guncelleme: {now})")
     print(
-        f"Kaynak: Yahoo taramasi (region=tr, filtresiz) - gunluk % degisime gore ilk {scanner.TOP_N}   |  "
+        f"Kaynak: Resmi BIST 100 Endeksi'nin (XU100) {len(scanner.BIST100_TICKERS)} sabit uyesi "
+        f"(web arayuzunde ayrica BIST 30/BIST 300 sekmeleri de var)   |  "
         f"Siralama: Once Skor gucu (GUCLU AL->AL->NOTR->SAT->GUCLU SAT), ayni grup icinde gunluk % (yuksekten dusuge)"
     )
     print(
@@ -158,7 +159,8 @@ def render(rows, missing_count: int = 0):
         f"BB({scanner.BB_PERIOD},{scanner.BB_STD}sigma)   |  her {scanner.REFRESH_SECONDS} sn'de bir yenilenir"
     )
     if missing_count:
-        print(f"Uyari: Hedeflenen {scanner.TOP_N} hisseden {missing_count} tanesi icin veri alinamadi.")
+        total_attempted = len(rows) + missing_count
+        print(f"Uyari: Taranan {total_attempted} hisseden {missing_count} tanesi icin veri alinamadi.")
     print()
 
     header = (
@@ -198,20 +200,31 @@ def render(rows, missing_count: int = 0):
 
 
 def main():
+    """Web arayuzundeki BIST 30/100/300 sekmelerinin ayni ortak havuzunu
+    kullanir (bkz. scanner_bistTop100.py modul aciklamasi) - sinyal/skor
+    gecmisi loglari boylece web ile tutarli kalir. Terminalde sekme olmadigi
+    icin varsayilan gorunum olarak sadece BIST 100 gosterilir."""
+    bist100_symbols = {t.removesuffix(".IS") for t in scanner.BIST100_TICKERS}
     while True:
-        candidate_tickers = scanner.fetch_bist_tickers(scanner.TOP_N + scanner.CANDIDATE_BUFFER)
-        rows_by_ticker, _still_missing = (
-            scanner.fetch_with_retry(candidate_tickers) if candidate_tickers else ({}, [])
-        )
+        top_gainers = scanner.fetch_top_gainers(scanner.TOP300_SIZE)
+        all_tickers = list(dict.fromkeys(scanner.BIST100_TICKERS + top_gainers))
+        rows_by_ticker, _still_missing = scanner.fetch_with_retry(all_tickers) if all_tickers else ({}, [])
 
-        top_rows = sorted(rows_by_ticker.values(), key=lambda r: r["daily"], reverse=True)[: scanner.TOP_N]
-        missing_count = max(0, scanner.TOP_N - len(top_rows))
+        def _daily_sort_key(row):
+            daily = row["daily"]
+            return -daily if daily == daily else float("inf")
 
-        if top_rows:
-            render(top_rows, missing_count=missing_count)
+        all_rows = sorted(rows_by_ticker.values(), key=_daily_sort_key)
+        if all_rows:
+            scanner.log_signal_changes(all_rows)
+            scanner.log_score_history(all_rows)
+
+        display_rows = [r for r in all_rows if r["ticker"] in bist100_symbols]
+        missing_count = max(0, len(scanner.BIST100_TICKERS) - len(display_rows))
+
+        if display_rows:
+            render(display_rows, missing_count=missing_count)
             play_refresh_beep()
-            scanner.log_signal_changes(top_rows)
-            scanner.log_score_history(top_rows)
         else:
             print("Veri cekilemedi, tekrar denenecek...")
         try:

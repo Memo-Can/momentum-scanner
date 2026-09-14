@@ -13,7 +13,7 @@ Sonra tarayicida: http://127.0.0.1:5000
 
 Sayfa acikken tablo REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
-sag panelde 3 aylik mum grafigi + istege bagli indikator katmanlari
+sag panelde 6 aylik mum grafigi + istege bagli indikator katmanlari
 (EMA/Bollinger/MACD/RSI) + Skor Gecmisi (gunluk/saatlik/5 dakikalik) gosterilir.
 """
 
@@ -21,7 +21,7 @@ import csv
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import scanner_bistTop100 as scanner
 import yfinance as yf
@@ -72,29 +72,36 @@ def _cache_set(cache_key, value):
 
 
 def _scan_once():
-    """terminal_bistTop100.main() ile birebir ayni secim/siralama mantigi -
-    sadece render()/play_refresh_beep() yerine sonucu _state'e yazar."""
-    candidate_tickers = scanner.fetch_bist_tickers(scanner.TOP_N + scanner.CANDIDATE_BUFFER)
-    rows_by_ticker, _still_missing = (
-        scanner.fetch_with_retry(candidate_tickers) if candidate_tickers else ({}, [])
-    )
+    """BIST 30/100/300 sekmelerinin ortak veri havuzunu hazirlar - bkz.
+    scanner_bistTop100.py modul aciklamasi: BIST100 (BIST30'u da kapsar) +
+    gunluk % degisime gore ilk TOP300_SIZE hisse, cakisanlar tekrar
+    cekilmez. Her satir bist30/bist100 uyelik bayraklariyla etiketlenir -
+    BIST 300 sekmesi ayrica bir bayrak gerektirmez, tum havuz zaten odur."""
+    bist30_symbols = {t.removesuffix(".IS") for t in scanner.BIST30_TICKERS}
+    bist100_symbols = {t.removesuffix(".IS") for t in scanner.BIST100_TICKERS}
 
-    top_rows = sorted(rows_by_ticker.values(), key=lambda r: r["daily"], reverse=True)[: scanner.TOP_N]
-    missing_count = max(0, scanner.TOP_N - len(top_rows))
+    top_gainers = scanner.fetch_top_gainers(scanner.TOP300_SIZE)
+    all_tickers = list(dict.fromkeys(scanner.BIST100_TICKERS + top_gainers))
+
+    rows_by_ticker, _still_missing = scanner.fetch_with_retry(all_tickers) if all_tickers else ({}, [])
+    missing_count = max(0, len(all_tickers) - len(rows_by_ticker))
 
     def _sort_key(row):
         daily = row["daily"]
         daily_sort = -daily if daily == daily else float("inf")
         return (scanner.SCORE_ORDER.get(row["score"], 2), daily_sort)
 
-    rows_sorted = sorted(top_rows, key=_sort_key)
+    top_rows = sorted(rows_by_ticker.values(), key=_sort_key)
+    for row in top_rows:
+        row["bist30"] = row["ticker"] in bist30_symbols
+        row["bist100"] = row["ticker"] in bist100_symbols
 
     if top_rows:
         scanner.log_signal_changes(top_rows)
         scanner.log_score_history(top_rows)
 
     with _state_lock:
-        _state["rows"] = [_row_to_json(r) for r in rows_sorted]
+        _state["rows"] = [_row_to_json(r) for r in top_rows]
         _state["missing_count"] = missing_count
         _state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -125,7 +132,7 @@ def api_rows():
 
 @app.route("/api/history/<ticker>")
 def api_history(ticker: str):
-    """Verilen (soneksiz) ticker icin 3 aylik gunluk mum verisini dondurur.
+    """Verilen (soneksiz) ticker icin 6 aylik gunluk mum verisini dondurur.
     orn. /api/history/AKBNK -> AKBNK.IS icin OHLC."""
     cache_key = ("history", ticker)
     cached = _cache_get(cache_key)
@@ -134,7 +141,7 @@ def api_history(ticker: str):
 
     yahoo_ticker = f"{ticker}.IS"
     try:
-        hist = yf.Ticker(yahoo_ticker).history(period="3mo", interval="1d", auto_adjust=False)
+        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
@@ -152,30 +159,69 @@ def api_history(ticker: str):
     return jsonify(_cache_set(cache_key, candles))
 
 
+SCORE_HISTORY_WINDOW_DAYS = 365  # Skor Gecmisi her zaman bugunden geriye bu kadar gun gosterir
+
+
 @app.route("/api/score-history/<ticker>")
 def api_score_history(ticker: str):
-    """Verilen ticker icin score_history_bist.csv'deki HER dongudeki (5 dk)
-    ham skor kaydini dondurur. Gunluk/saatlik ortalama ve 5 dakikalik ham
-    veri sekmeleri bu tek listeden istemci tarafinda hesaplanir."""
+    """Verilen ticker icin skor gecmisini dondurur: once (varsa)
+    score_history_bist_backfill.csv'deki GUNLUK backfill kayitlari (canli
+    logun BASLAMADIGI eski tarihler icin, source:"backfill" ile isaretli),
+    sonra score_history_bist.csv'deki HER dongudeki (5 dk) ham canli kayit.
+    Gunluk sekmesi ikisini birlikte kullanir; Saatlik/5-Dakikalik sekmeleri
+    sadece canli (gercek gun-ici granulariteli) kayitlari kullanir - bkz.
+    templates/index.html renderScoreHistory().
+
+    Her iki kaynak da SCORE_HISTORY_WINDOW_DAYS'ten (365) eski satirlari
+    ATLAR - boylece "Skor Gecmisi" her istekte bugune gore yeniden hesaplanip
+    HER ZAMAN tam olarak son 1 yili gosterir, backfill dosyasi tekrar
+    calistirilmasa bile (canli log zaten surekli buyuyerek yeni ucu
+    doldurur, bu filtre sadece eski ucu bugune gore kirpar)."""
     cache_key = ("score-history", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
         return jsonify(cached)
 
-    if not os.path.isfile(scanner.SCORE_HISTORY_PATH):
-        return jsonify(_cache_set(cache_key, []))
-    events = []
-    with open(scanner.SCORE_HISTORY_PATH, "r", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if row.get("ticker") == ticker:
-                events.append(
+    cutoff_date = (datetime.now() - timedelta(days=SCORE_HISTORY_WINDOW_DAYS)).strftime("%Y-%m-%d")
+
+    live_events = []
+    if os.path.isfile(scanner.SCORE_HISTORY_PATH):
+        with open(scanner.SCORE_HISTORY_PATH, "r", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("ticker") == ticker and row["timestamp"][:10] >= cutoff_date:
+                    live_events.append(
+                        {
+                            "time": row["timestamp"],
+                            "score_raw": float(row["score_raw"]),
+                            "score": row["score"],
+                            "price": row["price"],
+                        }
+                    )
+
+    backfill_events = []
+    if os.path.isfile(scanner.SCORE_HISTORY_BACKFILL_PATH):
+        # Canli log hangi tarihten itibaren basliyorsa, backfill sadece ONDAN
+        # ONCEKI gunleri doldurur - ayni gun icin iki kaynak cakismasin diye.
+        live_start_date = min((e["time"][:10] for e in live_events), default=None)
+        with open(scanner.SCORE_HISTORY_BACKFILL_PATH, "r", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("ticker") != ticker:
+                    continue
+                if row["date"] < cutoff_date:
+                    continue
+                if live_start_date and row["date"] >= live_start_date:
+                    continue
+                backfill_events.append(
                     {
-                        "time": row["timestamp"],
+                        "time": f"{row['date']} 00:00:00",
                         "score_raw": float(row["score_raw"]),
                         "score": row["score"],
                         "price": row["price"],
+                        "source": "backfill",
                     }
                 )
+
+    events = backfill_events + live_events
     return jsonify(_cache_set(cache_key, events))
 
 
@@ -183,9 +229,10 @@ def api_score_history(ticker: str):
 def api_indicators(ticker: str):
     """Verilen (soneksiz) ticker icin EMA9/21, MACD, RSI ve Bollinger
     Bantlarinin TAM zaman serisini dondurur - grafikte istege bagli
-    acilir/kapanir indikator katmanlari icin. Skorlamayla (fetch_row) ayni
-    6 aylik isinma penceresi uzerinden hesaplanir (tutarlilik icin), ama
-    yanit gorunen mum araligiyla (son ~3 ay) hizali kalsin diye kirpilir."""
+    acilir/kapanir indikator katmanlari icin. 1 yillik veri cekilir (gorunen
+    son ~6 aylik araligin TAMAMINDA indikatorlerin saglikli yakinsamis olmasi
+    icin ~6 aylik ekstra isinma payi birakilir), yanit son ~6 aya kirpilir -
+    bkz. api_history() (mum grafigi de ayni 6 aylik araligi gosterir)."""
     cache_key = ("indicators", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -193,7 +240,7 @@ def api_indicators(ticker: str):
 
     yahoo_ticker = f"{ticker}.IS"
     try:
-        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
+        hist = yf.Ticker(yahoo_ticker).history(period="1y", interval="1d", auto_adjust=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
@@ -207,7 +254,7 @@ def api_indicators(ticker: str):
     dates = [idx.strftime("%Y-%m-%d") for idx in hist.index]
 
     def _series(values):
-        trimmed = values.tail(65)
+        trimmed = values.tail(130)
         trimmed_dates = dates[-len(trimmed):]
         return [
             {"time": t, "value": None if v != v else float(v)}
