@@ -43,6 +43,17 @@ _state = {
 _market_lock = threading.Lock()
 _market_state = {"indicators": [], "updated_at": None}
 
+# Skor gecmisi index'i: /api/score-history her istekte CSV dosyasini (canli
+# dosya zamanla milyonlarca satira cikabiliyor - 3M+ satir, 100MB+) bastan
+# taramak YERINE, ticker->olay listesi seklinde bellekte tutulan bu
+# index'ten O(1) okur. Canli dosya uygulama baslarken BIR KEZ okunur;
+# sonrasinda her tarama dongusunde sadece o dongude eklenen yeni satirlar
+# index'e eklenir (dosya bir daha hic bastan okunmaz). Backfill dosyasi
+# sabit (hic degismiyor) oldugu icin de bir kez okunup kalici tutulur.
+_score_index_lock = threading.Lock()
+_live_score_index = {}      # ticker -> [{"time","score_raw","score","price"}, ...]
+_backfill_score_index = {}  # ticker -> [{"date","score_raw","score","price"}, ...]
+
 
 def _sanitize(value):
     """NaN, JSON'da gecerli bir deger degildir (JS'te JSON.parse patlar) -
@@ -78,6 +89,55 @@ def _cache_set(cache_key, value):
     return value
 
 
+def _build_live_score_index():
+    index = {}
+    if os.path.isfile(scanner.SCORE_HISTORY_PATH):
+        with open(scanner.SCORE_HISTORY_PATH, "r", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                t = row.get("ticker")
+                if not t:
+                    continue
+                index.setdefault(t, []).append(
+                    {
+                        "time": row["timestamp"],
+                        "score_raw": float(row["score_raw"]),
+                        "score": row["score"],
+                        "price": row["price"],
+                    }
+                )
+    return index
+
+
+def _build_backfill_score_index():
+    index = {}
+    if os.path.isfile(scanner.SCORE_HISTORY_BACKFILL_PATH):
+        with open(scanner.SCORE_HISTORY_BACKFILL_PATH, "r", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                t = row.get("ticker")
+                if not t:
+                    continue
+                index.setdefault(t, []).append(
+                    {
+                        "date": row["date"],
+                        "score_raw": float(row["score_raw"]),
+                        "score": row["score"],
+                        "price": row["price"],
+                    }
+                )
+    return index
+
+
+def _init_score_indexes():
+    """Uygulama baslarken BIR KEZ cagrilir - _scan_loop/_market_scan_loop
+    thread'leri baslamadan ONCE, ana thread'de SENKRON calisir. Boylece ilk
+    tarama dongusu her ihtimalde index tam hazirken basliyor (yoksa dongu,
+    index'i arka planda hala olusturuluyorken satir eklemeye calisirsa,
+    sonradan gelen 'dosyadan bastan olustur' adimi o satiri ezebilirdi)."""
+    with _score_index_lock:
+        _live_score_index.update(_build_live_score_index())
+        _backfill_score_index.update(_build_backfill_score_index())
+
+
 def _scan_once():
     """BIST 30/100/300 sekmelerinin ortak veri havuzunu hazirlar - bkz.
     scanner_bistTop100.py modul aciklamasi: BIST100 (BIST30'u da kapsar) +
@@ -106,6 +166,20 @@ def _scan_once():
     if top_rows:
         scanner.log_signal_changes(top_rows)
         scanner.log_score_history(top_rows)
+        # score_history_bist.csv'ye az once yazilan satirlarin AYNISI, dosyayi
+        # bir daha hic okumadan dogrudan bellek ici index'e eklenir - bkz.
+        # _init_score_indexes() ve api_score_history().
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with _score_index_lock:
+            for row in top_rows:
+                _live_score_index.setdefault(row["ticker"], []).append(
+                    {
+                        "time": now_str,
+                        "score_raw": row["score_raw"],
+                        "score": row["score"],
+                        "price": row["price"],
+                    }
+                )
 
     with _state_lock:
         _state["rows"] = [_row_to_json(r) for r in top_rows]
@@ -159,22 +233,54 @@ def api_market_indicators():
         return jsonify(dict(_market_state))
 
 
+# /api/history ve /api/indicators AYNI ticker icin ayri ayri Yahoo istegi
+# atmasin diye paylasilan HAM (DataFrame) onbellek - ikisi de 6 aylik veriyi
+# (indicators'in isinma penceresi, history'nin ihtiyacindan daha genis) TEK
+# bir Yahoo cagrisindan paylasir. Frontend ikisini neredeyse AYNI ANDA
+# (Promise.all) istedigi icin per-ticker kilit de var: ilk istek Yahoo'ya
+# gider, es zamanli ikinci istek kilidi bekleyip onbellekten okur - ikisi de
+# ayri ayri Yahoo'ya gitmesin diye.
+_raw_history_cache = {}  # ticker -> (fetched_at, DataFrame)
+_raw_history_locks = {}
+_raw_history_locks_guard = threading.Lock()
+RAW_HISTORY_CACHE_TTL = scanner.REFRESH_SECONDS - 5
+
+
+def _get_raw_history(ticker: str):
+    cached = _raw_history_cache.get(ticker)
+    if cached and time.time() - cached[0] < RAW_HISTORY_CACHE_TTL:
+        return cached[1]
+
+    with _raw_history_locks_guard:
+        lock = _raw_history_locks.setdefault(ticker, threading.Lock())
+
+    with lock:
+        cached = _raw_history_cache.get(ticker)
+        if cached and time.time() - cached[0] < RAW_HISTORY_CACHE_TTL:
+            return cached[1]
+        yahoo_ticker = f"{ticker}.IS"
+        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
+        _raw_history_cache[ticker] = (time.time(), hist)
+        return hist
+
+
 @app.route("/api/history/<ticker>")
 def api_history(ticker: str):
     """Verilen (soneksiz) ticker icin 3 aylik gunluk mum verisini dondurur.
-    orn. /api/history/AKBNK -> AKBNK.IS icin OHLC."""
+    orn. /api/history/AKBNK -> AKBNK.IS icin OHLC. Ham veri /api/indicators
+    ile paylasilir (bkz. _get_raw_history) - ayri bir Yahoo istegi yapmaz."""
     cache_key = ("history", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
         return jsonify(cached)
 
-    yahoo_ticker = f"{ticker}.IS"
     try:
-        hist = yf.Ticker(yahoo_ticker).history(period="3mo", interval="1d", auto_adjust=False)
+        hist = _get_raw_history(ticker)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
         return jsonify(_cache_set(cache_key, []))
+    recent = hist.tail(65)  # ~3 aylik islem gunu (6 aylik ham veriden son kismi)
     candles = [
         {
             "time": idx.strftime("%Y-%m-%d"),
@@ -183,7 +289,7 @@ def api_history(ticker: str):
             "low": float(row["Low"]),
             "close": float(row["Close"]),
         }
-        for idx, row in hist.iterrows()
+        for idx, row in recent.iterrows()
     ]
     return jsonify(_cache_set(cache_key, candles))
 
@@ -205,7 +311,12 @@ def api_score_history(ticker: str):
     ATLAR - boylece "Skor Gecmisi" her istekte bugune gore yeniden hesaplanip
     HER ZAMAN tam olarak son 1 yili gosterir, backfill dosyasi tekrar
     calistirilmasa bile (canli log zaten surekli buyuyerek yeni ucu
-    doldurur, bu filtre sadece eski ucu bugune gore kirpar)."""
+    doldurur, bu filtre sadece eski ucu bugune gore kirpar).
+
+    Veri dogrudan dosyadan DEGIL, bellek ici index'ten okunur (bkz.
+    _init_score_indexes/_live_score_index) - canli dosya milyonlarca satira
+    ciktiginda her tiklamada dosyayi bastan taramak grafigi saniyelerce
+    yavaslatiyordu."""
     cache_key = ("score-history", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -213,42 +324,30 @@ def api_score_history(ticker: str):
 
     cutoff_date = (datetime.now() - timedelta(days=SCORE_HISTORY_WINDOW_DAYS)).strftime("%Y-%m-%d")
 
-    live_events = []
-    if os.path.isfile(scanner.SCORE_HISTORY_PATH):
-        with open(scanner.SCORE_HISTORY_PATH, "r", newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                if row.get("ticker") == ticker and row["timestamp"][:10] >= cutoff_date:
-                    live_events.append(
-                        {
-                            "time": row["timestamp"],
-                            "score_raw": float(row["score_raw"]),
-                            "score": row["score"],
-                            "price": row["price"],
-                        }
-                    )
+    with _score_index_lock:
+        live_raw = list(_live_score_index.get(ticker, []))
+        backfill_raw = list(_backfill_score_index.get(ticker, []))
 
+    live_events = [e for e in live_raw if e["time"][:10] >= cutoff_date]
+
+    # Canli log hangi tarihten itibaren basliyorsa, backfill sadece ONDAN
+    # ONCEKI gunleri doldurur - ayni gun icin iki kaynak cakismasin diye.
+    live_start_date = min((e["time"][:10] for e in live_events), default=None)
     backfill_events = []
-    if os.path.isfile(scanner.SCORE_HISTORY_BACKFILL_PATH):
-        # Canli log hangi tarihten itibaren basliyorsa, backfill sadece ONDAN
-        # ONCEKI gunleri doldurur - ayni gun icin iki kaynak cakismasin diye.
-        live_start_date = min((e["time"][:10] for e in live_events), default=None)
-        with open(scanner.SCORE_HISTORY_BACKFILL_PATH, "r", newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                if row.get("ticker") != ticker:
-                    continue
-                if row["date"] < cutoff_date:
-                    continue
-                if live_start_date and row["date"] >= live_start_date:
-                    continue
-                backfill_events.append(
-                    {
-                        "time": f"{row['date']} 00:00:00",
-                        "score_raw": float(row["score_raw"]),
-                        "score": row["score"],
-                        "price": row["price"],
-                        "source": "backfill",
-                    }
-                )
+    for row in backfill_raw:
+        if row["date"] < cutoff_date:
+            continue
+        if live_start_date and row["date"] >= live_start_date:
+            continue
+        backfill_events.append(
+            {
+                "time": f"{row['date']} 00:00:00",
+                "score_raw": row["score_raw"],
+                "score": row["score"],
+                "price": row["price"],
+                "source": "backfill",
+            }
+        )
 
     events = backfill_events + live_events
     return jsonify(_cache_set(cache_key, events))
@@ -261,15 +360,16 @@ def api_indicators(ticker: str):
     acilir/kapanir indikator katmanlari icin. 6 aylik veri cekilir (gorunen
     son ~3 aylik araligin TAMAMINDA indikatorlerin saglikli yakinsamis olmasi
     icin ~3 aylik ekstra isinma payi birakilir), yanit son ~3 aya kirpilir -
-    bkz. api_history() (mum grafigi de ayni 3 aylik araligi gosterir)."""
+    bkz. api_history() (mum grafigi de ayni 3 aylik araligi gosterir). Ham
+    veri /api/history ile paylasilir (bkz. _get_raw_history) - ayri bir
+    Yahoo istegi yapmaz."""
     cache_key = ("indicators", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
         return jsonify(cached)
 
-    yahoo_ticker = f"{ticker}.IS"
     try:
-        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
+        hist = _get_raw_history(ticker)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
@@ -323,6 +423,14 @@ def register_device():
 
 
 if __name__ == "__main__":
+    # Tarama dongu thread'leri BASLAMADAN ONCE, ana thread'de senkron
+    # calisir - race olmadan (dongu, index hazir olmadan satir eklemeye
+    # calismasin diye) ilk acilista mevcut skor gecmisi dosyalari okunup
+    # bellek ici index'e yuklenir. Canli dosya buyukse (uretimde 100MB+) bu
+    # birkac saniye surebilir, ama bu TEK SEFERLIK bir maliyet - sonrasinda
+    # her /api/score-history istegi O(1) index okur, dosyayi bir daha hic
+    # bastan taramaz.
+    _init_score_indexes()
     threading.Thread(target=_scan_loop, daemon=True).start()
     threading.Thread(target=_market_scan_loop, daemon=True).start()
     # 127.0.0.1: bu Flask gelistirme sunucusu dogrudan disariya acik degil -
