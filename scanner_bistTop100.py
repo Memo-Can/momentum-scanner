@@ -197,6 +197,68 @@ def get_benchmark_daily_pct():
     return pct
 
 
+GRAMS_PER_TROY_OUNCE = 31.1034768
+
+
+def _quote_price_and_pct(ticker: str):
+    """Verilen Yahoo sembolu icin (guncel fiyat, gunluk % degisim) dondurur -
+    fetch_row()'daki ayni fiyat/degisim okuma mantigi, tek bir hisse yerine
+    herhangi bir enstruman (doviz/emtia/endeks/kripto) icin genellenmis hali."""
+    try:
+        info = yf.Ticker(ticker).get_info()
+        price = info.get("regularMarketPrice")
+        if price is None:
+            return None, None
+        pct = info.get("regularMarketChangePercent")
+        if pct is None:
+            prev = info.get("regularMarketPreviousClose")
+            pct = pct_change(price, prev) if prev else None
+        return price, pct
+    except Exception:
+        return None, None
+
+
+def fetch_market_indicators():
+    """Ust seritte gosterilen 8 piyasa gostergesini (doviz/emtia/BIST100/BTC)
+    dondurur - her biri {label, price, pct, unit} seklinde. Gram altin/gumus
+    Yahoo'da dogrudan yok; ons fiyati (USD) ile USDTRY kurunun TURETILMIS
+    (derived) carpimidir - gunluk % degisimi de onceki gunun (fiyat/(1+%/100))
+    ile geriye hesaplanan turetilmis onceki degerden hesaplanir."""
+    usd_price, usd_pct = _quote_price_and_pct("USDTRY=X")
+    eur_price, eur_pct = _quote_price_and_pct("EURTRY=X")
+    gbp_price, gbp_pct = _quote_price_and_pct("GBPTRY=X")
+    xu100_price, xu100_pct = _quote_price_and_pct("XU100.IS")
+    btc_price, btc_pct = _quote_price_and_pct("BTC-USD")
+    gold_oz_price, gold_oz_pct = _quote_price_and_pct("GC=F")
+    silver_oz_price, silver_oz_pct = _quote_price_and_pct("SI=F")
+    oil_price, oil_pct = _quote_price_and_pct("BZ=F")
+
+    def _derived_gram(oz_price, oz_pct):
+        if oz_price is None or usd_price is None:
+            return None, None
+        gram_try = oz_price * usd_price / GRAMS_PER_TROY_OUNCE
+        if oz_pct is None or usd_pct is None:
+            return gram_try, None
+        prev_oz = oz_price / (1 + oz_pct / 100)
+        prev_usd = usd_price / (1 + usd_pct / 100)
+        prev_gram = prev_oz * prev_usd / GRAMS_PER_TROY_OUNCE
+        return gram_try, pct_change(gram_try, prev_gram)
+
+    gold_gram_price, gold_gram_pct = _derived_gram(gold_oz_price, gold_oz_pct)
+    silver_gram_price, silver_gram_pct = _derived_gram(silver_oz_price, silver_oz_pct)
+
+    return [
+        {"label": "Dolar", "price": usd_price, "pct": usd_pct, "unit": "TL"},
+        {"label": "Euro", "price": eur_price, "pct": eur_pct, "unit": "TL"},
+        {"label": "Sterlin", "price": gbp_price, "pct": gbp_pct, "unit": "TL"},
+        {"label": "BIST100", "price": xu100_price, "pct": xu100_pct, "unit": ""},
+        {"label": "Bitcoin", "price": btc_price, "pct": btc_pct, "unit": "$"},
+        {"label": "Gram Altin", "price": gold_gram_price, "pct": gold_gram_pct, "unit": "TL"},
+        {"label": "Gram Gumus", "price": silver_gram_price, "pct": silver_gram_pct, "unit": "TL"},
+        {"label": "Petrol", "price": oil_price, "pct": oil_pct, "unit": "$"},
+    ]
+
+
 def get_intraday_signal(tk) -> str:
     """5dk mum uzerindeki surekli EMA9/EMA21 trend durumunu (kesisim ani degil)
     dondurur."""

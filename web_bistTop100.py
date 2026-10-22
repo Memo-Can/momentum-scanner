@@ -13,7 +13,7 @@ Sonra tarayicida: http://127.0.0.1:5000
 
 Sayfa acikken tablo REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
-sag panelde 6 aylik mum grafigi + istege bagli indikator katmanlari
+sag panelde 3 aylik mum grafigi + istege bagli indikator katmanlari
 (EMA/Bollinger/MACD/RSI) + Skor Gecmisi (gunluk/saatlik/5 dakikalik) gosterilir.
 """
 
@@ -35,6 +35,13 @@ _state = {
     "missing_count": 0,
     "updated_at": None,
 }
+
+# BIST sekmelerinin sagindaki doviz/emtia/BIST100/BTC seridi - hisse
+# taramasindan bagimsiz, kendi thread'inde ayni REFRESH_SECONDS ritmiyle
+# calisir (ikisi de ayni yavaslikta ama farkli veri kumeleri cekiyor,
+# birbirini bloklamasin diye ayri thread/lock).
+_market_lock = threading.Lock()
+_market_state = {"indicators": [], "updated_at": None}
 
 
 def _sanitize(value):
@@ -115,6 +122,22 @@ def _scan_loop():
         time.sleep(scanner.REFRESH_SECONDS)
 
 
+def _market_scan_once():
+    indicators = scanner.fetch_market_indicators()
+    with _market_lock:
+        _market_state["indicators"] = indicators
+        _market_state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _market_scan_loop():
+    while True:
+        try:
+            _market_scan_once()
+        except Exception as e:
+            print("Piyasa gostergesi tarama hatasi:", e)
+        time.sleep(scanner.REFRESH_SECONDS)
+
+
 @app.route("/")
 def index():
     return render_template(
@@ -130,9 +153,15 @@ def api_rows():
         return jsonify(dict(_state))
 
 
+@app.route("/api/market-indicators")
+def api_market_indicators():
+    with _market_lock:
+        return jsonify(dict(_market_state))
+
+
 @app.route("/api/history/<ticker>")
 def api_history(ticker: str):
-    """Verilen (soneksiz) ticker icin 6 aylik gunluk mum verisini dondurur.
+    """Verilen (soneksiz) ticker icin 3 aylik gunluk mum verisini dondurur.
     orn. /api/history/AKBNK -> AKBNK.IS icin OHLC."""
     cache_key = ("history", ticker)
     cached = _cache_get(cache_key)
@@ -141,7 +170,7 @@ def api_history(ticker: str):
 
     yahoo_ticker = f"{ticker}.IS"
     try:
-        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
+        hist = yf.Ticker(yahoo_ticker).history(period="3mo", interval="1d", auto_adjust=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
@@ -229,10 +258,10 @@ def api_score_history(ticker: str):
 def api_indicators(ticker: str):
     """Verilen (soneksiz) ticker icin EMA9/21, MACD, RSI ve Bollinger
     Bantlarinin TAM zaman serisini dondurur - grafikte istege bagli
-    acilir/kapanir indikator katmanlari icin. 1 yillik veri cekilir (gorunen
-    son ~6 aylik araligin TAMAMINDA indikatorlerin saglikli yakinsamis olmasi
-    icin ~6 aylik ekstra isinma payi birakilir), yanit son ~6 aya kirpilir -
-    bkz. api_history() (mum grafigi de ayni 6 aylik araligi gosterir)."""
+    acilir/kapanir indikator katmanlari icin. 6 aylik veri cekilir (gorunen
+    son ~3 aylik araligin TAMAMINDA indikatorlerin saglikli yakinsamis olmasi
+    icin ~3 aylik ekstra isinma payi birakilir), yanit son ~3 aya kirpilir -
+    bkz. api_history() (mum grafigi de ayni 3 aylik araligi gosterir)."""
     cache_key = ("indicators", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -240,7 +269,7 @@ def api_indicators(ticker: str):
 
     yahoo_ticker = f"{ticker}.IS"
     try:
-        hist = yf.Ticker(yahoo_ticker).history(period="1y", interval="1d", auto_adjust=False)
+        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     if hist.empty:
@@ -254,7 +283,7 @@ def api_indicators(ticker: str):
     dates = [idx.strftime("%Y-%m-%d") for idx in hist.index]
 
     def _series(values):
-        trimmed = values.tail(130)
+        trimmed = values.tail(65)
         trimmed_dates = dates[-len(trimmed):]
         return [
             {"time": t, "value": None if v != v else float(v)}
@@ -295,6 +324,7 @@ def register_device():
 
 if __name__ == "__main__":
     threading.Thread(target=_scan_loop, daemon=True).start()
+    threading.Thread(target=_market_scan_loop, daemon=True).start()
     # 127.0.0.1: bu Flask gelistirme sunucusu dogrudan disariya acik degil -
     # VPS'te nginx bir reverse proxy olarak 80/443'ten 5000'e yonlendiriyor
     # (bkz. /etc/nginx/sites-available/momentum-scanner), SSL sonlandirma da
