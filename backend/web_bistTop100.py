@@ -93,7 +93,15 @@ def _scan_once():
     bist100_symbols = {t.removesuffix(".IS") for t in scanner.BIST100_TICKERS}
 
     top_gainers = scanner.fetch_top_gainers(scanner.TOP300_SIZE)
-    all_tickers = list(dict.fromkeys(scanner.BIST100_TICKERS + top_gainers))
+    # Acik sanal al-sat pozisyonlarinin ticker'lari HER ZAMAN havuza eklenir -
+    # bunlar BIST100'de olmayabilir ve gunluk kazandiran listesinden (dinamik
+    # BIST300) her an dusebilir (bir hisse sonsuza kadar "gunun en cok
+    # kazandirani" olamaz). Eklenmezse o pozisyon bir sonraki dongude hic
+    # fiyat/skor alamaz - run_paper_trading_cycle() o ticker'i rows icinde
+    # bulamadigi icin stop/hedef/GUCLU_SAT kontrolu YAPILAMAZ, pozisyon
+    # sonsuza kadar acik kalir (gercekten yasandi - bkz. USHOL, 2026-10-23).
+    open_paper_tickers = [f"{p['ticker']}.IS" for p in scanner.get_paper_positions()]
+    all_tickers = list(dict.fromkeys(scanner.BIST100_TICKERS + top_gainers + open_paper_tickers))
 
     rows_by_ticker, _still_missing = scanner.fetch_with_retry(all_tickers) if all_tickers else ({}, [])
     missing_count = max(0, len(all_tickers) - len(rows_by_ticker))

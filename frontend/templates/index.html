@@ -262,18 +262,29 @@ let lastMissingCount = 0;
 // web_bistTop100.py _scan_once()) - hangi sekmenin secili oldugu sadece bu
 // havuzu ISTEMCI TARAFINDA filtreler, yeniden istek gerekmez.
 let activeMarket = 'bist100';
+// Su an acik sanal al-sat pozisyonu olan ticker'lar - refreshPaperTrading()
+// her dongude gunceller. BIST 300 sekmesinin "ilk 300" kesmesi bu ticker'lari
+// ATLAMAMALI (cok dusen bir hisse sekmeden kaybolmasin, satisi yapilana kadar
+// gorunur kalsin) - bkz. applyMarketFilter().
+let openPaperTickers = new Set();
 
 function applyMarketFilter(rows) {
   if (activeMarket === 'bist30') return rows.filter(r => r.bist30);
   if (activeMarket === 'bist100') return rows.filter(r => r.bist100);
   // bist300: havuzun tamami zaten "gunluk % ilk 300" taramasindan geliyor -
-  // sadece gunluk %'ye gore siralayip ilk 300'u almak yeterli (BIST100'den
-  // gelip ilk 300'e girmeyen olasi ek satirlari da eler).
-  return rows.slice().sort((a, b) => {
+  // gunluk %'ye gore siralayip ilk 300'u aliyoruz (BIST100'den gelip ilk
+  // 300'e girmeyen olasi ek satirlari da eler) - AMA acik pozisyonu olan bir
+  // ticker bu kesmede disarida kalirsa (cok dustuyse) listeye yine de eklenir.
+  const sorted = rows.slice().sort((a, b) => {
     const ad = a.daily === null || a.daily === undefined ? -Infinity : a.daily;
     const bd = b.daily === null || b.daily === undefined ? -Infinity : b.daily;
     return bd - ad;
-  }).slice(0, 300);
+  });
+  const top300 = sorted.slice(0, 300);
+  if (openPaperTickers.size === 0) return top300;
+  const shown = new Set(top300.map(r => r.ticker));
+  const extras = sorted.filter(r => openPaperTickers.has(r.ticker) && !shown.has(r.ticker));
+  return top300.concat(extras);
 }
 
 document.querySelectorAll('.market-tab-btn').forEach(btn => {
@@ -571,9 +582,15 @@ async function refreshPaperTrading() {
       fetch('/api/paper/positions'),
       fetch('/api/paper/trades'),
     ]);
+    const positions = await positionsRes.json();
     renderPaperSummary(await summaryRes.json());
-    renderPaperPositions(await positionsRes.json());
+    renderPaperPositions(positions);
     renderPaperTrades(await tradesRes.json());
+
+    // acik pozisyon seti degistiyse (yeni alim/satis) BIST 300 sekmesinin
+    // "ilk 300" kesmesi de buna gore guncellensin diye ana tablo yeniden cizilir.
+    openPaperTickers = new Set(positions.map(p => p.ticker));
+    if (activeMarket === 'bist300') renderTable();
   } catch (e) {
     // sessizce basarisiz ol - ana tablo deneyimini bozmasin
   }
