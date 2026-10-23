@@ -44,7 +44,7 @@ WARMUP_START = (datetime.now() - timedelta(days=BACKFILL_DAYS + 180)).strftime("
 MAX_WORKERS = 12
 
 SCORE_HISTORY_OUT = scanner.SCORE_HISTORY_BACKFILL_PATH
-SIGNAL_LOG_OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_log_bist_backfill.csv")
+SIGNAL_LOG_OUT = os.path.join(scanner.DATA_DIR, "signal_log_bist_backfill.csv")
 OUT_FIELDS = ["date", "ticker", "score_raw", "score", "price"]
 
 

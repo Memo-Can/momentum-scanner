@@ -23,13 +23,17 @@ Her 5 dakikada bir Yahoo Finance'ten BIST hisse verisi çekilip; EMA(9/21), MACD
 ## Mimari (özet — ayrıntı için `CLAUDE.md`)
 
 ```
-scanner_bistTop100.py   → iş katmanı: veri çekme, indikatör/skor hesaplama, loglama
-web_bistTop100.py       → Flask web arayüzü (AKTİF deploy edilen)
-terminal_bistTop100.py  → terminal arayüzü
-templates/index.html    → tek sayfalık web UI
-backfill_daily_bist.py  → geçmişe dönük günlük skor backfill (elle, tek seferlik)
-mobile/                 → Expo/React Native Android uygulaması
-diger-piyasalar/        → US/Crypto scanner'lar (KAPSAM DIŞI, artık geliştirilmiyor)
+backend/
+  scanner_bistTop100.py  → iş katmanı: veri çekme, indikatör/skor hesaplama, loglama
+  web_bistTop100.py      → Flask web arayüzü (AKTİF deploy edilen)
+  terminal_bistTop100.py → terminal arayüzü
+  backfill_daily_bist.py → geçmişe dönük günlük skor backfill (elle, tek seferlik)
+  data/                  → "veritabanı" gibi kullanılan CSV/JSON dosyaları
+frontend/
+  templates/index.html   → tek sayfalık web UI
+  static/                → favicon + bildirim sesleri
+mobile/                  → Expo/React Native Android uygulaması
+diger-piyasalar/         → US/Crypto scanner'lar (KAPSAM DIŞI, artık geliştirilmiyor)
 ```
 
 ## Altyapı
@@ -52,6 +56,7 @@ Proje `usd-info` adıyla başlayıp `momentum-scanner`'a taşındı ve kapsamı 
 7. Piyasa göstergesi şeridi (döviz/emtia/BTC)
 8. Geçmişe dönük 1 yıllık backfill sistemi
 9. Performans optimizasyonu: skor geçmişi dosyası milyonlarca satıra çıkınca bellek-içi index'e geçildi
+10. Repo yeniden düzenlendi: `backend/`/`frontend/` ayrımı + CSV "veritabanı" dosyaları `backend/data/`'ya taşındı (Ekim 2026)
 
 ## Bilinmesi gerekenler
 

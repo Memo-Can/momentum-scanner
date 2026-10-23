@@ -6,21 +6,38 @@ Bu dosya, bu repo üzerinde çalışan Claude Code oturumları için kalıcı ta
 
 Borsa İstanbul (BIST) hisseleri için canlı momentum/sinyal tarayıcısı. Web arayüzü (Flask) `https://momentumscanner.com.tr` adresinde VPS üzerinde çalışıyor; ayrıca bir terminal arayüzü ve bir Android mobil companion app (push bildirimli) var.
 
-## Katman mimarisi (önemli — her değişiklikte doğru dosyaya dokun)
+## Klasör yapısı (Ekim 2026'da backend/frontend ayrımına geçildi)
 
 ```
-scanner_bistTop100.py    → İŞ KATMANI (sunum içermez). Veri çekme, indikatör/skor
+backend/
+  scanner_bistTop100.py   → İŞ KATMANI (sunum içermez). Veri çekme, indikatör/skor
                             hesaplama, CSV loglama, push bildirim, piyasa göstergeleri.
                             Doğrudan çalıştırılmaz.
-web_bistTop100.py        → WEB sunum katmanı (Flask). AKTİF OLARAK DEPLOY EDİLEN budur.
-terminal_bistTop100.py   → Terminal sunum katmanı. scanner'ı import edip kullanır.
-templates/index.html     → Tek sayfalık web UI (tablo + sekmeler + grafik + skor geçmişi
-                            + piyasa şeridi). Tüm JS/CSS bu dosyanın içinde (inline).
-backfill_daily_bist.py   → Tek seferlik, elle çalıştırılan geçmişe dönük günlük skor
+  web_bistTop100.py       → WEB sunum katmanı (Flask). AKTİF OLARAK DEPLOY EDİLEN budur.
+                            Flask(template_folder=../frontend/templates,
+                            static_folder=../frontend/static) ile frontend/'e bakar.
+  terminal_bistTop100.py  → Terminal sunum katmanı. scanner'ı import edip kullanır.
+  backfill_daily_bist.py  → Tek seferlik, elle çalıştırılan geçmişe dönük günlük skor
                             backfill script'i (bkz. aşağıda "Skor geçmişi").
+  requirements.txt
+  sounds/                 → terminal_bistTop100.py'nin yerel beep sesleri (web'in
+                            frontend/static sesleriyle KARIŞTIRMA, ikisi ayrı).
+  data/                   → "database" gibi kullanılan CSV/JSON dosyaları (hepsi
+                            .gitignore'da, repo'da TAKİP EDİLMEZ — bkz. aşağıda).
+    score_history_bist.csv, score_history_bist_backfill.csv,
+    signal_log_bist.csv, signal_log_bist_backfill.csv
+  device_tokens_bist.json → data/ İÇİNDE DEĞİL, backend/ kökünde (CSV değil, ayrı tutuldu).
+frontend/
+  templates/index.html    → Tek sayfalık web UI (tablo + sekmeler + grafik + skor geçmişi
+                            + piyasa şeridi). Tüm JS/CSS bu dosyanın içinde (inline).
+  static/                 → favicon + web bildirim sesleri (Flask'ın /static/ rotası).
 ```
 
+`scanner_bistTop100.py`'deki `DATA_DIR = backend/data` sabiti tüm CSV/JSON yollarının kökü — yeni bir log/CSV dosyası eklenecekse buraya, `os.path.join(DATA_DIR, ...)` ile eklenir. `backend/data/.gitkeep` dizin git'te boş kalmasın diye var (asıl CSV'ler gitignored, fresh clone'da dizin yine de var olsun diye).
+
 `scanner_bistTop100.py` + `web_bistTop100.py` + `terminal_bistTop100.py` aynı iş mantığını paylaşır — biri değişince diğerlerinde de tutarlılık kontrolü yap.
+
+**⚠️ VPS'teki eski düz yapı (`/root/momentum-scanner/` kökünde tüm .py + .csv + templates/ + static/) henüz bu yeni backend/frontend/data yapısına GEÇİRİLMEDİ.** Bir sonraki VPS deploy'unda sadece dosya kopyalamak yetmez — VPS'te de aynı klasör yapısı oluşturulmalı (özellikle VPS'teki canlı `score_history_bist.csv`/`signal_log_bist.csv` dosyaları `backend/data/`'ya taşınmalı, yoksa servis yeniden başladığında sıfırdan boş dosyalarla başlar ve geçmiş veri görünmez hale gelir), `systemd` servis dosyasındaki `WorkingDirectory`/`ExecStart` yolu `backend/web_bistTop100.py`'yi gösterecek şekilde güncellenmeli. Bu migrasyon planlanmadan deploy YAPMA.
 
 **`diger-piyasalar/` klasörü (US/Crypto scanner'lar) KAPSAM DIŞI.** Kullanıcı sadece BIST'e odaklanmaya karar verdi, bu dosyalara dokunma, aktif geliştirme orada yapılmıyor.
 
@@ -35,7 +52,7 @@ backfill_daily_bist.py   → Tek seferlik, elle çalıştırılan geçmişe dön
 
 Confluence Score: `confluence_score_raw()` (-6..+6) + `confluence_label()` (GUCLU_AL/AL/NOTR/SAT/GUCLU_SAT). `ADX_TREND_THRESHOLD=20` ve `RS_THRESHOLD=0.5` sadece **etiketi** etkiler, hiçbir hisseyi listeden ELEMEZ — liste filtresi değil, güven eşiğidir.
 
-Varsayılan tablo sıralaması: önce Skor gücü (GUCLU_AL üstte), aynı grup içinde günlük % (yüksekten düşüğe). Bu, `templates/index.html`'deki `applySort()`'un `sortState.key === null` dalında ve backend'in `_sort_key()`'inde **birebir aynı** tutulmalı.
+Varsayılan tablo sıralaması: önce Skor gücü (GUCLU_AL üstte), aynı grup içinde günlük % (yüksekten düşüğe). Bu, `frontend/templates/index.html`'deki `applySort()`'un `sortState.key === null` dalında ve backend'in `_sort_key()`'inde **birebir aynı** tutulmalı.
 
 ## Skor geçmişi (performans kritik — DİKKAT)
 
@@ -46,7 +63,7 @@ Varsayılan tablo sıralaması: önce Skor gücü (GUCLU_AL üstte), aynı grup 
 ## Deploy süreci (VPS)
 
 - VPS: `77.245.146.216`, SSH portu **22667** (standart 22 DEĞİL — port değişmiş durumda, `ssh -i ~/.ssh/momentum_vps_key -p 22667 root@77.245.146.216`).
-- Dosyalar: `scp -P 22667 <dosya> root@77.245.146.216:/root/momentum-scanner/...`
+- Dosyalar: `scp -P 22667 <dosya> root@77.245.146.216:/root/momentum-scanner/...` — **yukarıdaki backend/frontend/data migrasyonu VPS'te henüz yapılmadığı için** bir sonraki deploy'da hedef yolların da güncellenmesi gerekiyor, aşağıdaki uyarıya bak.
 - Servis: `systemctl restart web-bist.service` (restart gerekir, Flask şablon/kod değişikliklerini otomatik almaz).
 - nginx reverse proxy 80/443'ten Flask'in 127.0.0.1:5000'ine yönlendiriyor, SSL orada sonlanıyor. Flask `host="127.0.0.1"` — dışarıdan doğrudan erişilemez, güvenlik için bilinçli.
 - Domain: `momentumscanner.com.tr`.

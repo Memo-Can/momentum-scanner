@@ -27,7 +27,12 @@ import scanner_bistTop100 as scanner
 import yfinance as yf
 from flask import Flask, jsonify, render_template, request
 
-app = Flask(__name__)
+_FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
+app = Flask(
+    __name__,
+    template_folder=os.path.join(_FRONTEND_DIR, "templates"),
+    static_folder=os.path.join(_FRONTEND_DIR, "static"),
+)
 
 _state_lock = threading.Lock()
 _state = {

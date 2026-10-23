@@ -90,14 +90,14 @@ BIST100_TICKERS = [f"{t}.IS" for t in BIST100_TICKERS]
 # bakip Skor'un gercekte ise yarayip yaramadigini (sinyalden sonra fiyat ne
 # oldu) kendi verinizle degerlendirebilirsiniz. Sadece durum DEGISTIGINDE
 # yazilir (her dongude tekrar tekrar degil), boylece dosya sismez.
-SIGNAL_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_log_bist.csv")
-SCORE_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score_history_bist.csv")
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+SIGNAL_LOG_PATH = os.path.join(DATA_DIR, "signal_log_bist.csv")
+SCORE_HISTORY_PATH = os.path.join(DATA_DIR, "score_history_bist.csv")
 # backfill_daily_bist.py'nin ürettigi GECMISE DONUK gunluk skor dosyasi -
 # canli SCORE_HISTORY_PATH'in kapsamadigi (scanner'in henuz calismadigi)
 # eski tarihleri doldurmak icin web_bistTop100.py'de canli veriyle birlestirilir.
-SCORE_HISTORY_BACKFILL_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "score_history_bist_backfill.csv"
-)
+SCORE_HISTORY_BACKFILL_PATH = os.path.join(DATA_DIR, "score_history_bist_backfill.csv")
 DEVICE_TOKENS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_tokens_bist.json")
 SIGNAL_LOG_FIELDS = ["timestamp", "ticker", "score", "price", "daily_pct", "rsi", "adx", "rel_strength"]
 SCORE_HISTORY_FIELDS = ["timestamp", "ticker", "score_raw", "score", "price"]
