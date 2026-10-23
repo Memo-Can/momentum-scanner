@@ -30,12 +30,13 @@ gercekte ise yarayip yaramadigini (sinyalden sonra fiyat ne oldu) kendi
 verinizle degerlendirebilirsiniz.
 """
 
-import csv
 import json
 import os
+import sqlite3
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import yfinance as yf
@@ -86,21 +87,154 @@ BIST100_TICKERS = [
 ]
 BIST100_TICKERS = [f"{t}.IS" for t in BIST100_TICKERS]
 
-# GUCLU_AL/GUCLU_SAT sinyallerinin gecmisini kaydeder - zamanla bu kayitlara
-# bakip Skor'un gercekte ise yarayip yaramadigini (sinyalden sonra fiyat ne
-# oldu) kendi verinizle degerlendirebilirsiniz. Sadece durum DEGISTIGINDE
-# yazilir (her dongude tekrar tekrar degil), boylece dosya sismez.
+# GUCLU_AL/GUCLU_SAT sinyallerinin gecmisini ve her dongudeki skor gecmisini
+# kaydeder - zamanla bu kayitlara bakip Skor'un gercekte ise yarayip
+# yaramadigini (sinyalden sonra fiyat ne oldu) kendi verinizle
+# degerlendirebilirsiniz. Eskiden iki ayri CSV cifti (canli + backfill) idi;
+# 2026-10'da tek bir SQLite dosyasina (iki tabloya, source='live'/'backfill'
+# sutunuyla ayristirilarak) tasindi - bkz. migrate_csv_to_sqlite.py. Sebep:
+# canli score_history CSV'si milyonlarca satira cikinca (3M+/130MB+) her
+# uygulama baslangicinda tamami belleğe okunuyordu (bkz. CLAUDE.md), SQLite
+# indeksli sorgu sayesinde bu gerekmiyor.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
-SIGNAL_LOG_PATH = os.path.join(DATA_DIR, "signal_log_bist.csv")
-SCORE_HISTORY_PATH = os.path.join(DATA_DIR, "score_history_bist.csv")
-# backfill_daily_bist.py'nin ürettigi GECMISE DONUK gunluk skor dosyasi -
-# canli SCORE_HISTORY_PATH'in kapsamadigi (scanner'in henuz calismadigi)
-# eski tarihleri doldurmak icin web_bistTop100.py'de canli veriyle birlestirilir.
-SCORE_HISTORY_BACKFILL_PATH = os.path.join(DATA_DIR, "score_history_bist_backfill.csv")
+DB_PATH = os.path.join(DATA_DIR, "momentum_scanner.db")
 DEVICE_TOKENS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_tokens_bist.json")
-SIGNAL_LOG_FIELDS = ["timestamp", "ticker", "score", "price", "daily_pct", "rsi", "adx", "rel_strength"]
-SCORE_HISTORY_FIELDS = ["timestamp", "ticker", "score_raw", "score", "price"]
+
+# Sanal para (paper trading) simulasyonu: GUCLU_AL'a YENI GECEN hisseler icin
+# otomatik "satin alma", swing stop/hedef (asagida ATR_SWING_MULT/ATR_TARGET_R)
+# ya da GUCLU_SAT'a donus ya da sure asimi ile "satma". Amac: Konfluens
+# Skor'un gercekte bir edge saglayip saglamadigini kendi canli verimizle
+# ampirik olcmek. _init_paper_trading() bu sabitlere ihtiyac duydugu icin
+# (asagida cagriliyor) burada, DB kurulumundan ONCE tanimlanmalari gerekiyor.
+PAPER_STARTING_BALANCE = 1_000_000.0
+PAPER_MAX_POSITIONS = 5
+PAPER_MAX_HOLD_DAYS = 21  # ~15 islem gunune denk takvim gunu yaklasimi
+
+# SQLite tek-yazarli oldugu icin tum INSERT/DELETE'ler bu kilit altinda
+# yapilir - WAL modu zaten coklu OKUYUCUYA izin veriyor (Flask'in threaded=True
+# istek thread'leri bu yuzden yazma sirasinda bile okuyabilir), ama ayni
+# process icinde iki yazma ayni anda calismasin diye bu ekstra guvenlik var.
+_DB_LOCK = threading.Lock()
+
+
+def get_db_connection() -> sqlite3.Connection:
+    """Her cagrida KISA OMURLU yeni bir baglanti acar (SQLite'ta bu ucuz bir
+    islem) - thread'ler arasinda tek bir Connection nesnesini paylasmanin
+    getirdigi "ayni anda kullanim" guvenlik sorunlarindan kacinmak icin.
+    WAL modu: process/thread'ler arasi coklu okuyucu + bir yazarin birbirini
+    BLOKLAMADAN calismasini saglar."""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db() -> None:
+    """Modul import edilirken BIR KEZ cagrilir - tablo/indeksler yoksa
+    olusturur (CREATE TABLE IF NOT EXISTS, idempotent)."""
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS score_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    score_raw REAL,
+                    score TEXT,
+                    price REAL,
+                    source TEXT NOT NULL DEFAULT 'live'
+                );
+                CREATE INDEX IF NOT EXISTS idx_score_history_ticker_ts
+                    ON score_history(ticker, timestamp);
+
+                CREATE TABLE IF NOT EXISTS signal_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    score TEXT,
+                    price REAL,
+                    daily_pct REAL,
+                    rsi REAL,
+                    adx REAL,
+                    rel_strength REAL,
+                    source TEXT NOT NULL DEFAULT 'live'
+                );
+                CREATE INDEX IF NOT EXISTS idx_signal_log_ticker_ts
+                    ON signal_log(ticker, timestamp);
+
+                CREATE TABLE IF NOT EXISTS paper_account (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    cash REAL NOT NULL,
+                    starting_balance REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS paper_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    entry_time TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    shares REAL NOT NULL,
+                    allocation REAL NOT NULL,
+                    stop_price REAL,
+                    target_price REAL,
+                    max_hold_until TEXT NOT NULL,
+                    exit_time TEXT,
+                    exit_price REAL,
+                    exit_reason TEXT,
+                    pnl REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_trades_status
+                    ON paper_trades(status);
+                CREATE INDEX IF NOT EXISTS idx_paper_trades_ticker
+                    ON paper_trades(ticker);
+
+                CREATE TABLE IF NOT EXISTS paper_equity_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    cash REAL NOT NULL,
+                    positions_value REAL NOT NULL,
+                    equity REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_equity_ts
+                    ON paper_equity_history(timestamp);
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _init_paper_trading() -> None:
+    """_init_db()'nin yanında modul import'unda BIR KEZ cagrilir -
+    paper_account tablosunda satir yoksa PAPER_STARTING_BALANCE ile
+    bootstrap eder (idempotent - satir zaten varsa dokunmaz)."""
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO paper_account (id, cash, starting_balance) VALUES (1, ?, ?)",
+                (PAPER_STARTING_BALANCE, PAPER_STARTING_BALANCE),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+_init_db()
+_init_paper_trading()
+
+# Ticker -> en son gorulen skor. log_signal_changes'in _last_logged_score'undan
+# BAGIMSIZ, ayri bir takip (push bildirim/sinyal log mantigina dokunulmaz).
+# Process her (re)basladiginda BOS baslar - bu KASITLI: ilk dongude her ticker
+# icin prev=None olacagi icin "yeni gecis" sayilmaz, yani deploy/restart
+# aninda zaten GUCLU_AL olan hicbir sey satin alinmaz. Ikinci dongudan
+# itibaren gercek gecisler (prev != 'GUCLU_AL' iken score=='GUCLU_AL' olmasi)
+# yakalanir.
+_paper_last_score = {}
 
 # Firebase kimlik dosyasi (servis hesabi JSON'u) commit'lenmez - VPS'te
 # systemd servis dosyasinda FIREBASE_CREDENTIALS_PATH env degiskeniyle
@@ -837,8 +971,8 @@ def _send_push_notifications(entries) -> None:
 
 def log_signal_changes(rows):
     """Skoru GUCLU_AL/GUCLU_SAT'a DONEN (onceki dongude farkli olan) hisseleri
-    SIGNAL_LOG_PATH'e ekler. Her dongude ayni sinyali tekrar tekrar yazmaz -
-    sadece durum degistiginde kaydeder, boylece log dosyasi anlamli kalir ve
+    signal_log tablosuna ekler. Her dongude ayni sinyali tekrar tekrar yazmaz -
+    sadece durum degistiginde kaydeder, boylece log tablosu anlamli kalir ve
     her satir gercekten "yeni bir sinyal aninı" temsil eder."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     new_entries = []
@@ -863,15 +997,22 @@ def log_signal_changes(rows):
 
     if not new_entries:
         return
-    file_exists = os.path.isfile(SIGNAL_LOG_PATH)
-    with open(SIGNAL_LOG_PATH, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=SIGNAL_LOG_FIELDS)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerows(new_entries)
 
-    # CSV yazimindan SONRA cagirilir - push gonderimi basarisiz olsa bile
-    # CSV log (tarihsel kayit) her zaman yazilmis olur.
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.executemany(
+                """INSERT INTO signal_log
+                       (timestamp, ticker, score, price, daily_pct, rsi, adx, rel_strength, source)
+                   VALUES (:timestamp, :ticker, :score, :price, :daily_pct, :rsi, :adx, :rel_strength, 'live')""",
+                new_entries,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    # DB yazimindan SONRA cagirilir - push gonderimi basarisiz olsa bile
+    # tarihsel kayit her zaman yazilmis olur.
     _send_push_notifications(new_entries)
 
 
@@ -882,20 +1023,242 @@ def log_score_history(rows):
     ham veri) kaynagi budur - REFRESH_SECONDS zaten 5 dakika oldugu icin her
     dongu dogal olarak bir "5 dakikalik" ornek temsil eder."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    file_exists = os.path.isfile(SCORE_HISTORY_PATH)
-    with open(SCORE_HISTORY_PATH, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=SCORE_HISTORY_FIELDS)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerows(
-            {
-                "timestamp": now,
-                "ticker": row["ticker"],
-                "score_raw": row["score_raw"],
-                "score": row["score"],
-                "price": row["price"],
-            }
-            for row in rows
-        )
+    entries = [
+        {
+            "timestamp": now,
+            "ticker": row["ticker"],
+            "score_raw": row["score_raw"],
+            "score": row["score"],
+            "price": row["price"],
+        }
+        for row in rows
+    ]
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.executemany(
+                """INSERT INTO score_history (timestamp, ticker, score_raw, score, price, source)
+                   VALUES (:timestamp, :ticker, :score_raw, :score, :price, 'live')""",
+                entries,
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
+
+def get_score_history(ticker: str, since_timestamp: str):
+    """Verilen ticker icin since_timestamp'ten (dahil, 'YYYY-MM-DD HH:MM:SS')
+    itibaren TUM skor gecmisi satirlarini (hem canli hem backfill kaynakli,
+    'source' sutunuyla ayristirilir) zaman sirasiyla dondurur. Eskiden iki
+    ayri bellek-ici index'ten (bkz. gecmis web_bistTop100.py) okunurdu; artik
+    (ticker, timestamp) uzerinde indeksli tek bir SQLite sorgusu."""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            """SELECT timestamp, score_raw, score, price, source
+               FROM score_history
+               WHERE ticker = ? AND timestamp >= ?
+               ORDER BY timestamp ASC""",
+            (ticker, since_timestamp),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def run_paper_trading_cycle(rows) -> None:
+    """Sanal para (paper trading) simulasyonunun ana dongusu -
+    web_bistTop100.py: _scan_once() tarafindan HER tarama dongusunde
+    (REFRESH_SECONDS) cagrilir, ayni rows (zaten taranmis, Yahoo'ya
+    tekrar gidilmez) kullanilir. Cagiran taraf bunu kendi try/except'i
+    icinde sarmali - burada beklenmeyen bir hata ana tarama/skor
+    loglama akisini bozmamali.
+
+    1) Acik pozisyonlari cikis kurallarina gore kapatir (stop/hedef/
+       GUCLU_SAT'a gercek donus/sure asimi - ilk uyan kural kazanir).
+    2) rows'taki YENI GUCLU_AL gecislerini (_paper_last_score ile
+       karsilastirarak) tespit eder, acik slot kadarini sirayla satin
+       alir.
+    3) Her dongude bir equity (nakit + acik pozisyon degeri) satiri
+       loglar."""
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    rows_by_ticker = {r["ticker"]: r for r in rows}
+
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
+            open_positions = [
+                dict(r) for r in conn.execute("SELECT * FROM paper_trades WHERE status = 'open'").fetchall()
+            ]
+
+            closed_this_cycle = set()
+            for pos in open_positions:
+                row = rows_by_ticker.get(pos["ticker"])
+                if row is None:
+                    continue  # bu dongude veri gelmedi (delisted/gecici) - dokunma
+
+                price = row["price"]
+                exit_reason = None
+                if pos["stop_price"] is not None and price <= pos["stop_price"]:
+                    exit_reason = "stop"
+                elif pos["target_price"] is not None and price >= pos["target_price"]:
+                    exit_reason = "target"
+                elif row["score"] == "GUCLU_SAT":
+                    exit_reason = "signal_reversal"
+                elif now_str >= pos["max_hold_until"]:
+                    exit_reason = "time_stop"
+
+                if exit_reason is not None:
+                    pnl = (price - pos["entry_price"]) * pos["shares"]
+                    conn.execute(
+                        """UPDATE paper_trades
+                           SET status='closed', exit_time=?, exit_price=?, exit_reason=?, pnl=?
+                           WHERE id=?""",
+                        (now_str, price, exit_reason, pnl, pos["id"]),
+                    )
+                    cash += price * pos["shares"]
+                    closed_this_cycle.add(pos["ticker"])
+
+            open_tickers = {p["ticker"] for p in open_positions} - closed_this_cycle
+            open_count = len(open_tickers)
+
+            # YENI GUCLU_AL gecislerini tespit et - rows zaten skor gucu +
+            # gunluk % sirali (bkz. web_bistTop100.py: _scan_once()'taki
+            # _sort_key), bu yuzden candidate_tickers de dogal olarak o
+            # oncelik sirasinda.
+            candidates = []
+            for row in rows:
+                ticker = row["ticker"]
+                prev = _paper_last_score.get(ticker)
+                if prev is not None and prev != "GUCLU_AL" and row["score"] == "GUCLU_AL":
+                    candidates.append(row)
+                _paper_last_score[ticker] = row["score"]
+
+            free_slots = PAPER_MAX_POSITIONS - open_count
+            for row in candidates:
+                if free_slots <= 0:
+                    break
+                ticker = row["ticker"]
+                if ticker in open_tickers or ticker in closed_this_cycle:
+                    continue
+                if row.get("swing_stop") is None or row.get("swing_target") is None:
+                    continue  # ATR verisi yetersiz - guvenli bir stop/hedef yok
+                price = row["price"]
+                if price != price or price <= 0:
+                    continue  # NaN/gecersiz fiyat (data glitch) - bu dongu atlanir
+
+                allocation = min(PAPER_STARTING_BALANCE / PAPER_MAX_POSITIONS, cash)
+                if allocation <= 0:
+                    break
+                shares = allocation / price
+                max_hold_until = (now + timedelta(days=PAPER_MAX_HOLD_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    """INSERT INTO paper_trades
+                           (ticker, status, entry_time, entry_price, shares, allocation,
+                            stop_price, target_price, max_hold_until)
+                       VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?)""",
+                    (ticker, now_str, price, shares, allocation, row["swing_stop"], row["swing_target"], max_hold_until),
+                )
+                cash -= allocation
+                open_tickers.add(ticker)
+                free_slots -= 1
+
+            conn.execute("UPDATE paper_account SET cash = ? WHERE id = 1", (cash,))
+
+            positions_value = 0.0
+            for r in conn.execute("SELECT ticker, shares FROM paper_trades WHERE status = 'open'").fetchall():
+                row = rows_by_ticker.get(r["ticker"])
+                if row is not None and row["price"] == row["price"]:  # NaN degilse
+                    positions_value += row["price"] * r["shares"]
+            conn.execute(
+                "INSERT INTO paper_equity_history (timestamp, cash, positions_value, equity) VALUES (?, ?, ?, ?)",
+                (now_str, cash, positions_value, cash + positions_value),
+            )
+
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_paper_positions():
+    """Su an acik olan sanal pozisyonlari dondurur (giris bilgileriyle -
+    guncel fiyat/K-Z hesaplamasi web_bistTop100.py'de canli rows ile
+    birlestirilerek yapilir)."""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute("SELECT * FROM paper_trades WHERE status = 'open' ORDER BY entry_time DESC")
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_paper_trades(limit: int = 200):
+    """Kapanmis sanal islemleri (en yeni once) dondurur."""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM paper_trades WHERE status = 'closed' ORDER BY exit_time DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_paper_equity_history(since_timestamp: str):
+    """since_timestamp'ten itibaren equity (nakit + acik pozisyon degeri)
+    gecmisini dondurur - Skor Gecmisi'ndeki gunluk/saatlik/5dk sekmeleriyle
+    ayni sekilde (ham veri, agregasyon okuma anında) grafik/tablo icin."""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "SELECT timestamp, cash, positions_value, equity FROM paper_equity_history "
+            "WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (since_timestamp,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_paper_summary():
+    """Sanal hesabin o anki ozetini dondurur: nakit, acik pozisyon degeri,
+    toplam equity, gerceklesmis/gerceklesmemis K-Z, kazanma orani. Acik
+    pozisyonlarin guncel degeri icin en son equity satirini kullanir (
+    run_paper_trading_cycle her dongude bunu zaten gunceller)."""
+    conn = get_db_connection()
+    try:
+        account = conn.execute("SELECT cash, starting_balance FROM paper_account WHERE id = 1").fetchone()
+        last_equity = conn.execute(
+            "SELECT equity, positions_value FROM paper_equity_history ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        closed = conn.execute("SELECT pnl FROM paper_trades WHERE status = 'closed'").fetchall()
+        open_count = conn.execute("SELECT COUNT(*) AS c FROM paper_trades WHERE status = 'open'").fetchone()["c"]
+
+        realized_pnl = sum(r["pnl"] for r in closed if r["pnl"] is not None)
+        equity = last_equity["equity"] if last_equity else account["cash"]
+        positions_value = last_equity["positions_value"] if last_equity else 0.0
+        wins = sum(1 for r in closed if r["pnl"] is not None and r["pnl"] > 0)
+
+        open_allocation = conn.execute(
+            "SELECT COALESCE(SUM(allocation), 0) AS total FROM paper_trades WHERE status = 'open'"
+        ).fetchone()["total"]
+        unrealized_pnl = positions_value - open_allocation
+
+        return {
+            "cash": account["cash"],
+            "positions_value": positions_value,
+            "equity": equity,
+            "starting_balance": account["starting_balance"],
+            "total_pnl": equity - account["starting_balance"],
+            "realized_pnl": realized_pnl,
+            "unrealized_pnl": unrealized_pnl,
+            "open_positions": open_count,
+            "closed_trades": len(closed),
+            "win_rate": (wins / len(closed) * 100.0) if closed else None,
+        }
+    finally:
+        conn.close()
 

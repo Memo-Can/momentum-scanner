@@ -18,7 +18,8 @@ Her 5 dakikada bir Yahoo Finance'ten BIST hisse verisi çekilip; EMA(9/21), MACD
 - **Arama, sütun sıralama, kolon başlığı tooltip'leri.**
 - **Web bildirimleri:** Bir hisse GÜÇLÜ AL/SAT'a geçtiğinde tarayıcı bildirimi + ses (sadece gerçek geçişte, spam yok).
 - **Mobil uygulama (Android):** Web sitesini saran bir WebView + Firebase üzerinden GÜÇLÜ AL/SAT push bildirimleri.
-- **Sinyal/skor geçmişi CSV logları:** Zamanla "Skor gerçekten işe yarıyor mu" diye kendi verinle değerlendirebilmen için.
+- **Sinyal/skor geçmişi (SQLite):** Zamanla "Skor gerçekten işe yarıyor mu" diye kendi verinle değerlendirebilmen için.
+- **Sanal Al-Sat (paper trading):** 1.000.000 TL sanal bakiye, GÜÇLÜ AL'a yeni geçen hisseleri otomatik "satın alır", swing stop/hedef ya da GÜÇLÜ SAT'a dönüş ya da süre aşımıyla "satar" — Skor'un gerçek performansını ölçmek için (gerçek para değil).
 
 ## Mimari (özet — ayrıntı için `CLAUDE.md`)
 
@@ -28,7 +29,7 @@ backend/
   web_bistTop100.py      → Flask web arayüzü (AKTİF deploy edilen)
   terminal_bistTop100.py → terminal arayüzü
   backfill_daily_bist.py → geçmişe dönük günlük skor backfill (elle, tek seferlik)
-  data/                  → "veritabanı" gibi kullanılan CSV/JSON dosyaları
+  data/                  → momentum_scanner.db (SQLite) — "veritabanı"
   diger-piyasalar/       → US/Crypto scanner'lar (KAPSAM DIŞI, artık geliştirilmiyor)
 frontend/
   templates/index.html   → tek sayfalık web UI
@@ -57,6 +58,8 @@ Proje `usd-info` adıyla başlayıp `momentum-scanner`'a taşındı ve kapsamı 
 8. Geçmişe dönük 1 yıllık backfill sistemi
 9. Performans optimizasyonu: skor geçmişi dosyası milyonlarca satıra çıkınca bellek-içi index'e geçildi
 10. Repo yeniden düzenlendi: `backend/`/`frontend/` ayrımı + CSV "veritabanı" dosyaları `backend/data/`'ya taşındı (Ekim 2026)
+11. CSV "veritabanı" → SQLite'a geçiş: canlı CSV dosyası RAM'i doldurmaya başlamıştı (sınırlı VPS belleği + her başlangıçta tamamının belleğe okunması), tek bir `momentum_scanner.db` + indeksli sorgular ile değiştirildi (Ekim 2026)
+12. Sanal Al-Sat (paper trading) simülasyonu eklendi: Skor sisteminin gerçek edge'ini ölçmek için 1.000.000 TL sanal bakiyeyle otomatik al-sat (Ekim 2026)
 
 ## Bilinmesi gerekenler
 

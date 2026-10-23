@@ -25,7 +25,7 @@ backend/                 → Flask API + tarama/indikator/skor mantığı + term
   web_bistTop100.py         Flask web sunucusu (aktif deploy edilen)
   terminal_bistTop100.py    terminal arayüzü
   backfill_daily_bist.py    geçmişe dönük günlük skor backfill (elle, tek seferlik)
-  data/                     CSV/JSON "veritabanı" dosyaları (git'e dahil değil)
+  data/                     momentum_scanner.db (SQLite, git'e dahil değil)
   diger-piyasalar/          kapsam dışı (US/Crypto scanner denemeleri)
 frontend/
   templates/index.html     tek sayfalık web UI

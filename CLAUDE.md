@@ -22,16 +22,20 @@ backend/
   requirements.txt
   sounds/                 → terminal_bistTop100.py'nin yerel beep sesleri (web'in
                             frontend/static sesleriyle KARIŞTIRMA, ikisi ayrı).
-  data/                   → "database" gibi kullanılan CSV/JSON dosyaları (hepsi
-                            .gitignore'da, repo'da TAKİP EDİLMEZ — bkz. aşağıda).
-    score_history_bist.csv, score_history_bist_backfill.csv,
-    signal_log_bist.csv, signal_log_bist_backfill.csv
-  device_tokens_bist.json → data/ İÇİNDE DEĞİL, backend/ kökünde (CSV değil, ayrı tutuldu).
+  data/                   → "database" olarak kullanılan dosyalar (hepsi .gitignore'da,
+                            repo'da TAKİP EDİLMEZ — bkz. "Skor geçmişi" altında).
+    momentum_scanner.db    → SQLite (2026-10'da CSV'lerden buraya taşındı), score_history
+                            + signal_log tabloları.
+    _backup/                → migrate_csv_to_sqlite.py'nin tasidigi eski CSV'ler (rollback
+                            yedeği, aktif kodun okuduğu/yazdığı bir yer DEĞİL).
+  device_tokens_bist.json → data/ İÇİNDE DEĞİL, backend/ kökünde (SQLite'a taşınmadı, ayrı tutuldu).
   diger-piyasalar/        → KAPSAM DIŞI (aşağıda ayrıca bahsedilir), sadece klasör düzeni.
 frontend/
   templates/index.html    → Tek sayfalık web UI (tablo + sekmeler + grafik + skor geçmişi
-                            + piyasa şeridi). Tüm JS/CSS bu dosyanın içinde (inline).
-  static/                 → favicon + web bildirim sesleri (Flask'ın /static/ rotası).
+                            + piyasa şeridi + Sanal Al-Sat). Tüm JS inline (dosyanın içinde),
+                            CSS ise AYRI bir dosyada (static/style.css) — 2026-10'da inline
+                            <style>'den çıkarıldı (bkz. aşağıda).
+  static/                 → favicon + web bildirim sesleri + style.css (Flask'ın /static/ rotası).
 ```
 
 `scanner_bistTop100.py`'deki `DATA_DIR = backend/data` sabiti tüm CSV/JSON yollarının kökü — yeni bir log/CSV dosyası eklenecekse buraya, `os.path.join(DATA_DIR, ...)` ile eklenir. `backend/data/.gitkeep` dizin git'te boş kalmasın diye var (asıl CSV'ler gitignored, fresh clone'da dizin yine de var olsun diye).
@@ -55,11 +59,34 @@ Confluence Score: `confluence_score_raw()` (-6..+6) + `confluence_label()` (GUCL
 
 Varsayılan tablo sıralaması: önce Skor gücü (GUCLU_AL üstte), aynı grup içinde günlük % (yüksekten düşüğe). Bu, `frontend/templates/index.html`'deki `applySort()`'un `sortState.key === null` dalında ve backend'in `_sort_key()`'inde **birebir aynı** tutulmalı.
 
-## Skor geçmişi (performans kritik — DİKKAT)
+## Skor geçmişi (SQLite'a taşındı — Ekim 2026)
 
-`score_history_bist.csv` canlı sunucuda **sürekli büyüyor** (her 5 dakikada bir havuzdaki her hisse için bir satır) — Ekim 2026 itibariyla 130MB+/3.2M+ satır. **Bu dosyayı asla per-request olarak baştan tarama** — `web_bistTop100.py` bunu bellek içi bir index'te tutuyor (`_live_score_index`, uygulama başlarken bir kez okunur, sonra her tarama döngüsünde sadece yeni satırlar eklenir). Bu deseni bozacak bir değişiklik yaparsan grafik açılışı yeniden saniyeler sürecek şekilde yavaşlar (bu gerçekten yaşandı, Ekim 2026).
+**Eski mimari (artık YOK):** `score_history_bist.csv` canlı sunucuda sürekli büyüyordu (her 5 dakikada bir havuzdaki her hisse için bir satır) — Ekim 2026'da 130MB+/3.2M+ satıra çıkmıştı, `web_bistTop100.py` her başlangıçta bunun TAMAMINI bellek içi bir index'e (`_live_score_index`) okuyordu. Bu hem grafik açılışını saniyelerce yavaşlatıyordu HEM DE VPS'in zaten sınırlı RAM'ini (toplam 1.9GB) doldurmaya başlamıştı (servis tek başına ~1.4-1.5GB RAM yiyordu, sistem genelinde sadece 98MB boş RAM kalmıştı, swap yok) — disk alanı değil, bu RAM baskısı asıl aciliyet kaynağıydı. **SQLite'a geçiş sonrası doğrulandı (2026-10-23):** VPS'te servis belleği 1.4GB'dan ~170MB'a düştü, sistem genelinde boş RAM 98MB'dan ~1.2GB'a çıktı.
 
-`score_history_bist_backfill.csv` (statik, `backfill_daily_bist.py` ile üretildi) + canlı log, `SCORE_HISTORY_WINDOW_DAYS=365` penceresiyle birleştirilip "her zaman son 1 yıl" gösterir — backfill script'i tekrar çalıştırmaya gerek yok, pencere otomatik kayıyor.
+**Yeni mimari:** `backend/data/momentum_scanner.db` (SQLite), iki tablo:
+- `score_history(id, timestamp, ticker, score_raw, score, price, source)`
+- `signal_log(id, timestamp, ticker, score, price, daily_pct, rsi, adx, rel_strength, source)`
+
+`source` sütunu `'live'` (her tarama döngüsünde yazılan ham veri) / `'backfill'` (`backfill_daily_bist.py`'nin ürettiği geçmişe dönük günlük veri) değerlerini alır — eskiden bunlar 2 ayrı CSV dosyasıydı, artık aynı tabloda tek bir sütunla ayrışıyor. `(ticker, timestamp)` üzerinde composite index var — `scanner_bistTop100.py: get_score_history()` bu index'i kullanan tek bir SQL sorgusuyla okur, **tabloyu asla tam olarak belleğe yüklemez**. `web_bistTop100.py: api_score_history()` eskisi gibi `SCORE_HISTORY_WINDOW_DAYS=365` penceresiyle backfill+live'ı birleştirip döndürür, backfill script'i tekrar çalıştırmaya gerek yok (pencere otomatik kayıyor).
+
+**Yazma tarafı:** `scanner_bistTop100.py: log_score_history()` / `log_signal_changes()` artık CSV'ye `append` değil, SQLite'a `INSERT` yapıyor — tüm yazmalar `_DB_LOCK` (process-içi `threading.Lock`) altında serileştiriliyor, WAL journal modu (`get_db_connection()`) process/thread'ler arası çoklu okuyucu + tek yazarın birbirini bloklamadan çalışmasını sağlıyor. Her çağrı KISA ÖMÜRLÜ bir `sqlite3.connect()` açıp işini yapıp kapatıyor — tek bir Connection nesnesini thread'ler arasında paylaşmıyoruz.
+
+**`backfill_daily_bist.py`** artık dosya yazmıyor — her çalıştırıldığında ÖNCE `source='backfill'` satırlarını SİLİP sonra yeniden hesapladığı tam seti ekliyor (eski CSV'nin `"w"` modunda baştan yazımına denk, tekrar tekrar çalıştırmak satır biriktirmiyor).
+
+**Migrasyon:** `backend/migrate_csv_to_sqlite.py` tek seferlik script'i eski 4 CSV'yi (varsa) okuyup DB'ye aktarır, satır sayısı karşılaştırmasıyla doğrular, başarılıysa eski CSV'leri SİLMEZ, `backend/data/_backup/` klasörüne (orijinal isimleriyle) taşır (rollback için). Hem yerelde hem VPS'te çalıştırıldı (2026-10-23) — VPS'te servis durdurulup checksum ile doğrulanarak yapıldı, veri kaybı olmadı.
+
+**SQLite dosyasını görüntülemek için** (DB client-server değil, dosya tabanlı — VPS'tekine doğrudan "bağlanılamaz", önce dosyayı `scp` ile indirmek ya da VPS'te `sqlite3` CLI/bir web arayüzü çalıştırmak gerekir): yerelde DB Browser for SQLite (GUI) veya VS Code'un SQLite eklentisi önerilir. VS Code Remote-SSH ile VPS'e bağlanıp dosyayı CANLI (indirmeden) açmak da mümkün — eklentinin "SSH: <host> - Installed" listesinde de kurulu olması gerekir, yoksa dosya düz metin editörüyle açılmaya çalışılır.
+
+## Sanal para (paper trading) simülasyonu
+
+Konfluens Skor'un gerçekte bir edge sağlayıp sağlamadığını kendi canlı verimizle ampirik ölçmek için kurulan, GERÇEK PARA OLMAYAN bir simülasyon (2026-10). `scanner_bistTop100.py: run_paper_trading_cycle(rows)` — `web_bistTop100.py: _scan_once()`'tan her tarama döngüsünde (aynı `top_rows`'la, EKSTRA Yahoo isteği yapmadan) çağrılır, **kendi try/except'i içinde** (bir hata ana tarama/skor loglama akışını bozmasın).
+
+- **Sabitler:** `PAPER_STARTING_BALANCE=1_000_000.0`, `PAPER_MAX_POSITIONS=5`, `PAPER_MAX_HOLD_DAYS=21` (bu sabitler, `_init_paper_trading()`'in ihtiyacı olduğu için dosyada `_init_db()`'den ÖNCE tanımlı — `ATR_*` sabitlerinin yanına taşınırsa bu sırayı bozma).
+- **Tablolar** (aynı `momentum_scanner.db`): `paper_account` (tekil satır, nakit), `paper_trades` (açık/kapalı işlemler, `status`/`exit_reason` sütunlu), `paper_equity_history` (her döngüde bir equity satırı — Skor Geçmişi'yle aynı "ham veri tut, agregasyonu okuma anında yap" deseni).
+- **Alım kuralı — SADECE YENİ GUCLU_AL geçişleri:** `_paper_last_score` (modül-seviyesi dict, `log_signal_changes`'in `_last_logged_score`'undan BAĞIMSIZ) her ticker'ın önceki döngüdeki skorunu tutar. Process her (re)başladığında BOŞ başlar — bu KASITLI: ilk döngüde `prev=None` olduğu için hiçbir şey "yeni geçiş" sayılmaz, yani **deploy/restart anında zaten GUCLU_AL olan hiçbir hisse satın alınmaz**. Sadece `prev != 'GUCLU_AL'` iken `score=='GUCLU_AL'` olan gerçek geçişler alım adayı olur.
+- **Çıkış kuralı (ilk uyan kazanır):** `price <= stop_price` → `'stop'`; `price >= target_price` → `'target'`; skor gerçekten `GUCLU_SAT`'a dönerse → `'signal_reversal'`; `PAPER_MAX_HOLD_DAYS` (takvim günü yaklaşımı, gerçek işlem günü sayacı DEĞİL) aşılırsa → `'time_stop'`. Stop/hedef değerleri zaten var olan `swing_stop`/`swing_target` (ATR×3, 1:2 risk-ödül) sütunlarından geliyor — yeni bir ATR formülü YOK.
+- **Pozisyon büyüklüğü:** Her yeni alım `min(PAPER_STARTING_BALANCE/PAPER_MAX_POSITIONS, mevcut nakit)` kadar (nakit yetmezse kısılır) — her zaman 5 slot dolu tutulmaya çalışılır, biri kapanınca aynı döngüde (ya da bir sonraki uygun adayla) yeni pozisyon açılabilir.
+- **API:** `/api/paper/summary`, `/api/paper/positions` (canlı fiyat/K-Z `_state['rows']` ile zenginleştirilir), `/api/paper/trades`, `/api/paper/equity`. Frontend'de `frontend/templates/index.html`'deki `#paper-trading` bölümü (ana tablonun ALTINDA, ayrı bir section — BIST sekmelerinden bağımsız).
 
 ## Deploy süreci (VPS)
 

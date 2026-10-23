@@ -4,5 +4,8 @@ __pycache__/
 .claude/
 signal_log_*.csv
 score_history_*.csv
+momentum_scanner.db
+momentum_scanner.db-wal
+momentum_scanner.db-shm
 device_tokens_*.json
 firebase-service-account.json

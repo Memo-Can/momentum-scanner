@@ -17,7 +17,6 @@ sag panelde 3 aylik mum grafigi + istege bagli indikator katmanlari
 (EMA/Bollinger/MACD/RSI) + Skor Gecmisi (gunluk/saatlik/5 dakikalik) gosterilir.
 """
 
-import csv
 import os
 import threading
 import time
@@ -48,16 +47,6 @@ _state = {
 _market_lock = threading.Lock()
 _market_state = {"indicators": [], "updated_at": None}
 
-# Skor gecmisi index'i: /api/score-history her istekte CSV dosyasini (canli
-# dosya zamanla milyonlarca satira cikabiliyor - 3M+ satir, 100MB+) bastan
-# taramak YERINE, ticker->olay listesi seklinde bellekte tutulan bu
-# index'ten O(1) okur. Canli dosya uygulama baslarken BIR KEZ okunur;
-# sonrasinda her tarama dongusunde sadece o dongude eklenen yeni satirlar
-# index'e eklenir (dosya bir daha hic bastan okunmaz). Backfill dosyasi
-# sabit (hic degismiyor) oldugu icin de bir kez okunup kalici tutulur.
-_score_index_lock = threading.Lock()
-_live_score_index = {}      # ticker -> [{"time","score_raw","score","price"}, ...]
-_backfill_score_index = {}  # ticker -> [{"date","score_raw","score","price"}, ...]
 
 
 def _sanitize(value):
@@ -94,55 +83,6 @@ def _cache_set(cache_key, value):
     return value
 
 
-def _build_live_score_index():
-    index = {}
-    if os.path.isfile(scanner.SCORE_HISTORY_PATH):
-        with open(scanner.SCORE_HISTORY_PATH, "r", newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                t = row.get("ticker")
-                if not t:
-                    continue
-                index.setdefault(t, []).append(
-                    {
-                        "time": row["timestamp"],
-                        "score_raw": float(row["score_raw"]),
-                        "score": row["score"],
-                        "price": row["price"],
-                    }
-                )
-    return index
-
-
-def _build_backfill_score_index():
-    index = {}
-    if os.path.isfile(scanner.SCORE_HISTORY_BACKFILL_PATH):
-        with open(scanner.SCORE_HISTORY_BACKFILL_PATH, "r", newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                t = row.get("ticker")
-                if not t:
-                    continue
-                index.setdefault(t, []).append(
-                    {
-                        "date": row["date"],
-                        "score_raw": float(row["score_raw"]),
-                        "score": row["score"],
-                        "price": row["price"],
-                    }
-                )
-    return index
-
-
-def _init_score_indexes():
-    """Uygulama baslarken BIR KEZ cagrilir - _scan_loop/_market_scan_loop
-    thread'leri baslamadan ONCE, ana thread'de SENKRON calisir. Boylece ilk
-    tarama dongusu her ihtimalde index tam hazirken basliyor (yoksa dongu,
-    index'i arka planda hala olusturuluyorken satir eklemeye calisirsa,
-    sonradan gelen 'dosyadan bastan olustur' adimi o satiri ezebilirdi)."""
-    with _score_index_lock:
-        _live_score_index.update(_build_live_score_index())
-        _backfill_score_index.update(_build_backfill_score_index())
-
-
 def _scan_once():
     """BIST 30/100/300 sekmelerinin ortak veri havuzunu hazirlar - bkz.
     scanner_bistTop100.py modul aciklamasi: BIST100 (BIST30'u da kapsar) +
@@ -171,20 +111,12 @@ def _scan_once():
     if top_rows:
         scanner.log_signal_changes(top_rows)
         scanner.log_score_history(top_rows)
-        # score_history_bist.csv'ye az once yazilan satirlarin AYNISI, dosyayi
-        # bir daha hic okumadan dogrudan bellek ici index'e eklenir - bkz.
-        # _init_score_indexes() ve api_score_history().
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with _score_index_lock:
-            for row in top_rows:
-                _live_score_index.setdefault(row["ticker"], []).append(
-                    {
-                        "time": now_str,
-                        "score_raw": row["score_raw"],
-                        "score": row["score"],
-                        "price": row["price"],
-                    }
-                )
+        try:
+            scanner.run_paper_trading_cycle(top_rows)
+        except Exception as e:
+            # Sanal al-sat mantigindaki bir hata ana tarama/skor loglama
+            # akisini ASLA bozmamali - kendi try/except'i icinde izole.
+            print("Sanal al-sat (paper trading) hatasi:", e)
 
     with _state_lock:
         _state["rows"] = [_row_to_json(r) for r in top_rows]
@@ -304,57 +236,44 @@ SCORE_HISTORY_WINDOW_DAYS = 365  # Skor Gecmisi her zaman bugunden geriye bu kad
 
 @app.route("/api/score-history/<ticker>")
 def api_score_history(ticker: str):
-    """Verilen ticker icin skor gecmisini dondurur: once (varsa)
-    score_history_bist_backfill.csv'deki GUNLUK backfill kayitlari (canli
-    logun BASLAMADIGI eski tarihler icin, source:"backfill" ile isaretli),
-    sonra score_history_bist.csv'deki HER dongudeki (5 dk) ham canli kayit.
-    Gunluk sekmesi ikisini birlikte kullanir; Saatlik/5-Dakikalik sekmeleri
-    sadece canli (gercek gun-ici granulariteli) kayitlari kullanir - bkz.
-    templates/index.html renderScoreHistory().
+    """Verilen ticker icin skor gecmisini dondurur: once (varsa) GUNLUK
+    backfill kayitlari (canli logun BASLAMADIGI eski tarihler icin,
+    source="backfill" ile isaretli), sonra HER dongudeki (5 dk) ham canli
+    kayit (source="live"). Gunluk sekmesi ikisini birlikte kullanir;
+    Saatlik/5-Dakikalik sekmeleri sadece canli (gercek gun-ici
+    granulariteli) kayitlari kullanir - bkz. templates/index.html
+    renderScoreHistory().
 
-    Her iki kaynak da SCORE_HISTORY_WINDOW_DAYS'ten (365) eski satirlari
-    ATLAR - boylece "Skor Gecmisi" her istekte bugune gore yeniden hesaplanip
-    HER ZAMAN tam olarak son 1 yili gosterir, backfill dosyasi tekrar
-    calistirilmasa bile (canli log zaten surekli buyuyerek yeni ucu
-    doldurur, bu filtre sadece eski ucu bugune gore kirpar).
+    SCORE_HISTORY_WINDOW_DAYS'ten (365) eski satirlar ATLANIR - boylece
+    "Skor Gecmisi" her istekte bugune gore yeniden hesaplanip HER ZAMAN
+    tam olarak son 1 yili gosterir.
 
-    Veri dogrudan dosyadan DEGIL, bellek ici index'ten okunur (bkz.
-    _init_score_indexes/_live_score_index) - canli dosya milyonlarca satira
-    ciktiginda her tiklamada dosyayi bastan taramak grafigi saniyelerce
-    yavaslatiyordu."""
+    Veri scanner.get_score_history() uzerinden (ticker, timestamp)
+    indeksli bir SQLite sorgusuyla okunur - eskiden bellek ici bir
+    index'ten okunurdu (canli CSV milyonlarca satira ciktiginda dosyayi
+    bastan taramak grafigi saniyelerce yavaslatiyordu), artik ne dosya
+    taramasi ne de tam tabloyu belleğe yukleme gerekiyor."""
     cache_key = ("score-history", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
         return jsonify(cached)
 
-    cutoff_date = (datetime.now() - timedelta(days=SCORE_HISTORY_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    cutoff_ts = (datetime.now() - timedelta(days=SCORE_HISTORY_WINDOW_DAYS)).strftime("%Y-%m-%d 00:00:00")
+    rows = scanner.get_score_history(ticker, cutoff_ts)
 
-    with _score_index_lock:
-        live_raw = list(_live_score_index.get(ticker, []))
-        backfill_raw = list(_backfill_score_index.get(ticker, []))
-
-    live_events = [e for e in live_raw if e["time"][:10] >= cutoff_date]
+    live_rows = [r for r in rows if r["source"] == "live"]
+    backfill_rows = [r for r in rows if r["source"] == "backfill"]
 
     # Canli log hangi tarihten itibaren basliyorsa, backfill sadece ONDAN
     # ONCEKI gunleri doldurur - ayni gun icin iki kaynak cakismasin diye.
-    live_start_date = min((e["time"][:10] for e in live_events), default=None)
-    backfill_events = []
-    for row in backfill_raw:
-        if row["date"] < cutoff_date:
-            continue
-        if live_start_date and row["date"] >= live_start_date:
-            continue
-        backfill_events.append(
-            {
-                "time": f"{row['date']} 00:00:00",
-                "score_raw": row["score_raw"],
-                "score": row["score"],
-                "price": row["price"],
-                "source": "backfill",
-            }
-        )
+    live_start_date = min((r["timestamp"][:10] for r in live_rows), default=None)
+    if live_start_date:
+        backfill_rows = [r for r in backfill_rows if r["timestamp"][:10] < live_start_date]
 
-    events = backfill_events + live_events
+    events = [
+        {"time": r["timestamp"], "score_raw": r["score_raw"], "score": r["score"], "price": r["price"], "source": r["source"]}
+        for r in (backfill_rows + live_rows)
+    ]
     return jsonify(_cache_set(cache_key, events))
 
 
@@ -427,15 +346,55 @@ def register_device():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/paper/summary")
+def api_paper_summary():
+    """Sanal al-sat hesabinin ozeti: nakit, equity, toplam/gerceklesmis/
+    gerceklesmemis K-Z, kazanma orani. bkz. scanner.run_paper_trading_cycle()."""
+    return jsonify(scanner.get_paper_summary())
+
+
+@app.route("/api/paper/positions")
+def api_paper_positions():
+    """Su an acik olan sanal pozisyonlar - guncel fiyat/K-Z, son taramanin
+    _state['rows']'u ile (ekstra Yahoo istegi olmadan) zenginlestirilir."""
+    positions = scanner.get_paper_positions()
+    with _state_lock:
+        price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
+
+    enriched = []
+    for pos in positions:
+        current_price = price_by_ticker.get(pos["ticker"])
+        pnl = None
+        pnl_pct = None
+        if current_price is not None and current_price == current_price:
+            pnl = (current_price - pos["entry_price"]) * pos["shares"]
+            if pos["allocation"]:
+                pnl_pct = pnl / pos["allocation"] * 100.0
+        enriched.append(
+            {**pos, "current_price": current_price, "unrealized_pnl": pnl, "unrealized_pnl_pct": pnl_pct}
+        )
+    return jsonify(enriched)
+
+
+@app.route("/api/paper/trades")
+def api_paper_trades():
+    """Kapanmis sanal islemler (en yeni once)."""
+    return jsonify(scanner.get_paper_trades())
+
+
+@app.route("/api/paper/equity")
+def api_paper_equity():
+    """Sanal hesabin equity (nakit + acik pozisyon degeri) gecmisi -
+    gunluk/saatlik/5dk gruplama frontend'de yapilir (Skor Gecmisi'yle ayni desen)."""
+    return jsonify(scanner.get_paper_equity_history("2000-01-01 00:00:00"))
+
+
 if __name__ == "__main__":
-    # Tarama dongu thread'leri BASLAMADAN ONCE, ana thread'de senkron
-    # calisir - race olmadan (dongu, index hazir olmadan satir eklemeye
-    # calismasin diye) ilk acilista mevcut skor gecmisi dosyalari okunup
-    # bellek ici index'e yuklenir. Canli dosya buyukse (uretimde 100MB+) bu
-    # birkac saniye surebilir, ama bu TEK SEFERLIK bir maliyet - sonrasinda
-    # her /api/score-history istegi O(1) index okur, dosyayi bir daha hic
-    # bastan taramaz.
-    _init_score_indexes()
+    # scanner_bistTop100 import edilirken DB/tablolar zaten hazirlandi
+    # (bkz. scanner._init_db()) - eskiden burada ayrica tum skor gecmisi
+    # dosyasi bellege okunurdu (buyuk dosyada birkac saniye surebiliyordu),
+    # SQLite'a gecince bu adima gerek kalmadi: her /api/score-history
+    # istegi indeksli bir sorguyla dogrudan DB'den okur.
     threading.Thread(target=_scan_loop, daemon=True).start()
     threading.Thread(target=_market_scan_loop, daemon=True).start()
     # 127.0.0.1: bu Flask gelistirme sunucusu dogrudan disariya acik degil -

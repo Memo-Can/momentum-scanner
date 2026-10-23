@@ -14,19 +14,20 @@ gore biraz daha zor gecilir (fiili maksimum skor 6 yerine 5). Bu, gecmis
 skorlari canli skorlarla birebir karsilastirilamaz yapar ama gunluk
 trend/momentum bazli bir yaklasim olarak yine de anlamlidir.
 
-Uretilen dosyalar (repo koku, .gitignore'daki mevcut score_history_*.csv /
-signal_log_*.csv desenlerine zaten uyuyor):
-  score_history_bist_backfill.csv  - her (tarih, ticker) icin bir skor satiri
-  signal_log_bist_backfill.csv     - sadece GUCLU_AL/SAT'A GECIS gunleri
-                                      (log_signal_changes'in gecmise donuk hali)
+Yazilan hedef (backend/data/momentum_scanner.db, scanner_bistTop100.py'nin
+SQLite veritabani - eskiden iki ayri backfill CSV'si idi):
+  score_history tablosu, source='backfill'  - her (tarih, ticker) icin bir skor satiri
+  signal_log tablosu, source='backfill'     - sadece GUCLU_AL/SAT'A GECIS gunleri
+                                               (log_signal_changes'in gecmise donuk hali)
+Her calistirmada ONCE mevcut source='backfill' satirlari SILINIR, sonra
+yeniden hesaplanan tam set eklenir (eski CSV'nin "w" modunda bastan yazimina
+denk) - boylece tekrar tekrar calistirmak satir biriktirmez.
 
 Calistirmak icin:
     python3 backfill_daily_bist.py [GERIYE_GIDILECEK_GUN_SAYISI]
 Varsayilan: bugunden geriye 365 gun (son bir yil).
 """
 
-import csv
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -42,10 +43,6 @@ BACKFILL_START = (datetime.now() - timedelta(days=BACKFILL_DAYS)).strftime("%Y-%
 # saglikli olsun diye.
 WARMUP_START = (datetime.now() - timedelta(days=BACKFILL_DAYS + 180)).strftime("%Y-%m-%d")
 MAX_WORKERS = 12
-
-SCORE_HISTORY_OUT = scanner.SCORE_HISTORY_BACKFILL_PATH
-SIGNAL_LOG_OUT = os.path.join(scanner.DATA_DIR, "signal_log_bist_backfill.csv")
-OUT_FIELDS = ["date", "ticker", "score_raw", "score", "price"]
 
 
 def compute_daily_rows(ticker: str, benchmark_pct):
@@ -146,18 +143,28 @@ def main():
     all_score_rows.sort(key=lambda r: (r["date"], r["ticker"]))
     all_signal_rows.sort(key=lambda r: (r["date"], r["ticker"]))
 
-    with open(SCORE_HISTORY_OUT, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=OUT_FIELDS)
-        writer.writeheader()
-        writer.writerows(all_score_rows)
+    with scanner._DB_LOCK:
+        conn = scanner.get_db_connection()
+        try:
+            conn.execute("DELETE FROM score_history WHERE source = 'backfill'")
+            conn.execute("DELETE FROM signal_log WHERE source = 'backfill'")
+            conn.executemany(
+                """INSERT INTO score_history (timestamp, ticker, score_raw, score, price, source)
+                   VALUES (:timestamp, :ticker, :score_raw, :score, :price, 'backfill')""",
+                [{**r, "timestamp": f"{r['date']} 00:00:00"} for r in all_score_rows],
+            )
+            conn.executemany(
+                """INSERT INTO signal_log
+                       (timestamp, ticker, score, price, daily_pct, rsi, adx, rel_strength, source)
+                   VALUES (:timestamp, :ticker, :score, :price, NULL, NULL, NULL, NULL, 'backfill')""",
+                [{**r, "timestamp": f"{r['date']} 00:00:00"} for r in all_signal_rows],
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
-    with open(SIGNAL_LOG_OUT, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=OUT_FIELDS)
-        writer.writeheader()
-        writer.writerows(all_signal_rows)
-
-    print(f"Tamamlandi: {len(all_score_rows)} skor satiri -> {SCORE_HISTORY_OUT}")
-    print(f"           {len(all_signal_rows)} GUCLU_AL/SAT gecisi -> {SIGNAL_LOG_OUT}")
+    print(f"Tamamlandi: {len(all_score_rows)} skor satiri -> score_history (source='backfill')")
+    print(f"           {len(all_signal_rows)} GUCLU_AL/SAT gecisi -> signal_log (source='backfill')")
 
 
 if __name__ == "__main__":
