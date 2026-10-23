@@ -29,11 +29,11 @@ backend/
   terminal_bistTop100.py → terminal arayüzü
   backfill_daily_bist.py → geçmişe dönük günlük skor backfill (elle, tek seferlik)
   data/                  → "veritabanı" gibi kullanılan CSV/JSON dosyaları
+  diger-piyasalar/       → US/Crypto scanner'lar (KAPSAM DIŞI, artık geliştirilmiyor)
 frontend/
   templates/index.html   → tek sayfalık web UI
   static/                → favicon + bildirim sesleri
 mobile/                  → Expo/React Native Android uygulaması
-diger-piyasalar/         → US/Crypto scanner'lar (KAPSAM DIŞI, artık geliştirilmiyor)
 ```
 
 ## Altyapı

@@ -27,6 +27,7 @@ backend/
     score_history_bist.csv, score_history_bist_backfill.csv,
     signal_log_bist.csv, signal_log_bist_backfill.csv
   device_tokens_bist.json → data/ İÇİNDE DEĞİL, backend/ kökünde (CSV değil, ayrı tutuldu).
+  diger-piyasalar/        → KAPSAM DIŞI (aşağıda ayrıca bahsedilir), sadece klasör düzeni.
 frontend/
   templates/index.html    → Tek sayfalık web UI (tablo + sekmeler + grafik + skor geçmişi
                             + piyasa şeridi). Tüm JS/CSS bu dosyanın içinde (inline).
@@ -37,9 +38,9 @@ frontend/
 
 `scanner_bistTop100.py` + `web_bistTop100.py` + `terminal_bistTop100.py` aynı iş mantığını paylaşır — biri değişince diğerlerinde de tutarlılık kontrolü yap.
 
-**⚠️ VPS'teki eski düz yapı (`/root/momentum-scanner/` kökünde tüm .py + .csv + templates/ + static/) henüz bu yeni backend/frontend/data yapısına GEÇİRİLMEDİ.** Bir sonraki VPS deploy'unda sadece dosya kopyalamak yetmez — VPS'te de aynı klasör yapısı oluşturulmalı (özellikle VPS'teki canlı `score_history_bist.csv`/`signal_log_bist.csv` dosyaları `backend/data/`'ya taşınmalı, yoksa servis yeniden başladığında sıfırdan boş dosyalarla başlar ve geçmiş veri görünmez hale gelir), `systemd` servis dosyasındaki `WorkingDirectory`/`ExecStart` yolu `backend/web_bistTop100.py`'yi gösterecek şekilde güncellenmeli. Bu migrasyon planlanmadan deploy YAPMA.
+VPS de bu yapıya göçürüldü (2026-10-23): `/root/momentum-scanner/backend/` (+ `data/`) ve `/root/momentum-scanner/frontend/` artık yerelle aynı düzende. `systemd` servis dosyası (`/etc/systemd/system/web-bist.service`) `WorkingDirectory=/root/momentum-scanner/backend`, `ExecStart=/root/momentum-scanner/venv/bin/python3 /root/momentum-scanner/backend/web_bistTop100.py`, `Environment=FIREBASE_CREDENTIALS_PATH=/root/momentum-scanner/backend/firebase-service-account.json` olacak şekilde güncellendi. Venv (`/root/momentum-scanner/venv/`) kasıtlı olarak `backend/`'in İÇİNE taşınmadı — dışarıda kalması sorun değil, yol zaten mutlak. Göç sırasında canlı CSV'ler (`score_history_bist.csv`, `signal_log_bist.csv`) checksum ile doğrulanarak taşındı, veri kaybı olmadı.
 
-**`diger-piyasalar/` klasörü (US/Crypto scanner'lar) KAPSAM DIŞI.** Kullanıcı sadece BIST'e odaklanmaya karar verdi, bu dosyalara dokunma, aktif geliştirme orada yapılmıyor.
+**`backend/diger-piyasalar/` klasörü (US/Crypto scanner'lar) KAPSAM DIŞI.** Kullanıcı sadece BIST'e odaklanmaya karar verdi, bu dosyalara dokunma, aktif geliştirme orada yapılmıyor. Sadece klasör düzeni için `backend/` altına taşındı (2026-10-23) — içindeki `web_usTop100.py`'nin `templates`/`static` yolu halihazırda eski/kullanılmayan bir referans (BIST tarafının `frontend/`'e taşınmasından önce de iki üst dizine göre hesaplanıyordu), bu dosya çalıştırılmadığı için düzeltilmedi.
 
 ## Hisse evreni: BIST 30 / BIST 100 / BIST 300 sekmeleri
 
@@ -63,7 +64,7 @@ Varsayılan tablo sıralaması: önce Skor gücü (GUCLU_AL üstte), aynı grup 
 ## Deploy süreci (VPS)
 
 - VPS: `77.245.146.216`, SSH portu **22667** (standart 22 DEĞİL — port değişmiş durumda, `ssh -i ~/.ssh/momentum_vps_key -p 22667 root@77.245.146.216`).
-- Dosyalar: `scp -P 22667 <dosya> root@77.245.146.216:/root/momentum-scanner/...` — **yukarıdaki backend/frontend/data migrasyonu VPS'te henüz yapılmadığı için** bir sonraki deploy'da hedef yolların da güncellenmesi gerekiyor, aşağıdaki uyarıya bak.
+- Dosyalar: `scp -P 22667 <dosya> root@77.245.146.216:/root/momentum-scanner/backend/...` veya `.../frontend/...` (VPS artık yerelle aynı backend/frontend/data yapısında, bkz. aşağıda).
 - Servis: `systemctl restart web-bist.service` (restart gerekir, Flask şablon/kod değişikliklerini otomatik almaz).
 - nginx reverse proxy 80/443'ten Flask'in 127.0.0.1:5000'ine yönlendiriyor, SSL orada sonlanıyor. Flask `host="127.0.0.1"` — dışarıdan doğrudan erişilemez, güvenlik için bilinçli.
 - Domain: `momentumscanner.com.tr`.

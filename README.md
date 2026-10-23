@@ -26,11 +26,11 @@ backend/                 → Flask API + tarama/indikator/skor mantığı + term
   terminal_bistTop100.py    terminal arayüzü
   backfill_daily_bist.py    geçmişe dönük günlük skor backfill (elle, tek seferlik)
   data/                     CSV/JSON "veritabanı" dosyaları (git'e dahil değil)
+  diger-piyasalar/          kapsam dışı (US/Crypto scanner denemeleri)
 frontend/
   templates/index.html     tek sayfalık web UI
   static/                  favicon + bildirim sesleri
 mobile/                   Expo/React Native Android uygulaması
-diger-piyasalar/         kapsam dışı (US/Crypto scanner denemeleri)
 ```
 
 ## Kurulum (yerel geliştirme)
