@@ -526,6 +526,9 @@ function renderPaperPositions(positions) {
   empty.hidden = positions.length > 0;
   positions.forEach(p => {
     const tr = document.createElement('tr');
+    tr.classList.add('paper-row');
+    if (p.ticker === selectedTicker) tr.classList.add('selected');
+    tr.onclick = () => selectTicker(p.ticker);
     tr.innerHTML = `
       <td class="left">${escapeHtml(p.ticker)}</td>
       <td>${fmtPaperPrice(p.entry_price)}</td>
@@ -546,6 +549,9 @@ function renderPaperTrades(trades) {
   empty.hidden = trades.length > 0;
   trades.forEach(t => {
     const tr = document.createElement('tr');
+    tr.classList.add('paper-row');
+    if (t.ticker === selectedTicker) tr.classList.add('selected');
+    tr.onclick = () => selectTicker(t.ticker);
     tr.innerHTML = `
       <td class="left">${escapeHtml(t.ticker)}</td>
       <td>${fmtPaperPrice(t.entry_price)}</td>
