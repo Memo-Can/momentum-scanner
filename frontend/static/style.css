@@ -48,9 +48,9 @@
   }
   #notify-toggle:hover { color: var(--text); }
   #notify-toggle.active { border-color: var(--green); color: var(--green); }
-  #search-wrap { position: relative; }
+  #search-wrap { position: relative; flex-shrink: 0; margin-left: 8px; }
   #search-input {
-    width: 220px;
+    width: 176px;
     background: var(--panel);
     border: 1px solid var(--border);
     color: var(--text);
@@ -343,7 +343,7 @@
     .market-tab-btn { flex: 1; padding: 6px 4px; font-size: 12px; }
     #market-ticker { flex: 1 1 100%; margin-left: 0; padding-left: 0; border-left: none; }
     #header-controls { width: 100%; }
-    #search-wrap { width: 100%; }
+    #search-wrap { width: 100%; margin-left: 0; flex: 1 1 100%; }
     #search-input { width: 100%; }
     .layout {
       flex-direction: column;
