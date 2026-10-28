@@ -41,6 +41,16 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
+# VPS'teki systemd servisi ADMIN_PASSWORD_HASH'i HER ZAMAN env degiskeniyle
+# verir (bkz. CLAUDE.md "Kullanici girisi") - lokalde bu degisken tanimli
+# DEGILSE bu bir lokal gelistirme ortami sayilir ve kullanici adi/sifre hic
+# sorulmadan otomatik giris yapilmis kabul edilir. Boylece lokalde her hisse
+# detayini/Sanal Al-Sat'i test etmek icin sir yonetmeye gerek kalmaz.
+_LOCAL_AUTO_LOGIN = not ADMIN_PASSWORD_HASH
+
+
+def _is_logged_in():
+    return _LOCAL_AUTO_LOGIN or bool(session.get("logged_in"))
 
 
 def _login_required(view):
@@ -50,7 +60,7 @@ def _login_required(view):
 
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("logged_in"):
+        if not _is_logged_in():
             return jsonify({"error": "login required"}), 401
         return view(*args, **kwargs)
 
@@ -192,7 +202,7 @@ def index():
         "index.html",
         refresh_seconds=scanner.REFRESH_SECONDS,
         title="BIST Momentum Scanner",
-        logged_in=session.get("logged_in", False),
+        logged_in=_is_logged_in(),
     )
 
 
@@ -202,7 +212,7 @@ def paper_trading_page():
     # basina ayri sayfasi - tamami login gerektirdigi icin API'lerdeki gibi
     # 401 JSON degil, dogrudan /login'e yonlendirme (gercek sayfa, gercek
     # HTML gizleme degil).
-    if not session.get("logged_in"):
+    if not _is_logged_in():
         return redirect(url_for("login"))
     return render_template(
         "paper_trading.html",
@@ -213,6 +223,14 @@ def paper_trading_page():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    # Lokalde ADMIN_PASSWORD_HASH tanimli degilse (_LOCAL_AUTO_LOGIN) bu
+    # sayfaya hic gelinmeden _is_logged_in() zaten True doner - ama direkt
+    # /login'e gidilirse (ya da POST atilirsa, bos alanlarla dahi) yine
+    # kullanici adi/sifre sormadan girisi tamamlar.
+    if _LOCAL_AUTO_LOGIN:
+        session.permanent = True
+        session["logged_in"] = True
+        return redirect(url_for("index"))
     error = None
     if request.method == "POST":
         username = request.form.get("username", "")

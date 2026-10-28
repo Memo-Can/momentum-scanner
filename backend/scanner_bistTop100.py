@@ -914,15 +914,30 @@ def _seed_last_logged_scores() -> None:
 _seed_last_logged_scores()
 
 
-def _send_push_notifications(entries) -> None:
-    """entries (log_signal_changes'in az once tespit ettigi GUCLU_AL/SAT
-    gecisleri) icin Telegram bot'u uzerinden TELEGRAM_CHAT_ID'ye bir mesaj
-    gonderir. TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID tanimli degilse (henuz
-    kurulmadiysa) sessizce hicbir sey yapmaz - push, tarama dongusunun
-    basarisi icin gerekli degildir."""
+def _telegram_send(text: str) -> None:
+    """Telegram bot API'sine HAM bir metin mesaji gonderir - sinyal
+    bildirimleri (_send_push_notifications) VE sanal al-sat alim/satim
+    bildirimlerinin (_send_paper_trade_notification) ORTAK gonderim kodu.
+    TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID tanimli degilse (henuz kurulmadiysa)
+    sessizce hicbir sey yapmaz, gonderim hatasi exception firlatmadan
+    print() ile loglanir - cagiran taraf (tarama/paper trading dongusu)
+    bundan etkilenmemeli."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": text}).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        urllib.request.urlopen(req, timeout=10).close()
+    except Exception as e:
+        print("Telegram bildirimi gonderilemedi:", e)
 
+
+def _send_push_notifications(entries) -> None:
+    """entries (log_signal_changes'in az once tespit ettigi GUCLU_AL/SAT
+    gecisleri) icin Telegram'a bir mesaj gonderir."""
     for entry in entries:
         # Telegram mesajlarinda gercek metin rengi desteklenmiyor - yesil/kirmizi
         # algisi icin renkli daire emoji kullanilir (GUCLU_AL=yesil, GUCLU_SAT=kirmizi).
@@ -933,15 +948,42 @@ def _send_push_notifications(entries) -> None:
             f"{entry['price']:.2f} TL ({entry['daily_pct']:+.2f}%)\n"
             f"{entry['timestamp']}"
         )
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": text}).encode("utf-8")
-            req = urllib.request.Request(
-                url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
-            )
-            urllib.request.urlopen(req, timeout=10).close()
-        except Exception as e:
-            print("Telegram bildirimi gonderilemedi:", e)
+        _telegram_send(text)
+
+
+_PAPER_EXIT_REASON_LABELS = {
+    "stop": "Stop",
+    "target": "Hedef",
+    "signal_reversal": "Sinyal Tersi",
+    "time_stop": "Sure Asimi",
+}
+
+
+def _send_paper_trade_notification(event: dict) -> None:
+    """Otomatik Sanal Al-Sat alim/satim olaylarini (run_paper_trading_cycle'in
+    az once yaptigi) Telegram'a bildirir - sinyal bildirimleriyle AYNI
+    yesil/kirmizi emoji deseni: alim her zaman yesil (zaten bir GUCLU_AL
+    gecisiyle tetiklendigi icin), satim ise kar/zarara gore yesil/kirmizi.
+    SADECE source='auto' islemler icin cagirilir - manuel alim/satimda
+    kullanici zaten ne yaptigini bildigi icin bildirime gerek yok."""
+    if event["kind"] == "buy":
+        text = (
+            f"🟢 SANAL ALIM: {event['ticker']}\n"
+            f"{event['price']:.2f} TL x {event['shares']:.2f} adet ({event['allocation']:.0f} TL)\n"
+            f"{event['timestamp']}"
+        )
+    else:
+        pnl = event["pnl"]
+        symbol = "🟢" if pnl >= 0 else "🔴"
+        sonuc = "KAR" if pnl >= 0 else "ZARAR"
+        reason = _PAPER_EXIT_REASON_LABELS.get(event["exit_reason"], event["exit_reason"])
+        text = (
+            f"{symbol} SANAL SATIS ({sonuc}): {event['ticker']}\n"
+            f"Giris {event['entry_price']:.2f} -> Cikis {event['exit_price']:.2f} TL\n"
+            f"K/Z: {pnl:+.0f} TL - Neden: {reason}\n"
+            f"{event['timestamp']}"
+        )
+    _telegram_send(text)
 
 
 def log_signal_changes(rows):
@@ -1068,6 +1110,11 @@ def run_paper_trading_cycle(rows) -> None:
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     rows_by_ticker = {r["ticker"]: r for r in rows}
+    # Telegram bildirimleri DB kilidi/commit'inden SONRA (asagida, with
+    # bloğu disinda) gonderilir - log_signal_changes'teki AYNI sebep: ag
+    # istegi _DB_LOCK'u gereksiz yere uzun tutmasin, gonderim basarisiz
+    # olsa bile islem her zaman DB'ye yazilmis olsun.
+    trade_events = []
 
     with _DB_LOCK:
         conn = get_db_connection()
@@ -1110,6 +1157,15 @@ def run_paper_trading_cycle(rows) -> None:
                     )
                     cash += price * pos["shares"]
                     closed_this_cycle.add(pos["ticker"])
+                    trade_events.append({
+                        "kind": "sell",
+                        "ticker": pos["ticker"],
+                        "entry_price": pos["entry_price"],
+                        "exit_price": price,
+                        "exit_reason": exit_reason,
+                        "pnl": pnl,
+                        "timestamp": now_str,
+                    })
 
             open_tickers = {p["ticker"] for p in open_positions} - closed_this_cycle
             open_count = len(open_tickers)
@@ -1154,6 +1210,14 @@ def run_paper_trading_cycle(rows) -> None:
                 cash -= allocation
                 open_tickers.add(ticker)
                 free_slots -= 1
+                trade_events.append({
+                    "kind": "buy",
+                    "ticker": ticker,
+                    "price": price,
+                    "shares": shares,
+                    "allocation": allocation,
+                    "timestamp": now_str,
+                })
 
             conn.execute("UPDATE paper_account SET cash = ? WHERE id = 1", (cash,))
 
@@ -1170,6 +1234,9 @@ def run_paper_trading_cycle(rows) -> None:
             conn.commit()
         finally:
             conn.close()
+
+    for event in trade_events:
+        _send_paper_trade_notification(event)
 
 
 def set_paper_cash(amount: float) -> None:

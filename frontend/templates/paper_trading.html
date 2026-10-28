@@ -19,7 +19,7 @@
   </div>
   <div id="header-controls">
     <a id="paper-trading-link" href="{{ url_for('index') }}">Ana Sayfaya Don</a>
-    <a id="auth-link" href="{{ url_for('logout') }}">Cikis Yap</a>
+    <a id="auth-link" href="{{ url_for('logout') }}" onclick="return confirm('Cikis yapmak istediginize emin misiniz?');">Cikis Yap</a>
   </div>
 </header>
 

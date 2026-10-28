@@ -23,7 +23,7 @@
     <button id="notify-toggle" type="button" title="Guclu Al/Sat sinyallerinde bildirim ve ses">Bildirimler: Kapali</button>
     {% if logged_in %}
       <a id="paper-trading-link" href="{{ url_for('paper_trading_page') }}">Sanal Al-Sat</a>
-      <a id="auth-link" href="{{ url_for('logout') }}">Cikis Yap</a>
+      <a id="auth-link" href="{{ url_for('logout') }}" onclick="return confirm('Cikis yapmak istediginize emin misiniz?');">Cikis Yap</a>
     {% else %}
       <a id="auth-link" href="{{ url_for('login') }}">Giris Yap</a>
     {% endif %}
@@ -62,10 +62,10 @@
           <th data-key="daily" data-type="num" data-tip="Canli fiyat ile Yahoo'nun canli 'onceki kapanis' alani arasindaki yuzde fark. Liste varsayilan olarak (Skor grubu icinde) bu sutuna gore buyukten kucuge siralanir.">Gunluk<span class="arrow"></span></th>
           <th data-key="d5" data-type="num" data-tip="Son 5 islem gunundeki yuzde degisim - kayan pencere (takvim haftasi degil), Yahoo'nun web sitesindeki '5D' ile ayni mantik.">5D<span class="arrow"></span></th>
           <th data-key="m1" data-type="num" data-tip="Son 21 islem gunundeki (~1 aylik) yuzde degisim - kayan pencere (takvim ayi degil), Yahoo'nun web sitesindeki '1M' ile ayni mantik.">1M<span class="arrow"></span></th>
-          <th data-key="day_stop" data-type="num" data-tip="ATR(14)x1.5 mesafeli, Skor'un yonune (AL/SAT) gore gun ici (day trade) stop-loss fiyati. Skor NOTR ise gosterilmez.">GunStop<span class="arrow"></span></th>
-          <th data-key="day_target" data-type="num" data-tip="Gun ici hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">GunHedef<span class="arrow"></span></th>
-          <th data-key="swing_stop" data-type="num" data-tip="ATR(14)x3.0 mesafeli, birkac gun/hafta tasinacak swing pozisyonlar icin stop-loss fiyati.">SwStop<span class="arrow"></span></th>
-          <th data-key="swing_target" data-type="num" data-tip="Swing pozisyon icin hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">SwHedef<span class="arrow"></span></th>
+          <th class="login-only-col" data-key="day_stop" data-type="num" data-tip="ATR(14)x1.5 mesafeli, Skor'un yonune (AL/SAT) gore gun ici (day trade) stop-loss fiyati. Skor NOTR ise gosterilmez.">GunStop<span class="arrow"></span></th>
+          <th class="login-only-col" data-key="day_target" data-type="num" data-tip="Gun ici hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">GunHedef<span class="arrow"></span></th>
+          <th class="login-only-col" data-key="swing_stop" data-type="num" data-tip="ATR(14)x3.0 mesafeli, birkac gun/hafta tasinacak swing pozisyonlar icin stop-loss fiyati.">SwStop<span class="arrow"></span></th>
+          <th class="login-only-col" data-key="swing_target" data-type="num" data-tip="Swing pozisyon icin hedef fiyat - stop mesafesinin 2 kati uzaklikta (risk:odul ~1:2).">SwHedef<span class="arrow"></span></th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -320,10 +320,10 @@ function renderRows(rows) {
       <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
       <td class="${pctClass(r.d5)}">${fmtPct(r.d5)}</td>
       <td class="${pctClass(r.m1)}">${fmtPct(r.m1)}</td>
-      <td class="${r.day_stop === null ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
-      <td class="${r.day_target === null ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
-      <td class="${r.swing_stop === null ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
-      <td class="${r.swing_target === null ? 'dash' : ''}">${fmtPrice(r.swing_target)}</td>
+      <td class="login-only-col ${r.day_stop === null ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
+      <td class="login-only-col ${r.day_target === null ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
+      <td class="login-only-col ${r.swing_stop === null ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
+      <td class="login-only-col ${r.swing_target === null ? 'dash' : ''}">${fmtPrice(r.swing_target)}</td>
     `;
     tbody.appendChild(tr);
   });
