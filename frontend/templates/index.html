@@ -69,6 +69,54 @@
       </thead>
       <tbody id="rows"></tbody>
     </table>
+
+    {% if logged_in %}
+    <section id="paper-trading">
+      <div id="paper-trading-header">
+        <h2>Sanal Al-Sat</h2>
+        <button id="paper-toggle" type="button" aria-label="Daralt/Genislet" title="Daralt/Genislet">&#9650;</button>
+      </div>
+      <div id="paper-body">
+        <div class="sub">GUCLU AL'a yeni gecen hisseler otomatik "satin alinir" - swing stop/hedef, GUCLU SAT'a donus ya da 15 islem gunu asimi ile "satilir". Gercek para degildir, sadece Skor'un performansini olcmek icindir.</div>
+        <div id="paper-summary"></div>
+        <h3>Acik Pozisyonlar</h3>
+        <div id="paper-positions-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="left">Hisse</th>
+                <th>Giris Fiyati</th>
+                <th>Guncel Fiyat</th>
+                <th>K/Z</th>
+                <th>Stop</th>
+                <th>Hedef</th>
+                <th class="left">Giris Tarihi</th>
+              </tr>
+            </thead>
+            <tbody id="paper-positions"></tbody>
+          </table>
+          <div id="paper-empty" hidden>Su an acik pozisyon yok.</div>
+        </div>
+        <h3>Kapanan Islemler</h3>
+        <div id="paper-trades-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="left">Hisse</th>
+                <th>Giris Fiyati</th>
+                <th>Cikis Fiyati</th>
+                <th>K/Z</th>
+                <th class="left">Cikis Nedeni</th>
+                <th class="left">Cikis Tarihi</th>
+              </tr>
+            </thead>
+            <tbody id="paper-trades"></tbody>
+          </table>
+          <div id="paper-trades-empty" hidden>Henuz kapanan islem yok.</div>
+        </div>
+      </div>
+    </section>
+    {% endif %}
   </div>
 
   <div id="side">
@@ -103,54 +151,6 @@
     </div>
   </div>
 </div>
-
-{% if logged_in %}
-<section id="paper-trading">
-  <div id="paper-trading-header">
-    <h2>Sanal Al-Sat</h2>
-    <button id="paper-toggle" type="button" aria-label="Daralt/Genislet" title="Daralt/Genislet">&#9650;</button>
-  </div>
-  <div id="paper-body">
-    <div class="sub">GUCLU AL'a yeni gecen hisseler otomatik "satin alinir" - swing stop/hedef, GUCLU SAT'a donus ya da 15 islem gunu asimi ile "satilir". Gercek para degildir, sadece Skor'un performansini olcmek icindir.</div>
-    <div id="paper-summary"></div>
-    <h3>Acik Pozisyonlar</h3>
-    <div id="paper-positions-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th class="left">Hisse</th>
-            <th>Giris Fiyati</th>
-            <th>Guncel Fiyat</th>
-            <th>K/Z</th>
-            <th>Stop</th>
-            <th>Hedef</th>
-            <th class="left">Giris Tarihi</th>
-          </tr>
-        </thead>
-        <tbody id="paper-positions"></tbody>
-      </table>
-      <div id="paper-empty" hidden>Su an acik pozisyon yok.</div>
-    </div>
-    <h3>Kapanan Islemler</h3>
-    <div id="paper-trades-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th class="left">Hisse</th>
-            <th>Giris Fiyati</th>
-            <th>Cikis Fiyati</th>
-            <th>K/Z</th>
-            <th class="left">Cikis Nedeni</th>
-            <th class="left">Cikis Tarihi</th>
-          </tr>
-        </thead>
-        <tbody id="paper-trades"></tbody>
-      </table>
-      <div id="paper-trades-empty" hidden>Henuz kapanan islem yok.</div>
-    </div>
-  </div>
-</section>
-{% endif %}
 
 <div id="modal-overlay" class="modal-overlay" hidden>
   <div class="modal-box">

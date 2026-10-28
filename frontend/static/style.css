@@ -162,21 +162,37 @@
   .sym-GUCLU_SAT { color: var(--red-strong); font-weight: 700; }
   .dash { color: var(--muted); }
 
-  #paper-trading { margin: 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }
+  /* #table-wrap'in ICINDE (tablonun altinda) yer alir - bkz. index.html -
+     bu sayede dogal olarak sadece hisse tablosunun hizasinda durur, #side
+     (grafik/skor gecmisi) panelinin altina/ustune hic tasmaz. Ozel bir
+     margin-right hesabina gerek yok, #side zaten AYRI bir flex kardes.
+     position:sticky + bottom:0: #table-wrap (scroll container) icinde
+     tablo yuzlerce satir olsa bile, bu panel KAYDIRMADAN HER ZAMAN ekranin
+     altinda sabit/gorunur kalir - tablonun en altina kadar kaydirmaya
+     gerek kalmaz. */
+  #paper-trading {
+    position: sticky; bottom: 0; z-index: 5;
+    margin: 14px 0 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 16px; box-shadow: 0 -8px 16px -8px rgba(0,0,0,0.5);
+  }
   #paper-trading-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
-  #paper-trading h2 { margin: 0 0 2px; font-size: 16px; }
+  #paper-trading h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   #paper-toggle {
     background: none; border: 1px solid var(--border); color: var(--muted);
-    border-radius: 6px; width: 28px; height: 28px; font-size: 11px; cursor: pointer;
+    border-radius: 6px; width: 24px; height: 24px; font-size: 10px; cursor: pointer;
   }
   #paper-toggle:hover { color: var(--text); border-color: var(--yellow); }
   #paper-body[hidden] { display: none; }
-  #paper-trading .sub { color: var(--muted); font-size: 12px; margin: 10px 0 14px; }
-  #paper-summary { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 18px; }
+  #paper-trading .sub { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
+  #paper-summary { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
   #paper-summary .stat { font-size: 12px; color: var(--muted); }
   #paper-summary .stat b { display: block; font-size: 16px; color: var(--text); margin-top: 2px; }
-  #paper-trading h3 { font-size: 13px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
-  #paper-trading table { border-collapse: collapse; width: 100%; }
+  #paper-trading h3 { font-size: 13px; color: var(--muted); margin: 16px 0 8px; font-weight: 600; }
+  /* Panel darlastiginda (yukaridaki margin-right yuzunden) sutunlar
+     sikismasin - tablo kendi min genisligini korur, tasarsa wrap yatay
+     kaydirma sunar (ana tablonun #table-wrap'iyla AYNI desen). */
+  #paper-positions-wrap, #paper-trades-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #paper-trading table { border-collapse: collapse; width: 100%; min-width: 560px; }
   #paper-trading th { text-align: right; padding: 6px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
   #paper-trading th.left { text-align: left; }
   #paper-trading td { padding: 6px 10px; text-align: right; border-bottom: 1px solid #1d2029; font-size: 13px; white-space: nowrap; }
