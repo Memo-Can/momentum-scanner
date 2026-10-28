@@ -17,7 +17,8 @@ Her 5 dakikada bir Yahoo Finance'ten BIST hisse verisi çekilip; EMA(9/21), MACD
 - **Skor Geçmişi:** Günlük/Saatlik/5 Dakikalık sekmeleri — her zaman son 1 yılı kapsar (geçmişe dönük backfill + canlı log birleştirilerek).
 - **Arama, sütun sıralama, kolon başlığı tooltip'leri.**
 - **Web bildirimleri:** Bir hisse GÜÇLÜ AL/SAT'a geçtiğinde tarayıcı bildirimi + ses (sadece gerçek geçişte, spam yok).
-- **Mobil uygulama (Android):** Web sitesini saran bir WebView + Firebase üzerinden GÜÇLÜ AL/SAT push bildirimleri.
+- **Telegram bildirimleri:** Bir hisse GÜÇLÜ AL/SAT'a geçtiğinde Telegram'a anlık mesaj (2026-10'da mobil push'un yerini aldı).
+- **Mobil uygulama (Android):** Web sitesini saran bir WebView (push bildirimi artık Telegram üzerinden, bkz. yukarı).
 - **Sinyal/skor geçmişi (SQLite):** Zamanla "Skor gerçekten işe yarıyor mu" diye kendi verinle değerlendirebilmen için.
 - **Sanal Al-Sat (paper trading):** 1.000.000 TL sanal bakiye, GÜÇLÜ AL'a yeni geçen hisseleri otomatik "satın alır", swing stop/hedef ya da GÜÇLÜ SAT'a dönüş ya da süre aşımıyla "satar" — Skor'un gerçek performansını ölçmek için (gerçek para değil).
 
@@ -42,7 +43,7 @@ mobile/                  → Expo/React Native Android uygulaması
 - **VPS:** DigitalOcean (77.245.146.216), nginx reverse proxy + Let's Encrypt SSL, Flask `systemd` servisi (`web-bist.service`).
 - **Domain:** `momentumscanner.com.tr` (hosting.com.tr üzerinden alındı).
 - **Veri kaynağı:** Yahoo Finance (`yfinance`, resmi olmayan API — rate-limit riskine dikkat, bkz. `CLAUDE.md`).
-- **Push bildirimleri:** Firebase Cloud Messaging.
+- **Push bildirimleri:** Telegram bot API (2026-10'da Firebase Cloud Messaging'in yerini aldı).
 
 ## Proje geçmişi (özet)
 
@@ -60,6 +61,7 @@ Proje `usd-info` adıyla başlayıp `momentum-scanner`'a taşındı ve kapsamı 
 10. Repo yeniden düzenlendi: `backend/`/`frontend/` ayrımı + CSV "veritabanı" dosyaları `backend/data/`'ya taşındı (Ekim 2026)
 11. CSV "veritabanı" → SQLite'a geçiş: canlı CSV dosyası RAM'i doldurmaya başlamıştı (sınırlı VPS belleği + her başlangıçta tamamının belleğe okunması), tek bir `momentum_scanner.db` + indeksli sorgular ile değiştirildi (Ekim 2026)
 12. Sanal Al-Sat (paper trading) simülasyonu eklendi: Skor sisteminin gerçek edge'ini ölçmek için 1.000.000 TL sanal bakiyeyle otomatik al-sat (Ekim 2026)
+13. Push bildirimleri Firebase'den Telegram'a taşındı: kurulum/bakım yükü çok daha az, mobil app'e (APK/EAS) bağımlılık kalktı (Ekim 2026)
 
 ## Bilinmesi gerekenler
 

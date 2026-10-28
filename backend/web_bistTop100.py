@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 
 import scanner_bistTop100 as scanner
 import yfinance as yf
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template
 
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 app = Flask(
@@ -338,20 +338,6 @@ def api_indicators(ticker: str):
             },
         )
     )
-
-
-@app.route("/api/register-device", methods=["POST"])
-def register_device():
-    """Mobil uygulamanin (Expo push token'i aldiktan sonra) kaydolmasi icin -
-    bir GUCLU_AL/SAT gecisinde bu token'a push bildirimi gonderilecek. Ayni
-    token tekrar gelirse (uygulama her acildiginda oldugu gibi) sorun degil,
-    register_device_token upsert yapar."""
-    data = request.get_json(silent=True) or {}
-    token, platform = data.get("token"), data.get("platform")
-    if not token or platform not in ("android", "ios"):
-        return jsonify({"error": "token and platform ('android'|'ios') required"}), 400
-    scanner.register_device_token(token, platform)
-    return jsonify({"status": "ok"})
 
 
 @app.route("/api/paper/summary")

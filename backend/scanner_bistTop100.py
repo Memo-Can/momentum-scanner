@@ -35,20 +35,19 @@ import os
 import sqlite3
 import threading
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 import pandas as pd
 import yfinance as yf
 
-# firebase-admin henuz kurulu olmayabilir (requirements.txt'e yeni eklendi) -
-# import basarisiz olursa push bildirimleri sessizce devre disi kalir, geri
-# kalan tum tarama/skor mantigi normal calismaya devam eder.
-try:
-    import firebase_admin
-    from firebase_admin import credentials, messaging
-except ImportError:
-    firebase_admin = None
+# Telegram bot token/chat_id - sir asla koda/repoya yazilmaz, sadece ortam
+# degiskeni (systemd servis dosyasinda Environment=, yerelde export). Ikisi
+# de tanimli degilse _send_push_notifications() sessizce atlar - Telegram
+# kurulmadan da tum tarama/skor mantigi normal calismaya devam eder.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 REFRESH_SECONDS = 300  # 5 dakika
 MAX_RETRIES = 2
@@ -99,7 +98,6 @@ BIST100_TICKERS = [f"{t}.IS" for t in BIST100_TICKERS]
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "momentum_scanner.db")
-DEVICE_TOKENS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_tokens_bist.json")
 
 # Sanal para (paper trading) simulasyonu: GUCLU_AL'a YENI GECEN hisseler icin
 # otomatik "satin alma", swing stop/hedef (asagida ATR_SWING_MULT/ATR_TARGET_R)
@@ -164,6 +162,12 @@ def _init_db() -> None:
                 );
                 CREATE INDEX IF NOT EXISTS idx_signal_log_ticker_ts
                     ON signal_log(ticker, timestamp);
+
+                CREATE TABLE IF NOT EXISTS last_known_score (
+                    ticker TEXT PRIMARY KEY,
+                    score TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS paper_account (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -235,15 +239,6 @@ _init_paper_trading()
 # itibaren gercek gecisler (prev != 'GUCLU_AL' iken score=='GUCLU_AL' olmasi)
 # yakalanir.
 _paper_last_score = {}
-
-# Firebase kimlik dosyasi (servis hesabi JSON'u) commit'lenmez - VPS'te
-# systemd servis dosyasinda FIREBASE_CREDENTIALS_PATH env degiskeniyle
-# gosterilir. Dosya yoksa (henuz Firebase projesi kurulmadiysa) push
-# bildirimleri sessizce devre disi kalir, scanner normal calismaya devam eder.
-if firebase_admin is not None:
-    _firebase_cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH")
-    if _firebase_cred_path and os.path.isfile(_firebase_cred_path) and not firebase_admin._apps:
-        firebase_admin.initialize_app(credentials.Certificate(_firebase_cred_path))
 
 EMA_FAST = 9
 EMA_SLOW = 21
@@ -884,89 +879,54 @@ SCORE_ORDER = {"GUCLU_AL": 0, "AL": 1, "NOTR": 2, "SAT": 3, "GUCLU_SAT": 4}
 _last_logged_score = {}  # ticker -> log dosyasina en son yazilan skor
 
 
-def load_device_tokens() -> dict:
-    """Kayitli mobil cihaz push token'larini okur. Dosya yoksa (henuz kimse
-    kayit olmadiysa) bos sozluk doner."""
-    if not os.path.isfile(DEVICE_TOKENS_PATH):
-        return {}
+def _seed_last_logged_scores() -> None:
+    """Process (re)basladiginda _last_logged_score'u her ticker'in SON
+    bilinen skoruyla (last_known_score tablosundan, O(1) - buyuk
+    score_history tablosu TARANMAZ) doldurur - boylece bir restart, zaten
+    GUCLU_AL/SAT durumunda olan hisseleri YANLISLIKLA 'yeni gecis' sayip
+    tekrar Telegram bildirimi GONDERMEZ. (Gercekten yasandi, 2026-10-28: ard
+    arda deploy/restart'lar AKBNK gibi gunlerce GUCLU_SAT'ta kalan hisseleri
+    her restart'ta yeniden bildirdi.)"""
+    conn = get_db_connection()
     try:
-        with open(DEVICE_TOKENS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
+        rows = conn.execute("SELECT ticker, score FROM last_known_score").fetchall()
+        for row in rows:
+            _last_logged_score[row["ticker"]] = row["score"]
+    finally:
+        conn.close()
 
 
-def save_device_tokens(tokens: dict) -> None:
-    """Token sozlugunu atomik olarak yazar - once .tmp dosyasina yazip
-    os.replace() ile degistirir, yazma sirasinda surec olursa (orn. servis
-    restart) yarim/bozuk bir JSON dosyasi kalmasin diye."""
-    tmp_path = DEVICE_TOKENS_PATH + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(tokens, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, DEVICE_TOKENS_PATH)
-
-
-def register_device_token(token: str, platform: str) -> None:
-    """Bir mobil cihazin push token'ini kaydeder/gunceller (upsert) - uygulama
-    her acildiginda ayni token tekrar gelebilir, sorun degil."""
-    tokens = load_device_tokens()
-    tokens[token] = {
-        "platform": platform,
-        "registered_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    save_device_tokens(tokens)
-
-
-def prune_device_tokens(dead_tokens: set) -> None:
-    """FCM'in 'artik gecersiz' dedigi token'lari (uygulama silinmis, bildirim
-    izni kaldirilmis vb.) kayitlardan temizler."""
-    if not dead_tokens:
-        return
-    tokens = load_device_tokens()
-    for t in dead_tokens:
-        tokens.pop(t, None)
-    save_device_tokens(tokens)
+_seed_last_logged_scores()
 
 
 def _send_push_notifications(entries) -> None:
     """entries (log_signal_changes'in az once tespit ettigi GUCLU_AL/SAT
-    gecisleri) icin kayitli tum cihazlara Firebase Cloud Messaging (FCM)
-    uzerinden push bildirimi gonderir. Firebase henuz kurulmadiysa (paket
-    kurulu degil ya da kimlik dosyasi yoksa) sessizce hicbir sey yapmaz -
-    push, tarama dongusunun basarisi icin gerekli degildir."""
-    if firebase_admin is None or not firebase_admin._apps:
-        return
-    tokens = load_device_tokens()
-    if not tokens:
+    gecisleri) icin Telegram bot'u uzerinden TELEGRAM_CHAT_ID'ye bir mesaj
+    gonderir. TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID tanimli degilse (henuz
+    kurulmadiysa) sessizce hicbir sey yapmaz - push, tarama dongusunun
+    basarisi icin gerekli degildir."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
-    try:
-        messages = []
-        for entry in entries:
-            label = "GUCLU AL" if entry["score"] == "GUCLU_AL" else "GUCLU SAT"
-            title = f"{entry['ticker']} -> {label}"
-            body = f"{entry['price']:.2f} TL ({entry['daily_pct']:+.2f}%)"
-            for token in tokens:
-                messages.append(
-                    messaging.Message(
-                        notification=messaging.Notification(title=title, body=body),
-                        data={"ticker": entry["ticker"], "score": entry["score"]},
-                        token=token,
-                    )
-                )
-        if not messages:
-            return
-
-        response = messaging.send_each(messages)
-        dead_tokens = set()
-        for msg, result in zip(messages, response.responses):
-            if not result.success and isinstance(
-                result.exception, (messaging.UnregisteredError, messaging.SenderIdMismatchError)
-            ):
-                dead_tokens.add(msg.token)
-        prune_device_tokens(dead_tokens)
-    except Exception as e:
-        print("Push bildirimi gonderilemedi:", e)
+    for entry in entries:
+        # Telegram mesajlarinda gercek metin rengi desteklenmiyor - yesil/kirmizi
+        # algisi icin renkli daire emoji kullanilir (GUCLU_AL=yesil, GUCLU_SAT=kirmizi).
+        symbol = "🟢" if entry["score"] == "GUCLU_AL" else "🔴"
+        label = "GUCLU AL" if entry["score"] == "GUCLU_AL" else "GUCLU SAT"
+        text = (
+            f"{symbol} {entry['ticker']} -> {label}\n"
+            f"{entry['price']:.2f} TL ({entry['daily_pct']:+.2f}%)\n"
+            f"{entry['timestamp']}"
+        )
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": text}).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            urllib.request.urlopen(req, timeout=10).close()
+        except Exception as e:
+            print("Telegram bildirimi gonderilemedi:", e)
 
 
 def log_signal_changes(rows):
@@ -1039,6 +999,15 @@ def log_score_history(rows):
             conn.executemany(
                 """INSERT INTO score_history (timestamp, ticker, score_raw, score, price, source)
                    VALUES (:timestamp, :ticker, :score_raw, :score, :price, 'live')""",
+                entries,
+            )
+            # last_known_score: her ticker icin TEK satir (upsert) - buyuyen
+            # score_history'yi taramadan "bu ticker su an hangi skorda" sorusuna
+            # O(1) cevap vermek icin (bkz. _seed_last_logged_scores()).
+            conn.executemany(
+                """INSERT INTO last_known_score (ticker, score, timestamp)
+                   VALUES (:ticker, :score, :timestamp)
+                   ON CONFLICT(ticker) DO UPDATE SET score=excluded.score, timestamp=excluded.timestamp""",
                 entries,
             )
             conn.commit()

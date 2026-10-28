@@ -14,8 +14,8 @@ Her 5 dakikada bir Yahoo Finance'ten BIST hisse verisi çekilip; EMA(9/21), MACD
 - **Piyasa göstergesi şeridi:** Dolar, Euro, Sterlin, BIST100 endeksi, Bitcoin, Gram Altın, Gram Gümüş, Petrol.
 - **Hisse grafiği:** 3 aylık mum grafiği + açılır/kapanır EMA/Bollinger/MACD/RSI katmanları.
 - **Skor Geçmişi:** Günlük/Saatlik/5 Dakikalık sekmeleri, her zaman son 1 yılı kapsar.
-- **Arama, sütun sıralama, web bildirimleri** (bir hisse GÜÇLÜ AL/SAT'a geçtiğinde).
-- **Android companion app:** Web sitesini saran bir WebView + Firebase push bildirimleri.
+- **Arama, sütun sıralama, web bildirimleri + Telegram bildirimleri** (bir hisse GÜÇLÜ AL/SAT'a geçtiğinde).
+- **Android companion app:** Web sitesini saran bir WebView.
 
 ## Proje yapısı
 
