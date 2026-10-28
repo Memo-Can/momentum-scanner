@@ -598,6 +598,35 @@ def api_paper_manual_sell():
     return jsonify(result)
 
 
+@app.route("/api/debug/test-telegram")
+@_login_required
+def api_debug_test_telegram():
+    """GECICI test endpoint'i (2026-10-28) - Telegram mesaj formatlarinin
+    hepsini (sinyal AL/SAT + otomatik alim/kar satisi/zarar satisi) gercek
+    gonderim fonksiyonlariyla (sahte ama belirgin TEST ticker'lariyla) bir
+    kez tetikler, boylece telefon uzerinden formati/ikonlari kontrol etmek
+    icin tarama dongusunun gercek bir sinyal/islem uretmesini beklemeye
+    gerek kalmaz. Kontrol bitince bu route KALDIRILACAK."""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    scanner._send_push_notifications([
+        {"timestamp": now_str, "ticker": "TESTAL", "score": "GUCLU_AL", "price": 123.45, "daily_pct": 3.2},
+        {"timestamp": now_str, "ticker": "TESTSAT", "score": "GUCLU_SAT", "price": 67.89, "daily_pct": -2.5},
+    ])
+    scanner._send_paper_trade_notification({
+        "kind": "buy", "ticker": "TESTBUY", "price": 50.0, "shares": 2000.0,
+        "allocation": 100000.0, "timestamp": now_str,
+    })
+    scanner._send_paper_trade_notification({
+        "kind": "sell", "ticker": "TESTKAR", "entry_price": 50.0, "exit_price": 56.0,
+        "exit_reason": "target", "pnl": 12000.0, "timestamp": now_str,
+    })
+    scanner._send_paper_trade_notification({
+        "kind": "sell", "ticker": "TESTZARAR", "entry_price": 50.0, "exit_price": 46.0,
+        "exit_reason": "stop", "pnl": -8000.0, "timestamp": now_str,
+    })
+    return jsonify({"sent": 5})
+
+
 if __name__ == "__main__":
     # scanner_bistTop100 import edilirken DB/tablolar zaten hazirlandi
     # (bkz. scanner._init_db()) - eskiden burada ayrica tum skor gecmisi

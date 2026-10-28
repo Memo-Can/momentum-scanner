@@ -961,20 +961,23 @@ _PAPER_EXIT_REASON_LABELS = {
 
 def _send_paper_trade_notification(event: dict) -> None:
     """Otomatik Sanal Al-Sat alim/satim olaylarini (run_paper_trading_cycle'in
-    az once yaptigi) Telegram'a bildirir - sinyal bildirimleriyle AYNI
-    yesil/kirmizi emoji deseni: alim her zaman yesil (zaten bir GUCLU_AL
-    gecisiyle tetiklendigi icin), satim ise kar/zarara gore yesil/kirmizi.
-    SADECE source='auto' islemler icin cagirilir - manuel alim/satimda
-    kullanici zaten ne yaptigini bildigi icin bildirime gerek yok."""
+    az once yaptigi) Telegram'a bildirir. Sinyal bildirimleri (🟢/🔴 daire)
+    ile KARISTIRILMASIN diye BILINCLI olarak FARKLI bir ikon ailesi kullanilir
+    (2026-10-28'de, sepet+daire denemesi sinyallerle ayni gorundugu icin
+    degistirildi): alim = sepet (giris, henuz iyi/kotu degil), satis =
+    kar/zarara gore yukari/asagi grafik oku (trading botlarinda kar/zarar
+    yonu icin yaygin kullanilan ikon). SADECE source='auto' islemler icin
+    cagirilir - manuel alim/satimda kullanici zaten ne yaptigini bildigi
+    icin bildirime gerek yok."""
     if event["kind"] == "buy":
         text = (
-            f"🟢 SANAL ALIM: {event['ticker']}\n"
+            f"🛒 SANAL ALIM: {event['ticker']}\n"
             f"{event['price']:.2f} TL x {event['shares']:.2f} adet ({event['allocation']:.0f} TL)\n"
             f"{event['timestamp']}"
         )
     else:
         pnl = event["pnl"]
-        symbol = "🟢" if pnl >= 0 else "🔴"
+        symbol = "📈" if pnl >= 0 else "📉"
         sonuc = "KAR" if pnl >= 0 else "ZARAR"
         reason = _PAPER_EXIT_REASON_LABELS.get(event["exit_reason"], event["exit_reason"])
         text = (
