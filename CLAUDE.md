@@ -89,6 +89,18 @@ Konfluens Skor'un gerçekte bir edge sağlayıp sağlamadığını kendi canlı 
 - **API:** `/api/paper/summary`, `/api/paper/positions` (canlı fiyat/K-Z `_state['rows']` ile zenginleştirilir), `/api/paper/trades`, `/api/paper/equity`. Frontend'de `frontend/templates/index.html`'deki `#paper-trading` bölümü (ana tablonun ALTINDA, ayrı bir section — BIST sekmelerinden bağımsız), başlığa tıklanınca daralır/genişler (tercih `localStorage`'da tutulur, sadece tarayıcı bazlı).
 - VPS'e deploy edildi (2026-10-23) — `paper_*` tabloları `CREATE TABLE IF NOT EXISTS` ile ilk `import`'ta otomatik oluştu, manuel migrasyon gerekmedi. Deploy anında (restart ile `_paper_last_score` sıfırlandığı için) hiçbir pozisyon otomatik açılmadı, doğrulandı.
 
+### Manuel kontrol (2026-10-28'de eklendi) — otomatik sistemden BAĞIMSIZ
+
+Kullanıcı artık nakti elle düzenleyebiliyor, herhangi bir hisseyi "manuel takip listesi"ne ekleyip o listeden istediği an elle alıp satabiliyor. Bu, yukarıdaki otomatik sistemle (`run_paper_trading_cycle`) **karışmaz**:
+
+- `paper_trades`'e **`source`** sütunu eklendi (`'auto'`/`'manual'`, var olan tablo `ALTER TABLE` ile migrate edildi — `PRAGMA table_info` kontrolüyle idempotent, `_init_db()`'de). Mevcut (deploy öncesi açılmış) satırlar otomatik `'auto'` sayılır.
+- **`run_paper_trading_cycle()`'ın çıkış kontrolü SADECE `source='auto'` satırları işler** — manuel pozisyonlara stop/hedef/GUCLU_SAT/süre kuralı hiç UYGULANMAZ, sadece kullanıcı elle "Sat" dediğinde kapanır (`manual_sell()`). `positions_value`/equity hesaplaması ise DEĞİŞMEDİ — hem auto hem manual açık pozisyonları sayar (toplam portföy değeri ikisini de yansıtmalı).
+- Yeni tablo: `paper_watchlist(ticker PRIMARY KEY, added_at)` — kullanıcının elle eklediği, henüz almadığı hisseler. `web_bistTop100.py: _scan_once()` bu ticker'ları da (açık pozisyonlarla AYNI sebeple — bkz. yukarıdaki USHOL notu) her döngüde tarama havuzuna ekler, yoksa fiyatsız kalır.
+- Manuel alımda tutar HER ALIMDA elle girilir (otomatik sistemin sabit 1/5 payı YOK) — `manual_buy(ticker, allocation, price)`, tek sınırı mevcut nakit, 5-slot limitine dahil DEĞİL.
+- Yeni API'ler (`web_bistTop100.py`, hepsi `@_login_required`): `POST /api/paper/cash`, `POST /api/paper/reset` (body `{amount}`), `GET/POST /api/paper/watchlist`, `DELETE /api/paper/watchlist/<ticker>`, `POST /api/paper/manual-buy`, `POST /api/paper/manual-sell`.
+- Frontend: yan panelde (`#side-content`) "Sanal Al-Sat Takibine Ekle/Çıkar" butonu; Sanal Al-Sat panelinde nakit düzenleme input'u + "Her Şeyi Sıfırla" butonu (JS `confirm()` ile onay ister) + "Manuel Takip Listesi" alt-bölümü; Açık Pozisyonlar/Kapanan İşlemler tablolarına "Kaynak" (Otomatik/Manuel) sütunu, manuel açık pozisyonlara "Sat" butonu.
+- **`reset_paper_trading(starting_balance)`:** `paper_trades`/`paper_equity_history`/`paper_watchlist` tamamen SİLİNİR, `cash` VE `starting_balance` (K/Z'nin ölçüldüğü baz) verilen tutara eşitlenir — **sabit `PAPER_STARTING_BALANCE` değil**, kullanıcı her sıfırlamada kendi başlangıç tutarını seçer (frontend "Yeni nakit" kutusundaki değeri kullanır, boşsa `prompt()` ile sorar). `_paper_last_score` KASITLI dokunulmaz (yoksa restart-hatasıyla aynı sebepten sıfırlama sonrası toplu yanlış alım tetiklenir).
+
 ## Deploy süreci (VPS)
 
 - VPS: `77.245.146.216`, SSH portu **22667** (standart 22 DEĞİL — port değişmiş durumda, `ssh -i ~/.ssh/momentum_vps_key -p 22667 root@77.245.146.216`).

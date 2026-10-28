@@ -205,9 +205,24 @@ def _init_db() -> None:
                 );
                 CREATE INDEX IF NOT EXISTS idx_paper_equity_ts
                     ON paper_equity_history(timestamp);
+
+                CREATE TABLE IF NOT EXISTS paper_watchlist (
+                    ticker TEXT PRIMARY KEY,
+                    added_at TEXT NOT NULL
+                );
                 """
             )
             conn.commit()
+
+            # paper_trades 'source' sutunu olmadan DEPLOY EDILMIS olabilir
+            # (manuel al-sat 2026-10'da eklendi) - CREATE TABLE IF NOT EXISTS
+            # var olan bir tabloyu GUNCELLEMEZ, bu yuzden ayrica kontrol
+            # edilip gerekirse eklenir. Mevcut satirlar (hepsi otomatik
+            # sistemle acildi) varsayilan 'auto' degerini dogru alir.
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(paper_trades)").fetchall()]
+            if "source" not in cols:
+                conn.execute("ALTER TABLE paper_trades ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'")
+                conn.commit()
         finally:
             conn.close()
 
@@ -1058,8 +1073,14 @@ def run_paper_trading_cycle(rows) -> None:
         conn = get_db_connection()
         try:
             cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
+            # SADECE source='auto' - manuel acilan pozisyonlara (kullanici
+            # elle satana kadar) otomatik stop/hedef/GUCLU_SAT/sure kontrolu
+            # UYGULANMAZ, bkz. manual_buy()/manual_sell().
             open_positions = [
-                dict(r) for r in conn.execute("SELECT * FROM paper_trades WHERE status = 'open'").fetchall()
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM paper_trades WHERE status = 'open' AND source = 'auto'"
+                ).fetchall()
             ]
 
             closed_this_cycle = set()
@@ -1126,8 +1147,8 @@ def run_paper_trading_cycle(rows) -> None:
                 conn.execute(
                     """INSERT INTO paper_trades
                            (ticker, status, entry_time, entry_price, shares, allocation,
-                            stop_price, target_price, max_hold_until)
-                       VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?)""",
+                            stop_price, target_price, max_hold_until, source)
+                       VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?, 'auto')""",
                     (ticker, now_str, price, shares, allocation, row["swing_stop"], row["swing_target"], max_hold_until),
                 )
                 cash -= allocation
@@ -1147,6 +1168,146 @@ def run_paper_trading_cycle(rows) -> None:
             )
 
             conn.commit()
+        finally:
+            conn.close()
+
+
+def set_paper_cash(amount: float) -> None:
+    """Sanal nakti elle istenen tutara ayarlar - kullanici Sanal Al-Sat
+    panelinden 'Nakit' degerini duzenleyebiliyor. Negatif deger cagiran
+    tarafta (API) reddedilmeli, burada sadece yazilir."""
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute("UPDATE paper_account SET cash = ? WHERE id = 1", (amount,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def reset_paper_trading(starting_balance: float) -> None:
+    """Sanal al-sat'i TAMAMEN sifirlar: tum acik/kapali islemler, equity
+    gecmisi ve manuel takip listesi SILINIR. Nakit VE starting_balance
+    (toplam K/Z'nin olculdugu baz) verilen starting_balance'a esitlenir -
+    sabit PAPER_STARTING_BALANCE kullanilmaz, kullanici her sifirlamada
+    kendi baslangic tutarini seciyor. Frontend'de bu, "emin misin" onayi
+    SONRASINDA cagrilir. _paper_last_score (hangi ticker'in GUCLU_AL'a
+    yeni gectigini takip eden hafiza) KASITLI olarak DOKUNULMAZ - yoksa
+    sifirlama hemen ardindan, zaten GUCLU_AL'da olan tum hisseleri 'yeni
+    gecis' sayip ayni restart-hatasini (bkz. CLAUDE.md) tekrar tetikler."""
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute("DELETE FROM paper_trades")
+            conn.execute("DELETE FROM paper_equity_history")
+            conn.execute("DELETE FROM paper_watchlist")
+            conn.execute(
+                "UPDATE paper_account SET cash = ?, starting_balance = ? WHERE id = 1",
+                (starting_balance, starting_balance),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_paper_watchlist():
+    """Kullanicinin elle ekledigi, otomatik sistemden BAGIMSIZ manuel takip
+    listesini dondurur - web_bistTop100.py: _scan_once() bu ticker'lari da
+    (acik pozisyonlar gibi) tarama havuzuna ekler, boylece fiyatsiz kalmaz."""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute("SELECT ticker, added_at FROM paper_watchlist ORDER BY added_at DESC")
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def add_to_paper_watchlist(ticker: str) -> None:
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO paper_watchlist (ticker, added_at) VALUES (?, ?)",
+                (ticker, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def remove_from_paper_watchlist(ticker: str) -> None:
+    """Takip listesinden cikarma, o ticker'daki ACIK bir manuel pozisyona
+    DOKUNMAZ - sadece 'hizli alim listesi'nden kaldirir, elindeki pozisyon
+    Acik Pozisyonlar'da gorunmeye devam eder."""
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute("DELETE FROM paper_watchlist WHERE ticker = ?", (ticker,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def manual_buy(ticker: str, allocation: float, price: float):
+    """Kullanicinin elle, istedigi an, istedigi tutarla satin almasi -
+    otomatik sistemin 5-slot limitine DAHIL DEGIL, tek siniri mevcut nakit.
+    Basarisizsa (tutar<=0, fiyat gecersiz, nakit yetersiz) None doner."""
+    if allocation <= 0 or price != price or price <= 0:
+        return None
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
+            if allocation > cash:
+                return None
+            shares = allocation / price
+            # swing_stop/target sadece BILGI amacli gosterilir - manuel
+            # pozisyonlar run_paper_trading_cycle() tarafindan otomatik
+            # kapatilmaz (bkz. yukarida source='auto' filtresi).
+            max_hold_until = (datetime.now() + timedelta(days=PAPER_MAX_HOLD_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+            cur = conn.execute(
+                """INSERT INTO paper_trades
+                       (ticker, status, entry_time, entry_price, shares, allocation,
+                        stop_price, target_price, max_hold_until, source)
+                   VALUES (?, 'open', ?, ?, ?, ?, NULL, NULL, ?, 'manual')""",
+                (ticker, now_str, price, shares, allocation, max_hold_until),
+            )
+            conn.execute("UPDATE paper_account SET cash = ? WHERE id = 1", (cash - allocation,))
+            conn.commit()
+            return {"id": cur.lastrowid, "ticker": ticker, "entry_price": price, "shares": shares}
+        finally:
+            conn.close()
+
+
+def manual_sell(trade_id: int, price: float):
+    """Kullanicinin elle, istedigi an satmasi - sadece source='manual' VE
+    status='open' olan bir satir icin calisir (otomatik pozisyonlari
+    kullanici buradan kapatamaz, sadece kendi actiklarini). Basarisizsa
+    (satir yok/zaten kapali/baska birinin otomatik pozisyonu) None doner."""
+    if price != price or price <= 0:
+        return None
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            pos = conn.execute(
+                "SELECT * FROM paper_trades WHERE id = ? AND status = 'open' AND source = 'manual'",
+                (trade_id,),
+            ).fetchone()
+            if pos is None:
+                return None
+            pnl = (price - pos["entry_price"]) * pos["shares"]
+            conn.execute(
+                """UPDATE paper_trades
+                       SET status='closed', exit_time=?, exit_price=?, exit_reason='manual', pnl=?
+                   WHERE id=?""",
+                (now_str, price, pnl, trade_id),
+            )
+            cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
+            conn.execute("UPDATE paper_account SET cash = ? WHERE id = 1", (cash + price * pos["shares"],))
+            conn.commit()
+            return {"id": trade_id, "pnl": pnl}
         finally:
             conn.close()
 

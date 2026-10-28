@@ -124,7 +124,13 @@ def _scan_once():
     # bulamadigi icin stop/hedef/GUCLU_SAT kontrolu YAPILAMAZ, pozisyon
     # sonsuza kadar acik kalir (gercekten yasandi - bkz. USHOL, 2026-10-23).
     open_paper_tickers = [f"{p['ticker']}.IS" for p in scanner.get_paper_positions()]
-    all_tickers = list(dict.fromkeys(scanner.BIST100_TICKERS + top_gainers + open_paper_tickers))
+    # Manuel takip listesindeki ticker'lar da AYNI sebeple havuza eklenir -
+    # kullanici henuz almadigi bir hisseyi izlemeye aldiginda, o hisse
+    # BIST100/gunun kazandiranlari disindaysa bile fiyat gorebilsin diye.
+    watchlist_tickers = [f"{w['ticker']}.IS" for w in scanner.get_paper_watchlist()]
+    all_tickers = list(
+        dict.fromkeys(scanner.BIST100_TICKERS + top_gainers + open_paper_tickers + watchlist_tickers)
+    )
 
     rows_by_ticker, _still_missing = scanner.fetch_with_retry(all_tickers) if all_tickers else ({}, [])
     missing_count = max(0, len(all_tickers) - len(rows_by_ticker))
@@ -433,6 +439,130 @@ def api_paper_equity():
     """Sanal hesabin equity (nakit + acik pozisyon degeri) gecmisi -
     gunluk/saatlik/5dk gruplama frontend'de yapilir (Skor Gecmisi'yle ayni desen)."""
     return jsonify(scanner.get_paper_equity_history("2000-01-01 00:00:00"))
+
+
+@app.route("/api/paper/cash", methods=["POST"])
+@_login_required
+def api_paper_set_cash():
+    """Sanal nakti elle istenen tutara ayarlar - kullanici Sanal Al-Sat
+    panelinden duzenleyebiliyor."""
+    data = request.get_json(silent=True) or {}
+    try:
+        amount = float(data.get("amount"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "gecerli bir tutar (amount) gerekli"}), 400
+    if amount < 0:
+        return jsonify({"error": "tutar negatif olamaz"}), 400
+    scanner.set_paper_cash(amount)
+    return jsonify({"status": "ok", "cash": amount})
+
+
+@app.route("/api/paper/reset", methods=["POST"])
+@_login_required
+def api_paper_reset():
+    """Sanal al-sat'i tamamen sifirlar - body {amount} ile baslangic nakti
+    kullanici tarafindan belirlenir (sabit 1.000.000 degil). Onay (emin
+    misin) frontend'de zaten alinmis olmali, bu endpoint dogrudan uygular."""
+    data = request.get_json(silent=True) or {}
+    try:
+        amount = float(data.get("amount"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "gecerli bir baslangic tutari (amount) gerekli"}), 400
+    if amount <= 0:
+        return jsonify({"error": "tutar sifirdan buyuk olmali"}), 400
+    scanner.reset_paper_trading(amount)
+    return jsonify({"status": "ok", "cash": amount})
+
+
+@app.route("/api/paper/watchlist", methods=["GET", "POST"])
+@_login_required
+def api_paper_watchlist():
+    """GET: manuel takip listesini guncel fiyatla doner. POST: body
+    {ticker} ile listeye ekler."""
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        ticker = (data.get("ticker") or "").strip().upper()
+        if not ticker:
+            return jsonify({"error": "ticker gerekli"}), 400
+        scanner.add_to_paper_watchlist(ticker)
+        return jsonify({"status": "ok"})
+
+    watchlist = scanner.get_paper_watchlist()
+    with _state_lock:
+        price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
+    open_manual_tickers = {
+        p["ticker"] for p in scanner.get_paper_positions() if p["source"] == "manual"
+    }
+    enriched = [
+        {
+            **w,
+            "current_price": price_by_ticker.get(w["ticker"]),
+            "has_open_position": w["ticker"] in open_manual_tickers,
+        }
+        for w in watchlist
+    ]
+    return jsonify(enriched)
+
+
+@app.route("/api/paper/watchlist/<ticker>", methods=["DELETE"])
+@_login_required
+def api_paper_watchlist_remove(ticker: str):
+    scanner.remove_from_paper_watchlist(ticker.strip().upper())
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/paper/manual-buy", methods=["POST"])
+@_login_required
+def api_paper_manual_buy():
+    """Kullanicinin elle, istedigi an, istedigi tutarla alim yapmasi -
+    otomatik sistemin 5-slot limitine DAHIL DEGIL (bkz. scanner.manual_buy)."""
+    data = request.get_json(silent=True) or {}
+    ticker = (data.get("ticker") or "").strip().upper()
+    try:
+        allocation = float(data.get("allocation"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "gecerli bir tutar (allocation) gerekli"}), 400
+    if not ticker:
+        return jsonify({"error": "ticker gerekli"}), 400
+
+    with _state_lock:
+        price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
+    price = price_by_ticker.get(ticker)
+    if price is None or price != price:
+        return jsonify({"error": f"{ticker} icin guncel fiyat yok"}), 400
+
+    result = scanner.manual_buy(ticker, allocation, price)
+    if result is None:
+        return jsonify({"error": "alim basarisiz - tutar gecersiz ya da nakit yetersiz"}), 400
+    return jsonify(result)
+
+
+@app.route("/api/paper/manual-sell", methods=["POST"])
+@_login_required
+def api_paper_manual_sell():
+    """Kullanicinin elle, istedigi an satmasi - sadece kendi actigi
+    (source='manual') acik bir pozisyon icin calisir."""
+    data = request.get_json(silent=True) or {}
+    try:
+        trade_id = int(data.get("trade_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "gecerli bir trade_id gerekli"}), 400
+
+    positions = {p["id"]: p for p in scanner.get_paper_positions()}
+    pos = positions.get(trade_id)
+    if pos is None:
+        return jsonify({"error": "pozisyon bulunamadi"}), 404
+
+    with _state_lock:
+        price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
+    price = price_by_ticker.get(pos["ticker"])
+    if price is None or price != price:
+        return jsonify({"error": f"{pos['ticker']} icin guncel fiyat yok"}), 400
+
+    result = scanner.manual_sell(trade_id, price)
+    if result is None:
+        return jsonify({"error": "satis basarisiz"}), 400
+    return jsonify(result)
 
 
 if __name__ == "__main__":
