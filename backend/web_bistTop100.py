@@ -196,6 +196,21 @@ def index():
     )
 
 
+@app.route("/sanal-al-sat")
+def paper_trading_page():
+    # Ana sayfadaki Sanal Al-Sat bolumunun (2026-10-28'de) tasindigi, kendi
+    # basina ayri sayfasi - tamami login gerektirdigi icin API'lerdeki gibi
+    # 401 JSON degil, dogrudan /login'e yonlendirme (gercek sayfa, gercek
+    # HTML gizleme degil).
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+    return render_template(
+        "paper_trading.html",
+        refresh_seconds=scanner.REFRESH_SECONDS,
+        title="Sanal Al-Sat - BIST Momentum Scanner",
+    )
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None

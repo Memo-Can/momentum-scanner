@@ -176,6 +176,17 @@
     padding: 10px 16px; box-shadow: 0 -8px 16px -8px rgba(0,0,0,0.5);
   }
   #paper-trading-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+
+  /* --- Sanal Al-Sat'in ayri sayfasi (paper_trading.html) - ayni #paper-trading
+     bilesenini/stillerini kullanir ama ana sayfadaki tablonun ALTINDA yapisan
+     (position:sticky) ve daralip-genisleyen davranisi burada gecersiz: kendi
+     basina tam bir sayfa oldugu icin normal akista, ortalanmis ve sabit genislikte
+     durur, daraltma baslik butonu da yok (bkz. paper_trading.html). */
+  body.paper-page #paper-page-wrap { padding: 16px 20px 40px; display: flex; justify-content: center; }
+  body.paper-page #paper-trading {
+    position: static; box-shadow: none; max-width: 900px; width: 100%; margin: 0;
+  }
+  body.paper-page #paper-trading-header { cursor: default; }
   #paper-trading h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   #paper-toggle {
     background: none; border: 1px solid var(--border); color: var(--muted);
@@ -215,10 +226,13 @@
   .paper-action-btn-muted:hover { color: var(--text); border-color: var(--yellow); }
   #paper-cash-msg { font-size: 12px; color: var(--muted); }
   #watchlist-toggle {
-    background: var(--panel); border: 1px solid var(--border); color: var(--muted);
-    border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; margin: 4px 0 8px;
+    background: var(--yellow); border: none; color: #1a1a1a;
+    border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 700;
+    cursor: pointer; margin: 4px 0 10px;
   }
-  #watchlist-toggle:hover { color: var(--text); border-color: var(--yellow); }
+  #watchlist-toggle:hover { opacity: 0.85; }
+  #watchlist-toggle.in-watchlist { background: none; border: 1px solid var(--red); color: var(--red); }
+  #watchlist-toggle.in-watchlist:hover { background: rgba(255, 92, 92, 0.12); }
 
   #side {
     width: 420px;
@@ -230,11 +244,13 @@
   }
   #side h2 { margin: 0 0 4px; font-size: 16px; }
   #side .sub {
-    color: var(--muted); font-size: 12px; margin-bottom: 12px;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+    color: var(--text); font-size: 12px; font-weight: 600; margin-bottom: 12px;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px;
   }
-  #side .sub:hover { color: var(--text); }
-  #side .sub::after { content: '⤢'; font-size: 12px; }
+  #side .sub:hover { color: var(--yellow); border-color: var(--yellow); }
+  #side .sub::after { content: '⤢'; font-size: 13px; }
   #chart { width: 100%; height: 280px; position: relative; }
   .chart-status {
     position: absolute; inset: 0; z-index: 10;
@@ -412,6 +428,18 @@
     thead th, tbody td { padding: 5px 6px; }
     #chart { height: 190px; }
   }
+
+  /* --- Sanal Al-Sat sayfasina gecis linki (header) --- */
+  #paper-trading-link {
+    background: var(--yellow);
+    color: #1a1a1a;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  #paper-trading-link:hover { opacity: 0.85; }
 
   /* --- Giris/Cikis linki (header) --- */
   #auth-link {
