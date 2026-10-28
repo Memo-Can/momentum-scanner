@@ -17,6 +17,7 @@ sag panelde 3 aylik mum grafigi + istege bagli indikator katmanlari
 (EMA/Bollinger/MACD/RSI) + Skor Gecmisi (gunluk/saatlik/5 dakikalik) gosterilir.
 """
 
+import functools
 import os
 import threading
 import time
@@ -24,7 +25,8 @@ from datetime import datetime, timedelta
 
 import scanner_bistTop100 as scanner
 import yfinance as yf
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash
 
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 app = Flask(
@@ -32,6 +34,27 @@ app = Flask(
     template_folder=os.path.join(_FRONTEND_DIR, "templates"),
     static_folder=os.path.join(_FRONTEND_DIR, "static"),
 )
+# Sadece tooltip'ler + Sanal Al-Sat bolumu icin tek-kullanicili basit giris -
+# coklu kullanici/kayit sistemi YOK. Sir (hash) asla koda/repoya yazilmaz,
+# Telegram bot token/Firebase kimlik dosyasiyla AYNI desen: ortam degiskeni.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
+
+
+def _login_required(view):
+    """API endpoint'lerini login'e baglar - HTML tarafinda bir bolum
+    gizlenmis olsa da, o bolumun API'sine DOGRUDAN istek atilarak veri
+    cekilemesin diye gercek bir koruma (sadece gorsel gizleme degil)."""
+
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("logged_in"):
+            return jsonify({"error": "login required"}), 401
+        return view(*args, **kwargs)
+
+    return wrapped
 
 _state_lock = threading.Lock()
 _state = {
@@ -163,7 +186,32 @@ def index():
         "index.html",
         refresh_seconds=scanner.REFRESH_SECONDS,
         title="BIST Momentum Scanner",
+        logged_in=session.get("logged_in", False),
     )
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if (
+            ADMIN_PASSWORD_HASH
+            and username == ADMIN_USERNAME
+            and check_password_hash(ADMIN_PASSWORD_HASH, password)
+        ):
+            session.permanent = True
+            session["logged_in"] = True
+            return redirect(url_for("index"))
+        error = "Kullanici adi veya sifre hatali."
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("index"))
 
 
 @app.route("/api/rows")
@@ -341,6 +389,7 @@ def api_indicators(ticker: str):
 
 
 @app.route("/api/paper/summary")
+@_login_required
 def api_paper_summary():
     """Sanal al-sat hesabinin ozeti: nakit, equity, toplam/gerceklesmis/
     gerceklesmemis K-Z, kazanma orani. bkz. scanner.run_paper_trading_cycle()."""
@@ -348,6 +397,7 @@ def api_paper_summary():
 
 
 @app.route("/api/paper/positions")
+@_login_required
 def api_paper_positions():
     """Su an acik olan sanal pozisyonlar - guncel fiyat/K-Z, son taramanin
     _state['rows']'u ile (ekstra Yahoo istegi olmadan) zenginlestirilir."""
@@ -371,12 +421,14 @@ def api_paper_positions():
 
 
 @app.route("/api/paper/trades")
+@_login_required
 def api_paper_trades():
     """Kapanmis sanal islemler (en yeni once)."""
     return jsonify(scanner.get_paper_trades())
 
 
 @app.route("/api/paper/equity")
+@_login_required
 def api_paper_equity():
     """Sanal hesabin equity (nakit + acik pozisyon degeri) gecmisi -
     gunluk/saatlik/5dk gruplama frontend'de yapilir (Skor Gecmisi'yle ayni desen)."""

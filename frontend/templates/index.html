@@ -8,7 +8,7 @@
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body class="{{ 'logged-in' if logged_in else '' }}">
 
 <header>
   <div class="header-title-group">
@@ -21,6 +21,11 @@
   </div>
   <div id="header-controls">
     <button id="notify-toggle" type="button" title="Guclu Al/Sat sinyallerinde bildirim ve ses">Bildirimler: Kapali</button>
+    {% if logged_in %}
+      <a id="auth-link" href="{{ url_for('logout') }}">Cikis Yap</a>
+    {% else %}
+      <a id="auth-link" href="{{ url_for('login') }}">Giris Yap</a>
+    {% endif %}
   </div>
 </header>
 
@@ -99,6 +104,7 @@
   </div>
 </div>
 
+{% if logged_in %}
 <section id="paper-trading">
   <div id="paper-trading-header">
     <h2>Sanal Al-Sat</h2>
@@ -144,6 +150,7 @@
     </div>
   </div>
 </section>
+{% endif %}
 
 <div id="modal-overlay" class="modal-overlay" hidden>
   <div class="modal-box">
@@ -162,6 +169,7 @@
 
 <script>
 const REFRESH_SECONDS = {{ refresh_seconds }};
+const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
 const SCORE_SYMBOLS = {GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼", GUCLU_SAT: "▼▼"};
 const SIGNAL_SYMBOLS = {AL: "▲", SAT: "▼", NOTR: "–"};
 
@@ -598,7 +606,13 @@ async function refreshPaperTrading() {
 
 // Sanal Al-Sat bolumu daraltilabilir/genisletilebilir - secim sadece bu
 // tarayicida (localStorage) hatirlanir, baska bir cihazi/kullaniciyi etkilemez.
-(function initPaperToggle() {
+// Login olmayana bu bolumun HTML'i hic gonderilmiyor (bkz. yukarida
+// Jinja kosulu ile sarili section) - bu yuzden LOGGED_IN kontrolu olmadan
+// asagidaki document.getElementById('paper-body') cagrisi null doner ve bir sonraki
+// satir (body.hidden=...) TypeError firlatip SCRIPT'IN TAMAMINI (refreshRows
+// dahil) durdururdu. Gercekten yasandi, 2026-10-28: login olmadan ana tablo
+// hic yuklenmiyordu.
+if (LOGGED_IN) (function initPaperToggle() {
   const body = document.getElementById('paper-body');
   const btn = document.getElementById('paper-toggle');
   let collapsed = false;
@@ -986,8 +1000,10 @@ refreshRows().then(() => {
 setInterval(refreshRows, REFRESH_SECONDS * 1000);
 refreshMarketTicker();
 setInterval(refreshMarketTicker, REFRESH_SECONDS * 1000);
-refreshPaperTrading();
-setInterval(refreshPaperTrading, REFRESH_SECONDS * 1000);
+if (LOGGED_IN) {
+  refreshPaperTrading();
+  setInterval(refreshPaperTrading, REFRESH_SECONDS * 1000);
+}
 </script>
 </body>
 </html>

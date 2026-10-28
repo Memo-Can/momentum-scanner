@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Giris Yap - Momentum Scanner</title>
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div id="login-wrap">
+  <form id="login-box" method="post">
+    <h1>Giris Yap</h1>
+    {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+    <label for="login-username">Kullanici adi</label>
+    <input type="text" id="login-username" name="username" autocomplete="username" required autofocus>
+    <label for="login-password">Sifre</label>
+    <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+    <button type="submit">Giris Yap</button>
+  </form>
+</div>
+</body>
+</html>

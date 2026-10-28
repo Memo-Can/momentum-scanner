@@ -132,7 +132,10 @@
     transition: opacity .12s ease;
     pointer-events: none;
   }
-  thead th[data-tip]:hover::after {
+  /* Tooltip metni her zaman DOM'da (view-source'tan gorulebilir, dusuk
+     hassasiyetli icerik) ama GORSEL olarak sadece giris yapilmissa (body'de
+     logged-in sinifi varsa) acilir - bkz. CLAUDE.md "Kullanici girisi". */
+  body.logged-in thead th[data-tip]:hover::after {
     opacity: 1;
     visibility: visible;
   }
@@ -371,4 +374,62 @@
   @media (max-width: 420px) {
     thead th, tbody td { padding: 5px 6px; }
     #chart { height: 190px; }
+  }
+
+  /* --- Giris/Cikis linki (header) --- */
+  #auth-link {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    text-decoration: none;
+  }
+  #auth-link:hover { color: var(--text); border-color: var(--yellow); }
+
+  /* --- Giris sayfasi (login.html) --- */
+  #login-wrap {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 20px;
+  }
+  #login-box {
+    width: min(340px, 100%);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 24px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #login-box h1 { margin: 0 0 10px; font-size: 18px; text-align: center; }
+  #login-box label { font-size: 12px; color: var(--muted); }
+  #login-box input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 9px 10px;
+    font-size: 14px;
+    outline: none;
+  }
+  #login-box input:focus { border-color: var(--yellow); }
+  #login-box button {
+    margin-top: 10px;
+    background: var(--yellow);
+    color: #1a1a1a;
+    border: none;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #login-box button:hover { opacity: 0.9; }
+  .login-error {
+    background: rgba(255, 92, 92, 0.12);
+    border: 1px solid var(--red);
+    color: var(--red);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
   }

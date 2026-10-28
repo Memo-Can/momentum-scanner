@@ -118,6 +118,18 @@ GUCLU_AL/GUCLU_SAT sinyal geçişlerinde (`log_signal_changes()`, sadece durum D
 
 **⚠️ Bilinen hata ve düzeltmesi (2026-10-28): restart'ta toplu yanlış bildirim.** `_last_logged_score` (ticker -> en son loglanan skor, `log_signal_changes()`'in "sadece durum DEĞİŞTİĞİNDE bildir" mantığının kalbi) process her (re)başladığında BOŞ başlıyordu — bu yüzden her deploy/restart'ta, o anda ZATEN GUCLU_AL/SAT durumunda olan TÜM hisseler (gerçekte hiçbir şey değişmemiş olsa bile) "yeni geçiş" sayılıp Telegram'a yeniden bildiriliyordu (gerçekten yaşandı: tek bir restart'ta 108 hisse aynı anda "yeni sinyal" olarak loglandı). **Düzeltme:** yeni `last_known_score` tablosu (`ticker PRIMARY KEY, score, timestamp` - tek satır/ticker, `log_score_history()` her döngüde upsert yapıyor) eklendi; `_seed_last_logged_scores()` process başlarken BU tablodan (büyük `score_history`'yi TARAMADAN, O(1)) `_last_logged_score`'u doldurur. **Neden ayrı bir tablo, neden `score_history`'den `MAX(id) GROUP BY ticker` değil:** o sorgu VPS'teki 3.4M+ satırlık tabloda ~12 saniye sürüyordu (her restart'ı 12sn geciktirirdi) - `last_known_score` en fazla ~630 satır (bir ticker için bir satır) olduğu için sorgu anlık.
 
+## Kullanıcı girişi (2026-10'da eklendi — SADECE belirli bölümler için)
+
+Site büyük ölçüde herkese açık kalıyor — login sadece İKİ şey için gerekli: (1) sütun başlıklarındaki detaylı açıklama balonları (`data-tip` tooltip'leri), (2) Sanal Al-Sat bölümü. Çoklu kullanıcı/kayıt sistemi YOK, tek sabit admin hesabı.
+
+- Flask'ın kendi imzalı çerez tabanlı `session`'ı kullanılıyor — yeni bir DB tablosu yok. Ortam değişkenleri (sır, koda/repoya YAZILMAZ — Telegram/Firebase ile AYNI desen): `FLASK_SECRET_KEY` (session imzalama), `ADMIN_USERNAME` (varsayılan `admin`), `ADMIN_PASSWORD_HASH` (werkzeug `generate_password_hash` çıktısı, DÜZ METİN DEĞİL).
+- `session.permanent=True` + `PERMANENT_SESSION_LIFETIME=365 gün` — login bir kez yapılınca tarayıcıda ~1 yıl kalıcı kalır.
+- `web_bistTop100.py: /login` (GET form, POST doğrulama), `/logout`. `_login_required` decorator'ı `/api/paper/*` endpoint'lerini gerçekten korur (sadece HTML gizleme değil — login olmadan bu API'lere direkt istek de 401 döner).
+- **Sanal Al-Sat bölümü** (`frontend/templates/index.html`'deki `{% if logged_in %}...{% endif %}`) login olmayana HİÇ GÖNDERİLMEZ (gerçek sunucu-taraflı gizleme).
+- **Tooltip'ler farklı/daha hafif bir yöntemle gizlenir:** `data-tip` metni HTML'de HER ZAMAN var (view-source'tan görülebilir) ama tooltip popup'ının CSS'i (`thead th[data-tip]:hover::after`) sadece `<body class="logged-in">` iken aktif. Bilinçli bir tradeoff — tooltip'ler düşük hassasiyetli içerik (gösterge açıklamaları) olduğu için tam sunucu-taraflı gizlemeye değmedi, Sanal Al-Sat için (gerçek "değer" taşıyan kısım) gerçek gizleme kullanıldı.
+- Frontend'de `const LOGGED_IN` JS sabiti `refreshPaperTrading()`'in çağrılmasını/interval'ini korur — login değilken anlamsız 401 isteği atılmaz.
+- VPS deploy: `systemd` servis dosyasına 3 yeni `Environment=` satırı (`FLASK_SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`) eklenir.
+
 ## Bilinen tuzaklar / dersler (tekrar düşmemek için)
 
 - **Yahoo rate-limit:** Tam piyasa (~628 hisse × 3 istek/hisse) taraması art arda/sık yapılınca `YFRateLimitError` ve "Invalid Crumb" hatalarına yol açıyor. Hem yerel sandbox hem VPS bunu yaşadı. Büyük hacimli canlı test yapmadan önce düşün; gerçekten gerekliyse VPS'in kendi (genelde daha "temiz") IP'sinden doğal 5 dakikalık döngülerle gözlemle, art arda patlamalar yapma.
