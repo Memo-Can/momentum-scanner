@@ -169,38 +169,16 @@
   .sym-GUCLU_SAT { color: var(--red-strong); font-weight: 700; }
   .dash { color: var(--muted); }
 
-  /* #table-wrap'in ICINDE (tablonun altinda) yer alir - bkz. index.html -
-     bu sayede dogal olarak sadece hisse tablosunun hizasinda durur, #side
-     (grafik/skor gecmisi) panelinin altina/ustune hic tasmaz. Ozel bir
-     margin-right hesabina gerek yok, #side zaten AYRI bir flex kardes.
-     position:sticky + bottom:0: #table-wrap (scroll container) icinde
-     tablo yuzlerce satir olsa bile, bu panel KAYDIRMADAN HER ZAMAN ekranin
-     altinda sabit/gorunur kalir - tablonun en altina kadar kaydirmaya
-     gerek kalmaz. */
+  /* #table-wrap'in ICINDE, hisse tablosunun YERINE gecen bir goruntu (bkz.
+     index.html #view-stocks / #view-paper-trading, showView()) - 2026-10-30'da
+     ayri sayfadan buraya tasindi, bu yuzden eskisi gibi tablonun ALTINDA
+     yapisan (sticky) degil, normal akista tam genislikte bir blok. */
   #paper-trading {
-    position: sticky; bottom: 0; z-index: 5;
-    margin: 14px 0 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 16px; box-shadow: 0 -8px 16px -8px rgba(0,0,0,0.5);
+    margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px;
   }
-  #paper-trading-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
-
-  /* --- Sanal Al-Sat'in ayri sayfasi (paper_trading.html) - ayni #paper-trading
-     bilesenini/stillerini kullanir ama ana sayfadaki tablonun ALTINDA yapisan
-     (position:sticky) ve daralip-genisleyen davranisi burada gecersiz: kendi
-     basina tam bir sayfa oldugu icin normal akista, ortalanmis ve sabit genislikte
-     durur, daraltma baslik butonu da yok (bkz. paper_trading.html). */
-  body.paper-page #paper-page-wrap { padding: 16px 20px 40px; display: flex; justify-content: center; }
-  body.paper-page #paper-trading {
-    position: static; box-shadow: none; max-width: 900px; width: 100%; margin: 0;
-  }
-  body.paper-page #paper-trading-header { cursor: default; }
+  #paper-trading-header { margin-bottom: 4px; }
   #paper-trading h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
-  #paper-toggle {
-    background: none; border: 1px solid var(--border); color: var(--muted);
-    border-radius: 6px; width: 24px; height: 24px; font-size: 10px; cursor: pointer;
-  }
-  #paper-toggle:hover { color: var(--text); border-color: var(--yellow); }
-  #paper-body[hidden] { display: none; }
   #paper-trading .sub { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
   #paper-summary { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
   #paper-summary .stat { font-size: 12px; color: var(--muted); }
@@ -435,18 +413,6 @@
     thead th, tbody td { padding: 5px 6px; }
     #chart { height: 190px; }
   }
-
-  /* --- Sanal Al-Sat sayfasina gecis linki (header) --- */
-  #paper-trading-link {
-    background: var(--yellow);
-    color: #1a1a1a;
-    border-radius: 6px;
-    padding: 7px 10px;
-    font-size: 12px;
-    font-weight: 700;
-    text-decoration: none;
-  }
-  #paper-trading-link:hover { opacity: 0.85; }
 
   /* --- Giris/Cikis linki (header) --- */
   #auth-link {
