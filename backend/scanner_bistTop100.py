@@ -270,7 +270,10 @@ RS_THRESHOLD = 0.5  # bu esigin altindaki fark (yuzde puan) NOTR sayilir
 ATR_PERIOD = 14
 ATR_DAY_MULT = 1.5  # gunluk (day trade) stop mesafesi = ATR * bu katsayi (dar)
 ATR_SWING_MULT = 3.0  # swing stop mesafesi = ATR * bu katsayi (genis)
-ATR_TARGET_R = 2.0  # hedef mesafesi = stop mesafesi * bu katsayi (risk:odul ~1:2)
+ATR_TARGET_R = 3.0  # hedef mesafesi = stop mesafesi * bu katsayi (risk:odul ~1:3 - 2026-10-30'da
+# 1 yillik backfill verisiyle yapilan backtest sonucuna gore 2.0'dan yukseltildi: ayni stop
+# genisliginde RR arttikca ortalama getiri tutarli sekilde artiyordu, bkz. CLAUDE.md "Al/satis
+# seviyeleri (ATR_TARGET_R) - backtest").
 WEEKLY_LOOKBACK_DAYS = 5  # "5D" - kayan pencere, takvim haftasi degil
 MONTHLY_LOOKBACK_DAYS = 21  # "1M" - ~1 aylik islem gunu sayisi, kayan pencere
 
@@ -939,6 +942,14 @@ def _send_push_notifications(entries) -> None:
     """entries (log_signal_changes'in az once tespit ettigi GUCLU_AL/SAT
     gecisleri) icin Telegram'a bir mesaj gonderir."""
     for entry in entries:
+        # GUCLU_SAT bildirimleri KULLANICI ISTEGIYLE gecici olarak KAPATILDI
+        # (2026-10-30) - GUCLU_SAT cok daha sik tetiklendigi icin (bkz.
+        # CLAUDE.md) Telegram'i spam'liyordu. signal_log'a yazilmasini
+        # ETKILEMEZ (bu fonksiyon DB yazimindan SONRA cagriliyor, bkz.
+        # log_signal_changes()) - sadece push gonderimi atlaniyor. Tekrar
+        # acmak icin asagidaki continue satirini kaldir.
+        if entry["score"] == "GUCLU_SAT":
+            continue
         # Telegram mesajlarinda gercek metin rengi desteklenmiyor - yesil/kirmizi
         # algisi icin renkli daire emoji kullanilir (GUCLU_AL=yesil, GUCLU_SAT=kirmizi).
         symbol = "🟢" if entry["score"] == "GUCLU_AL" else "🔴"
