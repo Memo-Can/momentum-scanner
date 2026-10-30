@@ -108,6 +108,16 @@ DB_PATH = os.path.join(DATA_DIR, "momentum_scanner.db")
 PAPER_STARTING_BALANCE = 1_000_000.0
 PAPER_MAX_POSITIONS = 5
 PAPER_MAX_HOLD_DAYS = 21  # ~15 islem gunune denk takvim gunu yaklasimi
+# Otomatik alim icin minimum volatilite filtresi (2026-10-30, backtest sonucu
+# eklendi): "row['vol20']" (gunluk kapanis getirilerinin son 20 gunluk standart
+# sapmasi) bu esigin ALTINDAYSA GUCLU_AL gecisi otomatik alinmaz - 1 yillik
+# backfill verisiyle yapilan test, en sakin %25'lik dilimdeki hisselerde
+# GUCLU_AL'in pratikte edge tasimadigini (ortalama getiri ~%0.16, diger
+# ceyreklerde %1.3-2.2) gosterdi. Esik, o testteki Q1 ustu (25. persentil)
+# degeri (%2.13) - bkz. CLAUDE.md "GUCLU_AL volatilite filtresi - backtest".
+# SADECE otomatik alim kararini etkiler - GUCLU_AL etiketi/gorunumu (sitede
+# herkese gosterilen) DEGISMEZ, confluence_label() bundan habersiz.
+PAPER_MIN_VOL20 = 0.0213
 
 # SQLite tek-yazarli oldugu icin tum INSERT/DELETE'ler bu kilit altinda
 # yapilir - WAL modu zaten coklu OKUYUCUYA izin veriyor (Flask'in threaded=True
@@ -803,6 +813,12 @@ def fetch_row(ticker: str):
         # kendi oynakligina (ATR) olceklenmis gunluk (dar) ve swing (genis)
         # seviyeler. NOTR sinyalde net yon olmadigi icin (None, None) doner.
         atr_val = atr(hist)
+        # Son 20 gunluk kapanis getirilerinin standart sapmasi - PAPER_MIN_VOL20
+        # filtresi icin (bkz. yukarida). Zaten cekilmis olan 6 aylik gunluk
+        # kapanis serisi (closes) uzerinden hesaplanir, ekstra Yahoo istegi
+        # gerekmez.
+        daily_returns = closes.pct_change().tail(20)
+        vol20 = float(daily_returns.std()) if len(daily_returns.dropna()) >= 10 else float("nan")
         trade_direction = "AL" if score in ("AL", "GUCLU_AL") else "SAT" if score in ("SAT", "GUCLU_SAT") else None
         day_stop, day_target = stop_target_levels(current_price, atr_val, trade_direction, ATR_DAY_MULT, ATR_TARGET_R)
         swing_stop, swing_target = stop_target_levels(
@@ -846,6 +862,7 @@ def fetch_row(ticker: str):
             "swing_target": swing_target,
             "volume_ratio": volume_ratio,
             "day_range_pos": day_range_pos,
+            "vol20": vol20,
         }
     except Exception:
         return None
@@ -1205,6 +1222,9 @@ def run_paper_trading_cycle(rows) -> None:
                     continue
                 if row.get("swing_stop") is None or row.get("swing_target") is None:
                     continue  # ATR verisi yetersiz - guvenli bir stop/hedef yok
+                vol20 = row.get("vol20")
+                if vol20 is None or vol20 != vol20 or vol20 < PAPER_MIN_VOL20:
+                    continue  # cok sakin/durgun hisse - backtest'te GUCLU_AL burada edge tasimiyordu
                 price = row["price"]
                 if price != price or price <= 0:
                     continue  # NaN/gecersiz fiyat (data glitch) - bu dongu atlanir
