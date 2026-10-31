@@ -10,7 +10,7 @@ Havuz = BIST100_TICKERS UNION fetch_top_gainers(TOP300_SIZE) (cakisanlar
 TEKRAR CEKILMEZ) - boylece TUM piyasayi (~600+ hisse) taramak yerine en
 fazla ~100+300=400 farklı hisse cekilir, Yahoo'nun resmi olmayan API'sinin
 rate-limit riskini azaltir. Her hisse icin EMA/MACD/RSI/Bollinger/ADX/ATR
-indikatorleri hesaplanip tek bir Skor'a (-6..+6, GUCLU_AL..GUCLU_SAT)
+indikatorleri hesaplanip tek bir Skor'a (-5..+5, GUCLU_AL..GUCLU_SAT)
 birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
 (terminal arayuzu) ve web_bistTop100.py (web arayuzu) bu modulu
 `import scanner_bistTop100 as scanner` ile kullanip kendi sunumlarini yapar.
@@ -18,10 +18,12 @@ birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
 Her REFRESH_SECONDS (300sn / 5dk) saniyede bir veri Yahoo Finance'ten
 yeniden cekilir.
 
-Onbellek: 5dk sinyali ve haftalik/aylik her REFRESH_SECONDS'ta Yahoo'dan
-yeniden cekilir (onbellek yok). Sadece BIST100 endeksi (RS icin) dongu
-basina onbelleklenir - yoksa her hisse icin ayri ayri cekilip 100+ kat
-gereksiz istege yol acardi.
+Onbellek: haftalik/aylik degisim her REFRESH_SECONDS'ta Yahoo'dan yeniden
+cekilir (onbellek yok). Sadece BIST100 endeksi (RS icin) dongu basina
+onbelleklenir - yoksa her hisse icin ayri ayri cekilip 100+ kat gereksiz
+istege yol acardi. (2026-10-31'de kaldirilan 5 dakikalik EMA sinyali de
+hisse basina AYRI bir Yahoo istegi gerektiriyordu - kaldirilmasi hisse
+basina istek sayisini 3'ten 2'ye dusurdu.)
 
 Sinyal gecmisi: Skoru GUCLU_AL/GUCLU_SAT'a DONEN hisseler signal_log_bist.csv
 dosyasina eklenir (sadece durum degistiginde, spam onlenir) ve kayitli mobil
@@ -416,13 +418,6 @@ def fetch_market_indicators():
     ]
 
 
-def get_intraday_signal(tk) -> str:
-    """5dk mum uzerindeki surekli EMA9/EMA21 trend durumunu (kesisim ani degil)
-    dondurur."""
-    intraday = tk.history(period="5d", interval="5m", auto_adjust=False)
-    return ema_trend_signal(intraday["Close"] if not intraday.empty else None)
-
-
 def ema_trend_signal(closes) -> str:
     """EMA9'un EMA21'e gore o anki surekli trend durumunu dondurur (kesisim
     ani degil). EMA9 > EMA21 oldugu surece AL, EMA9 < EMA21 oldugu surece SAT
@@ -603,21 +598,24 @@ def stop_target_levels(price: float, atr_val: float, direction: str, stop_mult: 
 
 def confluence_score_raw(
     signal_1d: str,
-    signal_5m: str,
     signal_macd: str,
     rsi_val: float,
     bb_percent: float,
     rel_strength: float,
 ) -> int:
-    """confluence_label'in ADX filtresi uygulanmadan onceki ham -6..+6
+    """confluence_label'in ADX filtresi uygulanmadan onceki ham -5..+5
     toplami. ADX aninlik bir guven filtresi oldugu icin (ortalamasi anlamli
     degil), Skor Gecmisi sekmelerinde gunluk/saatlik ortalama almak icin bu
-    ham deger ayrica saklanir - bkz. log_score_history."""
+    ham deger ayrica saklanir - bkz. log_score_history.
+
+    5 bilesen (2026-10-31'den once 6'ydi, signal_5m cikarildi - bkz.
+    CLAUDE.md "5 dakikalik bilesen kaldirildi"): signal_1d, signal_macd,
+    RSI, BB%, RS."""
 
     def cat(sig: str) -> int:
         return {"AL": 1, "SAT": -1}.get(sig, 0)
 
-    score = cat(signal_1d) + cat(signal_5m) + cat(signal_macd)
+    score = cat(signal_1d) + cat(signal_macd)
 
     if rsi_val == rsi_val:  # NaN degil
         if rsi_val >= 55:
@@ -639,16 +637,15 @@ def confluence_score_raw(
 
 def confluence_label(
     signal_1d: str,
-    signal_5m: str,
     signal_macd: str,
     rsi_val: float,
     bb_percent: float,
     adx_val: float,
     rel_strength: float,
 ) -> str:
-    """1d/5m EMA, MACD, RSI, BB% ve endekse gore goreceli guc (RS) sinyallerini
-    tek bir konfluens skoruna (-6..+6) birlestirir ve GUCLU_AL/AL/NOTR/SAT/
-    GUCLU_SAT etiketine cevirir. Boylece 6 ayri sutuna tek tek bakip kafada
+    """1d EMA, MACD, RSI, BB% ve endekse gore goreceli guc (RS) sinyallerini
+    tek bir konfluens skoruna (-5..+5) birlestirir ve GUCLU_AL/AL/NOTR/SAT/
+    GUCLU_SAT etiketine cevirir. Boylece 5 ayri sutuna tek tek bakip kafada
     birlestirmek yerine, tek sutunda net bir AL/SAT karari gorulur.
 
     RS (rel_strength = hissenin gunluk% - endeksin gunluk%): hisse piyasayla
@@ -661,15 +658,20 @@ def confluence_label(
     yatay piyasa) veya hesaplanamiyorsa, "guclu" etiket normal AL/SAT'a
     dusurulur - boyle bir ortamda guclu sinyale guvenmek yaniltici olabilir."""
 
-    score = confluence_score_raw(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, rel_strength)
+    score = confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
 
-    if score >= 5:
+    # Esikler 2026-10-31'de (signal_5m kaldirilinca, maks |skor| 6'dan 5'e
+    # dusunce) yeniden olceklendi - GUCLU_AL/SAT icin "en fazla 1 bilesen
+    # cekimser, SIFIR karsit oy" kurali AYNEN korunuyor (eskiden 6 bilesenden
+    # 5-6'si, simdi 5 bilesenden 4-5'i hemfikir). AL/NOTR/SAT sinirlari
+    # (net oy farki >=2) mutlak deger olarak degismedi.
+    if score >= 4:
         label = "GUCLU_AL"
     elif score >= 2:
         label = "AL"
     elif score >= -1:
         label = "NOTR"
-    elif score >= -4:
+    elif score >= -3:
         label = "SAT"
     else:
         label = "GUCLU_SAT"
@@ -785,9 +787,13 @@ def fetch_row(ticker: str):
         d5_pct = rolling_pct_change(closes, current_price, WEEKLY_LOOKBACK_DAYS)
         m1_pct = rolling_pct_change(closes, current_price, MONTHLY_LOOKBACK_DAYS)
 
-        signal_5m = get_intraday_signal(tk)
         # Gunluk EMA kesisimi: zaten cekilmis olan gunluk kapanis serisi (closes)
-        # uzerinden hesaplanir, ekstra Yahoo istegi gerekmez.
+        # uzerinden hesaplanir, ekstra Yahoo istegi gerekmez. (2026-10-31'de
+        # buradaki 5 dakikalik EMA bileseni - ayri bir Yahoo istegi gerektirdigi
+        # ICIN - kaldirildi, bkz. CLAUDE.md "5 dakikalik bilesen kaldirildi":
+        # hisse basina istek sayisini 3'ten 2'ye dusurup rate-limit riskini
+        # azaltiyor, ayrica zaten gunluk mum canli fiyatla surekli guncellendigi
+        # icin bilgi kaybi minimal.)
         signal_1d = ema_trend_signal(closes)
 
         # MACD/RSI/Bollinger: gunluk kapanis serisi (closes) uzerinden
@@ -806,8 +812,8 @@ def fetch_row(ticker: str):
             daily_pct - benchmark_pct if (daily_pct == daily_pct and benchmark_pct is not None) else float("nan")
         )
 
-        score_raw = confluence_score_raw(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, rel_strength)
-        score = confluence_label(signal_1d, signal_5m, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
+        score_raw = confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
+        score = confluence_label(signal_1d, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
 
         # ATR bazli stop-loss/hedef: sinyalin yonune (AL/SAT) gore, hissenin
         # kendi oynakligina (ATR) olceklenmis gunluk (dar) ve swing (genis)
@@ -847,7 +853,6 @@ def fetch_row(ticker: str):
             "daily": daily_pct,
             "d5": d5_pct,
             "m1": m1_pct,
-            "signal_5m": signal_5m,
             "signal_1d": signal_1d,
             "signal_macd": signal_macd,
             "score": score,
@@ -984,6 +989,7 @@ _PAPER_EXIT_REASON_LABELS = {
     "target": "Hedef",
     "signal_reversal": "Sinyal Tersi",
     "time_stop": "Sure Asimi",
+    "manual_sat_signal": "Sinyal (SAT)",
 }
 
 
@@ -1131,8 +1137,11 @@ def run_paper_trading_cycle(rows) -> None:
     icinde sarmali - burada beklenmeyen bir hata ana tarama/skor
     loglama akisini bozmamali.
 
-    1) Acik pozisyonlari cikis kurallarina gore kapatir (stop/hedef/
-       GUCLU_SAT'a gercek donus/sure asimi - ilk uyan kural kazanir).
+    1) Acik pozisyonlari cikis kurallarina gore kapatir - source='auto'
+       icin stop/hedef/SAT-veya-GUCLU_SAT sinyali/sure asimi (ilk uyan kural
+       kazanir, 2026-10-31'de sinyal kosulu GUCLU_SAT'tan SAT'i da kapsayacak
+       sekilde genisletildi); source='manual' icin SADECE SAT/GUCLU_SAT
+       sinyali (stop/hedef/sure kurali YOK, bkz. asagida).
     2) rows'taki YENI GUCLU_AL gecislerini (_paper_last_score ile
        karsilastirarak) tespit eder, acik slot kadarini sirayla satin
        alir.
@@ -1151,13 +1160,17 @@ def run_paper_trading_cycle(rows) -> None:
         conn = get_db_connection()
         try:
             cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
-            # SADECE source='auto' - manuel acilan pozisyonlara (kullanici
-            # elle satana kadar) otomatik stop/hedef/GUCLU_SAT/sure kontrolu
-            # UYGULANMAZ, bkz. manual_buy()/manual_sell().
+            # Hem source='auto' HEM source='manual' acik pozisyonlar burada
+            # kontrol edilir, ama cikis kurallari FARKLI (asagidaki dallanmaya
+            # bak) - manuel pozisyonlara stop/hedef/sure kurali HALA
+            # UYGULANMAZ, kullanicinin "Sat" butonuyla elle kapatmasi hala
+            # gecerli (manual_sell()) - sadece SAT/GUCLU_SAT sinyali artik
+            # EK bir otomatik cikis yolu (2026-10-31'de kullanici istegiyle
+            # eklendi, bkz. CLAUDE.md).
             open_positions = [
                 dict(r)
                 for r in conn.execute(
-                    "SELECT * FROM paper_trades WHERE status = 'open' AND source = 'auto'"
+                    "SELECT * FROM paper_trades WHERE status = 'open'"
                 ).fetchall()
             ]
 
@@ -1169,14 +1182,17 @@ def run_paper_trading_cycle(rows) -> None:
 
                 price = row["price"]
                 exit_reason = None
-                if pos["stop_price"] is not None and price <= pos["stop_price"]:
-                    exit_reason = "stop"
-                elif pos["target_price"] is not None and price >= pos["target_price"]:
-                    exit_reason = "target"
-                elif row["score"] == "GUCLU_SAT":
-                    exit_reason = "signal_reversal"
-                elif now_str >= pos["max_hold_until"]:
-                    exit_reason = "time_stop"
+                if pos["source"] == "auto":
+                    if pos["stop_price"] is not None and price <= pos["stop_price"]:
+                        exit_reason = "stop"
+                    elif pos["target_price"] is not None and price >= pos["target_price"]:
+                        exit_reason = "target"
+                    elif row["score"] in ("SAT", "GUCLU_SAT"):
+                        exit_reason = "signal_reversal"
+                    elif now_str >= pos["max_hold_until"]:
+                        exit_reason = "time_stop"
+                elif row["score"] in ("SAT", "GUCLU_SAT"):
+                    exit_reason = "manual_sat_signal"
 
                 if exit_reason is not None:
                     pnl = (price - pos["entry_price"]) * pos["shares"]
@@ -1198,7 +1214,9 @@ def run_paper_trading_cycle(rows) -> None:
                         "timestamp": now_str,
                     })
 
-            open_tickers = {p["ticker"] for p in open_positions} - closed_this_cycle
+            # SADECE source='auto' - 5-slot limiti manuel pozisyonlari
+            # SAYMAZ (open_positions artik ikisini de iceriyor, bkz. yukarida).
+            open_tickers = {p["ticker"] for p in open_positions if p["source"] == "auto"} - closed_this_cycle
             open_count = len(open_tickers)
 
             # YENI GUCLU_AL gecislerini tespit et - rows zaten skor gucu +

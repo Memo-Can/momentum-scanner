@@ -5,14 +5,11 @@ Canli tarama dongusunun (web_bistTop100.py/terminal_bistTop100.py) bir
 parcasi degildir, elle calistirilir - scanner_bistTop100.py'deki mevcut
 indikator/skor fonksiyonlarini (OLDUGU GIBI) yeniden kullanir.
 
-ONEMLI SINIRLAMA: Yahoo Finance 5 dakikalik (intraday) veriyi sadece son
-~60 gun geriye saklar, bu yuzden gecmis gunler icin signal_5m (5 dakikalik
-EMA trend) hesaplanamaz. Bu script signal_5m'i TUM gecmis gunler icin NOTR
-kabul eder (confluence_score_raw'a 0 katkida bulunur) - canli skorun 6
-bilesenden biri eksik kalir, bu yuzden GUCLU_AL/SAT esikleri canli veriye
-gore biraz daha zor gecilir (fiili maksimum skor 6 yerine 5). Bu, gecmis
-skorlari canli skorlarla birebir karsilastirilamaz yapar ama gunluk
-trend/momentum bazli bir yaklasim olarak yine de anlamlidir.
+NOT (2026-10-31): Confluence skoru artik 5 bilesenden olusuyor (signal_5m
+kaldirildi, bkz. CLAUDE.md "5 dakikalik bilesen kaldirildi") - bu script'in
+daha once signal_5m'i TUM gecmis gunler icin NOTR sabitlemesi (Yahoo'nun 5
+dakikalik veriyi sadece ~60 gun geriye saklamasi yuzunden) gerekiyordu;
+simdi canli hesaplamayla ZATEN birebir aynisi, ayrica bir sinirlama/fark YOK.
 
 Yazilan hedef (backend/data/momentum_scanner.db, scanner_bistTop100.py'nin
 SQLite veritabani - eskiden iki ayri backfill CSV'si idi):
@@ -47,8 +44,7 @@ MAX_WORKERS = 12
 
 def compute_daily_rows(ticker: str, benchmark_pct):
     """Bir hisse icin BACKFILL_START'tan bugune kadar HER islem gunu icin
-    bir skor satiri (score_raw, score, price) uretir - signal_5m NOTR
-    sabitlenir (bkz. dosya basi aciklamasi)."""
+    bir skor satiri (score_raw, score, price) uretir."""
     try:
         hist = yf.Ticker(ticker).history(start=WARMUP_START, interval="1d", auto_adjust=False)
     except Exception:
@@ -88,8 +84,8 @@ def compute_daily_rows(ticker: str, benchmark_pct):
         bench = benchmark_pct.get(ts, float("nan"))
         rel_strength = (d_pct - bench) if d_pct == d_pct and bench == bench else float("nan")
 
-        score_raw = scanner.confluence_score_raw(signal_1d, "NOTR", signal_macd, rsi_val, bb_percent, rel_strength)
-        score = scanner.confluence_label(signal_1d, "NOTR", signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
+        score_raw = scanner.confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
+        score = scanner.confluence_label(signal_1d, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
 
         rows.append({
             "date": ts.strftime("%Y-%m-%d"),

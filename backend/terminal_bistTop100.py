@@ -14,19 +14,19 @@ getiriler Yahoo Finance'ten yeniden cekilip terminal yenilenir.
 Sutunlar:
   #        Siralamadaki yeri: once Skor gucu (GUCLU AL en ustte, GUCLU SAT en
            altta), ayni skor grubu icinde gunluk getiriye gore buyukten kucuge
-  Skor     1d/5m EMA, MACD, RSI, BB% ve RS'nin tek bir konfluens skoruna
-           (-6..+6) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/
-           GUCLU SAT(▼▼). 6 ayri sinyale tek tek bakmak yerine tek bakista
+  Skor     1d EMA, MACD, RSI, BB% ve RS'nin tek bir konfluens skoruna
+           (-5..+5) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/
+           GUCLU SAT(▼▼). 5 ayri sinyale tek tek bakmak yerine tek bakista
            netlik saglar. ADX(14) ayri bir sutun olarak gosterilmez, GUCLU
            AL/SAT etiketini teyit eden bir guven filtresi olarak kullanilir:
            ADX<20 (zayif/yatay piyasa) ise "guclu" etiket otomatik normal
            AL/SAT'a duser.
-  1d       Gunluk mumda EMA9/EMA21'e gore SUREKLI trend durumu (AL/SAT/NOTR)
-  5m       5 dakikalik mumda EMA9/EMA21'e gore SUREKLI trend durumu
-           (1d ile ayni mantik, farkli zaman dilimi; ikisi de kesisim aninda
-           degil, EMA9'un EMA21'e gore o anki konumuna gore surekli AL/SAT
-           gosterir). Renk: AL=yesil, SAT=kirmizi, NOTR=sari - satirin genel
-           renginden (Gunluk +/-'ye gore) bagimsizdir.
+  1d       Gunluk mumda EMA9/EMA21'e gore SUREKLI trend durumu (AL/SAT/NOTR;
+           kesisim aninda degil, EMA9'un EMA21'e gore o anki konumuna gore).
+           Renk: AL=yesil, SAT=kirmizi, NOTR=sari - satirin genel renginden
+           (Gunluk +/-'ye gore) bagimsizdir. (2026-10-31'de ayni mantiktaki
+           5 dakikalik "5m" sutunu, ayri bir Yahoo istegi gerektirdigi ve
+           zaten gunluk mum canli guncellendigi icin kaldirildi.)
   Sektor   Hissenin kisa sektor kodu. Bu dosyada hisse listesi dinamik oldugu
            icin sabit bir harita yerine Yahoo'nun canli "sector" alani
            (SECTOR_TRANSLATE ile kisa koda cevrilir) kullanilir.
@@ -154,7 +154,7 @@ def render(rows, missing_count: int = 0):
         f"Siralama: Once Skor gucu (GUCLU AL->AL->NOTR->SAT->GUCLU SAT), ayni grup icinde gunluk % (yuksekten dusuge)"
     )
     print(
-        f"Sinyal: EMA{scanner.EMA_FAST}/EMA{scanner.EMA_SLOW} (1d/5dk) + "
+        f"Sinyal: EMA{scanner.EMA_FAST}/EMA{scanner.EMA_SLOW} (gunluk) + "
         f"MACD({scanner.MACD_FAST},{scanner.MACD_SLOW},{scanner.MACD_SIGNAL}) + RSI({scanner.RSI_PERIOD}) + "
         f"BB({scanner.BB_PERIOD},{scanner.BB_STD}sigma)   |  her {scanner.REFRESH_SECONDS} sn'de bir yenilenir"
     )
@@ -164,7 +164,7 @@ def render(rows, missing_count: int = 0):
     print()
 
     header = (
-        f"{'#':>2} {'Skor':^4} {'1d':^2} {'5m':^2} {'MACD':^4} {'Hisse':<5} {'Sektor':<6} {'Fiyat':>6} "
+        f"{'#':>2} {'Skor':^4} {'1d':^2} {'MACD':^4} {'Hisse':<5} {'Sektor':<6} {'Fiyat':>6} "
         f"{'Hacim':>5} {'GunPoz':>6} {'RSI':>3} {'BB%':>4} {'RS':>8} {'Gunluk':>8} "
         f"{'GunStop/Hedef':>13} {'SwStop/Hedef':>13}"
     )
@@ -174,7 +174,6 @@ def render(rows, missing_count: int = 0):
     for i, row in enumerate(rows_sorted, start=1):
         symbol_score = f"{SCORE_SYMBOLS.get(row['score'], row['score']):^4}"
         symbol_1d = f"{SIGNAL_SYMBOLS.get(row['signal_1d'], row['signal_1d']):^2}"
-        symbol_5m = f"{SIGNAL_SYMBOLS.get(row['signal_5m'], row['signal_5m']):^2}"
         symbol_macd = f"{SIGNAL_SYMBOLS.get(row['signal_macd'], row['signal_macd']):^4}"
         idx = f"{i:>2}"
         prefix = (
@@ -190,10 +189,9 @@ def render(rows, missing_count: int = 0):
             idx = f"{row_color}{idx}{RESET}"
             symbol_score = f"{SCORE_COLORS.get(row['score'], YELLOW)}{symbol_score}{RESET}"
             symbol_1d = f"{SIGNAL_COLORS.get(row['signal_1d'], YELLOW)}{symbol_1d}{RESET}"
-            symbol_5m = f"{SIGNAL_COLORS.get(row['signal_5m'], YELLOW)}{symbol_5m}{RESET}"
             symbol_macd = f"{SIGNAL_COLORS.get(row['signal_macd'], YELLOW)}{symbol_macd}{RESET}"
             prefix = f"{row_color}{prefix}{RESET}"
-        print(f"{idx} {symbol_score} {symbol_1d} {symbol_5m} {symbol_macd} {prefix}")
+        print(f"{idx} {symbol_score} {symbol_1d} {symbol_macd} {prefix}")
 
     print(f"\nCikmak icin CTRL+C")
     sys.stdout.flush()

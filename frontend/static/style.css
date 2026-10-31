@@ -256,6 +256,15 @@
   }
   #indicator-toggles label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   #indicator-toggles input { cursor: pointer; accent-color: var(--yellow); }
+  /* Mum/MACD/RSI uzerine gelince (crosshair) o anin tum indikator degerlerini
+     gosteren canli bilgi satiri - bkz. index.html wireCrosshairSync(). Bos
+     (fare grafikten cekilince) sabit yukseklik korunur, altindaki grafik
+     ani bir sicrama yapmaz. */
+  #chart-legend {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    font-size: 11px; color: var(--muted); min-height: 15px; margin-bottom: 4px;
+  }
+  #chart-legend .legend-date { color: var(--text); font-weight: 600; }
   #macd-chart, #rsi-chart { width: 100%; height: 110px; margin-top: 6px; }
   #score-history { /*margin-top: 14px;*/ }
   #score-history h3 {
