@@ -10,6 +10,14 @@ Borsa İstanbul (BIST) hisseleri için canlı momentum/sinyal tarayıcısı. Web
 
 ```
 backend/
+  app_settings.json       → ÇALIŞMA ZAMANLAMASI ayarları (BIST_REFRESH_SECONDS, BIST açık
+                            saatleri) — düz JSON (kod DEĞİL, "yazılım standartlarına" uygun
+                            ayrı bir ayar dosyası olsun diye — ilk sürümü .py idi, kullanıcı
+                            isteğiyle JSON'a çevrildi), 2026-11-01'de eklendi, bkz. aşağıda
+                            "BIST piyasa saatleri dışında tarama durdurulması". Anahtarlar
+                            BIST_ önekli (ileride başka bir piyasanın ayarları eklenirse
+                            karışmasın diye). Strateji/indikator sabitleri (ATR/PAPER_*/
+                            eşikler) BURADA DEĞİL, hâlâ scanner_bistTop100.py'de.
   scanner_bistTop100.py   → İŞ KATMANI (sunum içermez). Veri çekme, indikatör/skor
                             hesaplama, CSV loglama, push bildirim, piyasa göstergeleri.
                             Doğrudan çalıştırılmaz.
@@ -149,6 +157,25 @@ Kullanıcı isteği: bir muma gelince (hover), o günün TÜM gösterge değerle
 - `candleTimeMap`/`indicatorTimeMaps` — `selectTicker()`/`applyIndicatorData()` her hisse seçiminde bunları (backend'den gelen `time` string'leriyle anahtarlanmış `Map`'ler) yeniden oluşturur. `updateChartLegend(time)` hangi grafiğin crosshair'i tetiklerse tetiklesin AYNI Map'lerden okur — üç grafik arasında veri tekrarı/ayrı sorgu YOK.
 - **`timeKey()` normalizasyonu ZORUNLU** — bkz. "Bilinen tuzaklar" altındaki ayrı madde: crosshair'in `param.time`'ı bazen `{year,month,day}` nesnesi dönüyor, Map'ler ise orijinal string'lerle anahtarlanmış.
 - Grafik "büyütme" modal'ı (`openInModal()`, tüm `#chart-group`'u taşıyor) bunu etkilemiyor — legend `#chart-group`'un İÇİNDE olduğu için modal'a birlikte taşınıyor, crosshair subscription'ları da DOM konumundan bağımsız (chart JS nesnelerine bağlı) çalışmaya devam ediyor.
+- **Grafikte AL/GÜÇLÜ AL/SAT/GÜÇLÜ SAT geçiş işaretleri** (aynı gün eklendi): `updateChartMarkers()`, Skor Geçmişi'nin GÜNLÜK sekmesinin kullandığı AYNI `aggregateBy(scoreHistoryRaw, dayKey)` verisini kronolojik gezip `candleSeries.setMarkers()` ile mumların üstüne/altına ok koyar. İKİ önemli detay: (1) Skor Geçmişi 1 yıl geriye gidiyor ama grafikteki mumlar sadece ~3 ay — bir işaret SADECE `candleTimeMap.has(d.label)` ise (o gün gerçekten grafikte bir mum varsa) eklenir, aksi halde lightweight-charts aralık dışı işaretleri ilk muma yığıyordu. (2) AL/GÜÇLÜ AL (ve SAT/GÜÇLÜ SAT) `markerZone()` ile TEK bir "bölge" sayılır — ADX'in GÜÇLÜ eşiğinin (20) etrafında gün gün gidip gelmesi aynı trend sürerken tekrar tekrar işaretlemeye yol açıyordu, bölge gerçekten değişmeden (örn. NÖTR/SAT'tan AL'a) yeni işaret konulmuyor.
+
+## BIST piyasa saatleri dışında tarama durdurulması (2026-11-01'de eklendi)
+
+`web_bistTop100.py: _scan_loop()` (hisse tarama döngüsü) artık BIST'in **hafta içi (Pazartesi-Cuma) VE** `app_settings.json`'daki `BIST_MARKET_OPEN_*`/`BIST_MARKET_CLOSE_*` penceresi (varsayılan 09:30-18:30, TR saati) **dışındayken** `_scan_once()`'ı hiç çağırmıyor — döngü yine `BIST_REFRESH_SECONDS`'ta bir uyanıp `scanner.is_market_open()`'a bakıyor, Yahoo'ya istek atmadan tekrar uyuyor.
+
+- **Neden:** Önceden hem hisse tarama hem market-şeridi döngüsü 7/24 (hafta sonu ve BIST kapalıyken DAHİL) her 5 dakikada bir Yahoo'ya istek atıyordu — BIST haftada sadece ~40/168 saat açık olduğu için bu, gerçekte gerekenin ~4 katı istek anlamına geliyordu ve CLAUDE.md'de zaten en çok vurgulanan riski (Yahoo rate-limit) gereksiz büyütüyordu.
+- **Kapsam BİLİNÇLİ olarak SADECE hisse tarama döngüsüne (`_scan_loop`)** uygulandı — `_market_scan_loop()` (Dolar/Euro/Sterlin/BIST100/BTC/Altın/Gümüş/Petrol şeridi) buna TABİ DEĞİL, çünkü bu enstrümanların (özellikle döviz/BTC) kendi işlem saatleri BIST'ten bağımsız ve BIST dışı saatlerde de gerçek fiyat hareketi oluyor. `terminal_bistTop100.py`'nin kendi döngüsü de BİLİNÇLİ olarak DOKUNULMADI — o, kullanıcının elle başlatıp izlediği bir araç, piyasa kapalıyken "neden güncellenmiyor" kafa karışıklığı yaratmasın diye.
+- **`app_settings.json`** (yeni dosya, `backend/`) — **düz JSON, Python kodu DEĞİL** (kullanıcı "yazılım standartları gereği ayar dosyası .py olmamalı" dedi, ilk sürüm `.py` idi, sonra buna çevrildi). İçeriği: `{"BIST_REFRESH_SECONDS": 300, "BIST_MARKET_OPEN_HOUR": 9, "BIST_MARKET_OPEN_MINUTE": 30, "BIST_MARKET_CLOSE_HOUR": 18, "BIST_MARKET_CLOSE_MINUTE": 30}`. Anahtarlar **BIST_ önekli** — kullanıcı isteği: ileride başka bir piyasanın (örn. ABD/kripto) kendi REFRESH_SECONDS/MARKET_OPEN_* değerleri eklenirse BIST'inkiyle KARIŞMASIN diye. `scanner_bistTop100.py` dosyanın başında `json.load()` ile okuyup **AYNI BIST_ önekiyle** kendi isim alanına sabit olarak atıyor (`BIST_REFRESH_SECONDS = _app_settings["BIST_REFRESH_SECONDS"]` vb.) — bu yüzden `scanner.REFRESH_SECONDS` DEĞİL, **`scanner.BIST_REFRESH_SECONDS`** (aynı şekilde `BIST_MARKET_OPEN_HOUR`/`_MINUTE`/`BIST_MARKET_CLOSE_HOUR`/`_MINUTE`) — bu, isim DEĞİŞİKLİĞİ olduğu için `web_bistTop100.py` VE `terminal_bistTop100.py`'deki TÜM çağrı noktaları (`scanner.REFRESH_SECONDS` geçen her yer) bu yeni isme güncellendi. Strateji/indikator sabitleri (ATR_*/PAPER_*/eşikler) bu dosyada DEĞİL, hâlâ `scanner_bistTop100.py`'de düz Python sabiti olarak kalıyor — `app_settings.json` SADECE "ne zaman/ne sıklıkla çalışıyoruz" sorusuna cevap veren ayarlar için.
+- **`scanner_bistTop100.py: is_market_open(now=None)`** — hafta sonu kontrolü (`now.weekday() >= 5`) + saat penceresi kontrolü. Resmi BIST tatilleri (bayram vb.) BİLİNÇLİ olarak hesaba katılmıyor — o günlerde tarama yine çalışır ama Yahoo zaten değişmeyen son fiyatı döndürür, zararsız bir fazladan istek olur.
+- Piyasa açık saatlerinde `_state["rows"]`/`updated_at` normal akışında (`_scan_loop`, her `BIST_REFRESH_SECONDS`'ta bir) güncellenmeye devam eder.
+
+### İlk taramanın piyasa kapalıyken bile anında yapılması (`_ensure_scanned_once`, aynı gün eklendi)
+
+**Sorun:** `_scan_loop()` piyasa kapalıyken `_scan_once()`'ı HİÇ çağırmadığı için, servis TAM OLARAK piyasa kapalıyken (re)başlarsa `_state["rows"]` ilk tarama yapılana kadar (piyasa açılana kadar, saatlerce) **BOŞ** kalıyordu — kullanıcı siteyi hafta sonu açtığında "0 hisse" görüyordu. Kullanıcı isteği: "sayfaya istek atıldığında datalar görünsün ama 5 dakikada bir çalışmasın, o anda Yahoo'da hangi veriler varsa onları yansıtsın."
+
+- **`web_bistTop100.py: _ensure_scanned_once()`** — `/api/rows` çağrılan HER istekte en başta çalışır: `_state["updated_at"]` hâlâ `None` ise (yani HENÜZ hiç tarama yapılmadıysa) piyasa saatinden BAĞIMSIZ, **bir kerelik** senkron bir `_scan_once()` tetikler; zaten bir tarama yapılmışsa (en son ne zaman olduğuna bakılmaksızın) hiçbir şey yapmadan hemen döner. `_ensure_scan_lock` ile çift kontrol (double-checked locking) yapılır — aynı anda gelen birden fazla istek, aynı anda birden fazla tarama tetiklemez (biri tararken diğerleri bekler, sonucu paylaşır).
+- **Bilinçli tasarım:** Bu, SÜREKLİ çalışan bir mekanizma DEĞİL — sadece "hiç taranmamış" durumunu bir kez kurtarır. İlk istek sonrası (piyasa kapalıyken bile) `_state["rows"]` dolar ve bir SONRAKİ istek anında (`updated_at` artık `None` olmadığı için) döner, YENİDEN TARAMAZ — "5 dakikada bir çalışmasın" isteği böyle karşılanıyor. Piyasa açıldığında `_scan_loop()` normal akışına (her `BIST_REFRESH_SECONDS`'ta bir tazeleme) kendiliğinden devam eder.
+- **Doğrulandı (2026-11-01, Pazar günü, yerelde):** İlk `/api/rows` isteği ~14 saniye sürdü (353 hisse, piyasa kapalı olduğu için Yahoo'nun elindeki son kapanış verisi), hemen ardından gelen ikinci istek 0.02 saniyede AYNI `updated_at` ile döndü (yeniden tarama YAPILMADI).
 
 ## Deploy süreci (VPS)
 

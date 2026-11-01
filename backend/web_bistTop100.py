@@ -3,7 +3,7 @@
 
 Mevcut scanner_bistTop100 modulunun tum tarama/indikator mantigini (fetch_row,
 fetch_with_retry, confluence_label vb.) OLDUGU GIBI yeniden kullanir - burada
-sadece bu veriyi bir arka plan thread'inde REFRESH_SECONDS'ta bir tazeleyip
+sadece bu veriyi bir arka plan thread'inde BIST_REFRESH_SECONDS'ta bir tazeleyip
 basit bir JSON API + HTML sayfasi uzerinden sunuyoruz. Tarama mantigi
 degismedi, sadece terminal yerine tarayicida gosteriliyor.
 
@@ -11,7 +11,7 @@ Calistirmak icin:
     python3 web_bistTop100.py
 Sonra tarayicida: http://127.0.0.1:5000
 
-Sayfa acikken tablo REFRESH_SECONDS'a yakin bir surede kendiliginden
+Sayfa acikken tablo BIST_REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
 sag panelde 3 aylik mum grafigi + istege bagli indikator katmanlari
 (EMA/Bollinger/MACD/RSI) + Skor Gecmisi (gunluk/saatlik/5 dakikalik) gosterilir.
@@ -74,7 +74,7 @@ _state = {
 }
 
 # BIST sekmelerinin sagindaki doviz/emtia/BIST100/BTC seridi - hisse
-# taramasindan bagimsiz, kendi thread'inde ayni REFRESH_SECONDS ritmiyle
+# taramasindan bagimsiz, kendi thread'inde ayni BIST_REFRESH_SECONDS ritmiyle
 # calisir (ikisi de ayni yavaslikta ama farkli veri kumeleri cekiyor,
 # birbirini bloklamasin diye ayri thread/lock).
 _market_lock = threading.Lock()
@@ -95,13 +95,13 @@ def _row_to_json(row: dict) -> dict:
 
 
 # Grafik/indikator/skor-gecmisi endpoint'leri icin onbellek - scanner_bistTop100.py'deki
-# _benchmark_cache ile AYNI desen (TTL = REFRESH_SECONDS-5). Bir hisse zaten
+# _benchmark_cache ile AYNI desen (TTL = BIST_REFRESH_SECONDS-5). Bir hisse zaten
 # secilip verisi cekildiyse, ayni hisseye kisa surede tekrar tiklandiginda
 # (ya da farkli bir tarayicidan ayni hisseye bakildiginda) Yahoo'ya tekrar
 # istek atmak yerine onbellekten donulur - tarama zaten 5 dakikada bir
 # yenilendigi icin daha sik bir veriye ihtiyac yok.
 _chart_cache = {}  # (endpoint_adi, ticker) -> (fetched_at, json'lanabilir deger)
-CHART_CACHE_TTL = scanner.REFRESH_SECONDS - 5
+CHART_CACHE_TTL = scanner.BIST_REFRESH_SECONDS - 5
 
 
 def _cache_get(cache_key):
@@ -172,12 +172,44 @@ def _scan_once():
 
 
 def _scan_loop():
+    # BIST kapaliyken (hafta sonu / app_settings.json'daki BIST_MARKET_OPEN_*-
+    # BIST_MARKET_CLOSE_* penceresi disinda) Yahoo'ya bos yere istek atmamak
+    # icin _scan_once() hic cagrilmaz - dongu yine BIST_REFRESH_SECONDS'ta bir
+    # "acik mi?" diye bakmaya devam eder, piyasa acilir acilmaz (en fazla
+    # bir BIST_REFRESH_SECONDS gecikmeyle) tarama kendiliginden devam eder.
+    # Market seridi (_market_scan_loop) buna TABI DEGIL - doviz/emtia/
+    # kripto BIST disi saatlerde de islem goruyor.
     while True:
         try:
-            _scan_once()
+            if scanner.is_market_open():
+                _scan_once()
         except Exception as e:
             print("Tarama hatasi:", e)
-        time.sleep(scanner.REFRESH_SECONDS)
+        time.sleep(scanner.BIST_REFRESH_SECONDS)
+
+
+# _scan_loop() piyasa kapaliyken (hafta sonu vb.) hic _scan_once() cagirmadigi
+# icin, servis TAM OLARAK piyasa kapaliyken (re)baslatilirsa _state["rows"]
+# ilk tarama yapilana kadar BOS kalirdi - piyasa acilana kadar (saatlerce)
+# sayfada hic hisse gorunmezdi. Bunun yerine: ilk istek geldiginde (henuz
+# hic tarama yapilmamissa) BIR KERELIK, piyasa saatinden BAGIMSIZ, anlik bir
+# tarama tetiklenir - kullanici o an Yahoo'nun elindeki (piyasa kapaliysa
+# son kapanis) veriyi gorur. _scan_loop() piyasa acilinca normal akisina
+# (BIST_REFRESH_SECONDS'ta bir tazeleme) devam eder - bu fonksiyon SADECE
+# "hic taranmamis" durumunu bir kez kurtarir, surekli calisan bir mekanizma
+# DEGIL.
+_ensure_scan_lock = threading.Lock()
+
+
+def _ensure_scanned_once():
+    with _state_lock:
+        if _state["updated_at"] is not None:
+            return
+    with _ensure_scan_lock:
+        with _state_lock:
+            if _state["updated_at"] is not None:
+                return  # bu arada baska bir istek zaten taramayi tamamladi
+        _scan_once()
 
 
 def _market_scan_once():
@@ -193,14 +225,14 @@ def _market_scan_loop():
             _market_scan_once()
         except Exception as e:
             print("Piyasa gostergesi tarama hatasi:", e)
-        time.sleep(scanner.REFRESH_SECONDS)
+        time.sleep(scanner.BIST_REFRESH_SECONDS)
 
 
 @app.route("/")
 def index():
     return render_template(
         "index.html",
-        refresh_seconds=scanner.REFRESH_SECONDS,
+        refresh_seconds=scanner.BIST_REFRESH_SECONDS,
         title="BIST Momentum Scanner",
         logged_in=_is_logged_in(),
     )
@@ -240,6 +272,7 @@ def logout():
 
 @app.route("/api/rows")
 def api_rows():
+    _ensure_scanned_once()
     with _state_lock:
         return jsonify(dict(_state))
 
@@ -260,7 +293,7 @@ def api_market_indicators():
 _raw_history_cache = {}  # ticker -> (fetched_at, DataFrame)
 _raw_history_locks = {}
 _raw_history_locks_guard = threading.Lock()
-RAW_HISTORY_CACHE_TTL = scanner.REFRESH_SECONDS - 5
+RAW_HISTORY_CACHE_TTL = scanner.BIST_REFRESH_SECONDS - 5
 
 
 def _get_raw_history(ticker: str):

@@ -15,10 +15,10 @@ birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
 (terminal arayuzu) ve web_bistTop100.py (web arayuzu) bu modulu
 `import scanner_bistTop100 as scanner` ile kullanip kendi sunumlarini yapar.
 
-Her REFRESH_SECONDS (300sn / 5dk) saniyede bir veri Yahoo Finance'ten
+Her BIST_REFRESH_SECONDS (300sn / 5dk) saniyede bir veri Yahoo Finance'ten
 yeniden cekilir.
 
-Onbellek: haftalik/aylik degisim her REFRESH_SECONDS'ta Yahoo'dan yeniden
+Onbellek: haftalik/aylik degisim her BIST_REFRESH_SECONDS'ta Yahoo'dan yeniden
 cekilir (onbellek yok). Sadece BIST100 endeksi (RS icin) dongu basina
 onbelleklenir - yoksa her hisse icin ayri ayri cekilip 100+ kat gereksiz
 istege yol acardi. (2026-10-31'de kaldirilan 5 dakikalik EMA sinyali de
@@ -44,6 +44,24 @@ from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 
+# Calisma zamanlamasi (BIST_REFRESH_SECONDS, BIST acik saatleri) ARTIK
+# burada TANIMLANMIYOR - app_settings.json'dan OKUNUP bu modulun isim
+# alaninda sabit olarak disa veriliyor (scanner.BIST_REFRESH_SECONDS vb.) -
+# .py yerine .json: duz veri, kod DEGIL, "yazilim standartlarina" uygun
+# ayri bir ayar dosyasi. Anahtarlar BIST_ onekli - ileride baska bir
+# piyasanin (orn. ABD/kripto) ayni dosyaya/benzer bir dosyaya kendi
+# REFRESH_SECONDS/MARKET_OPEN_* degerleri eklenirse BIST'inkiyle
+# KARISMASIN diye.
+_APP_SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings.json")
+with open(_APP_SETTINGS_PATH, "r", encoding="utf-8") as _f:
+    _app_settings = json.load(_f)
+
+BIST_REFRESH_SECONDS = _app_settings["BIST_REFRESH_SECONDS"]
+BIST_MARKET_OPEN_HOUR = _app_settings["BIST_MARKET_OPEN_HOUR"]
+BIST_MARKET_OPEN_MINUTE = _app_settings["BIST_MARKET_OPEN_MINUTE"]
+BIST_MARKET_CLOSE_HOUR = _app_settings["BIST_MARKET_CLOSE_HOUR"]
+BIST_MARKET_CLOSE_MINUTE = _app_settings["BIST_MARKET_CLOSE_MINUTE"]
+
 # Telegram bot token/chat_id - sir asla koda/repoya yazilmaz, sadece ortam
 # degiskeni (systemd servis dosyasinda Environment=, yerelde export). Ikisi
 # de tanimli degilse _send_push_notifications() sessizce atlar - Telegram
@@ -51,9 +69,28 @@ import yfinance as yf
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-REFRESH_SECONDS = 300  # 5 dakika
 MAX_RETRIES = 2
 TOP300_SIZE = 300  # BIST 300 sekmesi: gunluk % degisime gore ilk N (dinamik, endeks degil)
+
+
+def is_market_open(now=None) -> bool:
+    """BIST hisse tarama dongusunun (web_bistTop100.py: _scan_loop(), bkz.
+    oradaki cagri) Yahoo'ya istek atmasi icin "piyasa acik" sayilan an mi -
+    hafta ici (Pazartesi-Cuma) VE app_settings.json'daki BIST_MARKET_OPEN_*/
+    BIST_MARKET_CLOSE_* penceresi icindeyse True. Market seridi (doviz/emtia/
+    kripto, web_bistTop100.py: _market_scan_loop()) buna BAKMAZ - o
+    enstrumanlar BIST disi saatlerde de islem goruyor.
+
+    Resmi BIST tatilleri (bayram vb.) BILINCLI olarak HESABA KATILMAZ -
+    o gunlerde tarama yine calisir ama Yahoo zaten degismeyen son fiyati
+    dondurur, zararsiz bir fazladan istek olur. `now` parametresi test
+    icin disaridan verilebilir, verilmezse gercek su an kullanilir."""
+    now = now or datetime.now()
+    if now.weekday() >= 5:  # 5=Cumartesi, 6=Pazar
+        return False
+    open_t = now.replace(hour=BIST_MARKET_OPEN_HOUR, minute=BIST_MARKET_OPEN_MINUTE, second=0, microsecond=0)
+    close_t = now.replace(hour=BIST_MARKET_CLOSE_HOUR, minute=BIST_MARKET_CLOSE_MINUTE, second=0, microsecond=0)
+    return open_t <= now <= close_t
 
 # Resmi BIST 30 Endeksi'nin (XU030) sabit uye listesi - 2026-09 itibariyla
 # dogrulanmis (Midas + Yahoo region=tr evreniyle capraz kontrol edildi).
@@ -332,14 +369,14 @@ _benchmark_cache = {}  # "pct" -> (fetched_at, daily_pct)
 
 
 def get_benchmark_daily_pct():
-    """BIST100 endeksinin gunluk yuzde degisimini REFRESH_SECONDS'a yakin bir
-    sure onbellekten dondurur - her hisse icin ayri ayri degil, dongu basina
+    """BIST100 endeksinin gunluk yuzde degisimini BIST_REFRESH_SECONDS'a yakin
+    bir sure onbellekten dondurur - her hisse icin ayri ayri degil, dongu basina
     bir kez cekilir (onbellek olmadan, 100+ hisse icin ayni endeks verisi
     100+ kez ayri ayri cekilirdi). Hisselerin gercekten piyasayla birlikte mi
     surukendigi yoksa piyasadan bagimsiz mi guclu oldugu (RS) bunun uzerinden
     hesaplanir."""
     cached = _benchmark_cache.get("pct")
-    if cached and time.time() - cached[0] < REFRESH_SECONDS - 5:
+    if cached and time.time() - cached[0] < BIST_REFRESH_SECONDS - 5:
         return cached[1]
     pct = None
     try:
@@ -407,10 +444,10 @@ def fetch_market_indicators():
     silver_gram_price, silver_gram_pct = _derived_gram(silver_oz_price, silver_oz_pct)
 
     return [
+        {"label": "BIST100", "price": xu100_price, "pct": xu100_pct, "unit": ""},
         {"label": "Dolar", "price": usd_price, "pct": usd_pct, "unit": "TL"},
         {"label": "Euro", "price": eur_price, "pct": eur_pct, "unit": "TL"},
         {"label": "Sterlin", "price": gbp_price, "pct": gbp_pct, "unit": "TL"},
-        {"label": "BIST100", "price": xu100_price, "pct": xu100_pct, "unit": ""},
         {"label": "Bitcoin", "price": btc_price, "pct": btc_pct, "unit": "$"},
         {"label": "Gram Altin", "price": gold_gram_price, "pct": gold_gram_pct, "unit": "TL"},
         {"label": "Gram Gumus", "price": silver_gram_price, "pct": silver_gram_pct, "unit": "TL"},
@@ -1074,7 +1111,7 @@ def log_score_history(rows):
     """log_signal_changes'in aksine SADECE GUCLU_AL/SAT'a donuste degil, HER
     dongude TUM hisseler icin bir satir yazar. Web arayuzundeki Skor Gecmisi
     panelinin 3 sekmesinin (gunluk ortalama / saatlik ortalama / 5 dakikalik
-    ham veri) kaynagi budur - REFRESH_SECONDS zaten 5 dakika oldugu icin her
+    ham veri) kaynagi budur - BIST_REFRESH_SECONDS zaten 5 dakika oldugu icin her
     dongu dogal olarak bir "5 dakikalik" ornek temsil eder."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     entries = [
@@ -1132,7 +1169,7 @@ def get_score_history(ticker: str, since_timestamp: str):
 def run_paper_trading_cycle(rows) -> None:
     """Sanal para (paper trading) simulasyonunun ana dongusu -
     web_bistTop100.py: _scan_once() tarafindan HER tarama dongusunde
-    (REFRESH_SECONDS) cagrilir, ayni rows (zaten taranmis, Yahoo'ya
+    (BIST_REFRESH_SECONDS) cagrilir, ayni rows (zaten taranmis, Yahoo'ya
     tekrar gidilmez) kullanilir. Cagiran taraf bunu kendi try/except'i
     icinde sarmali - burada beklenmeyen bir hata ana tarama/skor
     loglama akisini bozmamali.

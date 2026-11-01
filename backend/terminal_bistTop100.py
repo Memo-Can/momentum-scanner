@@ -8,7 +8,7 @@ sundugunun terminal karsiligidir.
 Calistirmak icin (proje kok dizininden):
     python3 terminal_bistTop100.py
 
-Her REFRESH_SECONDS (300sn / 5dk) saniyede bir hem tarayici listesi hem de
+Her BIST_REFRESH_SECONDS (300sn / 5dk) saniyede bir hem tarayici listesi hem de
 getiriler Yahoo Finance'ten yeniden cekilip terminal yenilenir.
 
 Sutunlar:
@@ -55,7 +55,7 @@ Sutunlar:
   SwStop/Hedef  Ayni mantik, ATR(14)*3.0 mesafeli - birkac gun/hafta tasinacak
            swing pozisyonlar icin daha genis stop/hedef.
 
-Ses: Her basarili yenilemede (REFRESH_SECONDS'ta bir) tek bir bip sesi
+Ses: Her basarili yenilemede (BIST_REFRESH_SECONDS'ta bir) tek bir bip sesi
 (al_beep.wav) calinir - sinyale bagli degildir.
 """
 
@@ -156,7 +156,7 @@ def render(rows, missing_count: int = 0):
     print(
         f"Sinyal: EMA{scanner.EMA_FAST}/EMA{scanner.EMA_SLOW} (gunluk) + "
         f"MACD({scanner.MACD_FAST},{scanner.MACD_SLOW},{scanner.MACD_SIGNAL}) + RSI({scanner.RSI_PERIOD}) + "
-        f"BB({scanner.BB_PERIOD},{scanner.BB_STD}sigma)   |  her {scanner.REFRESH_SECONDS} sn'de bir yenilenir"
+        f"BB({scanner.BB_PERIOD},{scanner.BB_STD}sigma)   |  her {scanner.BIST_REFRESH_SECONDS} sn'de bir yenilenir"
     )
     if missing_count:
         total_attempted = len(rows) + missing_count
@@ -226,7 +226,7 @@ def main():
         else:
             print("Veri cekilemedi, tekrar denenecek...")
         try:
-            time.sleep(scanner.REFRESH_SECONDS)
+            time.sleep(scanner.BIST_REFRESH_SECONDS)
         except KeyboardInterrupt:
             sys.exit(0)
 
