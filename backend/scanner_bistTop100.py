@@ -10,8 +10,8 @@ Havuz = BIST100_TICKERS UNION fetch_top_gainers(TOP300_SIZE) (cakisanlar
 TEKRAR CEKILMEZ) - boylece TUM piyasayi (~600+ hisse) taramak yerine en
 fazla ~100+300=400 farklı hisse cekilir, Yahoo'nun resmi olmayan API'sinin
 rate-limit riskini azaltir. Her hisse icin EMA/MACD/RSI/Bollinger/ADX/ATR
-indikatorleri hesaplanip tek bir Skor'a (-5..+5, GUCLU_AL..GUCLU_SAT)
-birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
+indikatorleri hesaplanip tek bir Skor'a (-5..+5, MUTLAK_AL..MUTLAK_SAT - bkz.
+confluence_label) birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
 (terminal arayuzu) ve web_bistTop100.py (web arayuzu) bu modulu
 `import scanner_bistTop100 as scanner` ile kullanip kendi sunumlarini yapar.
 
@@ -25,7 +25,7 @@ istege yol acardi. (2026-10-31'de kaldirilan 5 dakikalik EMA sinyali de
 hisse basina AYRI bir Yahoo istegi gerektiriyordu - kaldirilmasi hisse
 basina istek sayisini 3'ten 2'ye dusurdu.)
 
-Sinyal gecmisi: Skoru GUCLU_AL/GUCLU_SAT'a DONEN hisseler signal_log_bist.csv
+Sinyal gecmisi: Skoru MUTLAK_AL/GUCLU_AL/GUCLU_SAT/MUTLAK_SAT'a DONEN hisseler signal_log_bist.csv
 dosyasina eklenir (sadece durum degistiginde, spam onlenir) ve kayitli mobil
 cihazlara push bildirimi gonderilir. Zamanla bu kayitlara bakip Skor'un
 gercekte ise yarayip yaramadigini (sinyalden sonra fiyat ne oldu) kendi
@@ -157,6 +157,11 @@ PAPER_MAX_HOLD_DAYS = 21  # ~15 islem gunune denk takvim gunu yaklasimi
 # SADECE otomatik alim kararini etkiler - GUCLU_AL etiketi/gorunumu (sitede
 # herkese gosterilen) DEGISMEZ, confluence_label() bundan habersiz.
 PAPER_MIN_VOL20 = 0.0213
+# GUCLU_AL ve MUTLAK_AL (2026-11-01'de eklendi) TEK bir "guclu alim bolgesi"
+# sayilir - otomatik alim, bu bolgenin DISINDAN icine girildiginde tetiklenir,
+# ikisi arasinda (eskalasyon/dusus) gidip gelmek YENI alim SAYILMAZ (bkz.
+# run_paper_trading_cycle).
+_STRONG_BUY_ZONE = ("GUCLU_AL", "MUTLAK_AL")
 
 # SQLite tek-yazarli oldugu icin tum INSERT/DELETE'ler bu kilit altinda
 # yapilir - WAL modu zaten coklu OKUYUCUYA izin veriyor (Flask'in threaded=True
@@ -681,28 +686,39 @@ def confluence_label(
     rel_strength: float,
 ) -> str:
     """1d EMA, MACD, RSI, BB% ve endekse gore goreceli guc (RS) sinyallerini
-    tek bir konfluens skoruna (-5..+5) birlestirir ve GUCLU_AL/AL/NOTR/SAT/
-    GUCLU_SAT etiketine cevirir. Boylece 5 ayri sutuna tek tek bakip kafada
-    birlestirmek yerine, tek sutunda net bir AL/SAT karari gorulur.
+    tek bir konfluens skoruna (-5..+5) birlestirir ve MUTLAK_AL/GUCLU_AL/AL/
+    NOTR/SAT/GUCLU_SAT/MUTLAK_SAT etiketine cevirir. Boylece 5 ayri sutuna
+    tek tek bakip kafada birlestirmek yerine, tek sutunda net bir AL/SAT
+    karari gorulur.
 
     RS (rel_strength = hissenin gunluk% - endeksin gunluk%): hisse piyasayla
     birlikte mi surukleniyor yoksa piyasadan bagimsiz gercekten guclu mu
     oldugunu ayirt eder - endeksin +%4 oldugu bir gunde hissenin +%5 olmasi,
     endeksin duz oldugu bir gunde +%5 olmasindan cok daha az anlamlidir.
 
-    ADX, ayri bir sutun olarak degil, GUCLU_AL/GUCLU_SAT etiketinin
-    guvenilirligini teyit eden bir filtre olarak kullanilir: ADX<20 (zayif/
-    yatay piyasa) veya hesaplanamiyorsa, "guclu" etiket normal AL/SAT'a
-    dusurulur - boyle bir ortamda guclu sinyale guvenmek yaniltici olabilir."""
+    ADX, ayri bir sutun olarak degil, MUTLAK_AL/GUCLU_AL/GUCLU_SAT/MUTLAK_SAT
+    etiketlerinin guvenilirligini teyit eden bir filtre olarak kullanilir:
+    ADX<20 (zayif/yatay piyasa) veya hesaplanamiyorsa, bu etiketler normal
+    AL/SAT'a dusurulur - boyle bir ortamda guclu/mutlak sinyale guvenmek
+    yaniltici olabilir."""
 
     score = confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
 
     # Esikler 2026-10-31'de (signal_5m kaldirilinca, maks |skor| 6'dan 5'e
     # dusunce) yeniden olceklendi - GUCLU_AL/SAT icin "en fazla 1 bilesen
-    # cekimser, SIFIR karsit oy" kurali AYNEN korunuyor (eskiden 6 bilesenden
-    # 5-6'si, simdi 5 bilesenden 4-5'i hemfikir). AL/NOTR/SAT sinirlari
-    # (net oy farki >=2) mutlak deger olarak degismedi.
-    if score >= 4:
+    # cekimser, SIFIR karsit oy" kurali AYNEN korunuyor. 2026-11-01'de
+    # kullanici istegiyle MUTLAK_AL/MUTLAK_SAT eklendi (bkz. CLAUDE.md
+    # "MUTLAK AL/SAT etiketleri"): MUTLAK_AL SADECE tam mutabakat (5 bilesen
+    # 5 AL, sifir cekimser/karsit) gerektirir - GUCLU_AL artik SADECE
+    # skor==4'u (4 AL + 1 cekimser) kapsar, skor==5 MUTLAK_AL'a gider.
+    # MUTLAK_SAT ise BILINCLI olarak daha GEVSEK bir esikle (skor<=-4, yani
+    # eski GUCLU_SAT'in TUM araligi) tanimlandi - kullanicinin kendi secimi,
+    # AL tarafiyla simetrik DEGIL. Bu yuzden GUCLU_SAT etiketi artik CANLI
+    # taramada HIC URETILMEZ (sadece eski/gecmis DB kayitlarinda gorulebilir,
+    # geriye donuk uyumluluk icin kod/frontend'den SILINMEDI).
+    if score == 5:
+        label = "MUTLAK_AL"
+    elif score >= 4:
         label = "GUCLU_AL"
     elif score >= 2:
         label = "AL"
@@ -711,12 +727,12 @@ def confluence_label(
     elif score >= -3:
         label = "SAT"
     else:
-        label = "GUCLU_SAT"
+        label = "MUTLAK_SAT"
 
     trend_confirmed = adx_val == adx_val and adx_val >= ADX_TREND_THRESHOLD
-    if label == "GUCLU_AL" and not trend_confirmed:
+    if label in ("MUTLAK_AL", "GUCLU_AL") and not trend_confirmed:
         label = "AL"
-    elif label == "GUCLU_SAT" and not trend_confirmed:
+    elif label in ("MUTLAK_SAT", "GUCLU_SAT") and not trend_confirmed:
         label = "SAT"
 
     return label
@@ -862,7 +878,11 @@ def fetch_row(ticker: str):
         # gerekmez.
         daily_returns = closes.pct_change().tail(20)
         vol20 = float(daily_returns.std()) if len(daily_returns.dropna()) >= 10 else float("nan")
-        trade_direction = "AL" if score in ("AL", "GUCLU_AL") else "SAT" if score in ("SAT", "GUCLU_SAT") else None
+        trade_direction = (
+            "AL" if score in ("AL", "GUCLU_AL", "MUTLAK_AL")
+            else "SAT" if score in ("SAT", "GUCLU_SAT", "MUTLAK_SAT")
+            else None
+        )
         day_stop, day_target = stop_target_levels(current_price, atr_val, trade_direction, ATR_DAY_MULT, ATR_TARGET_R)
         swing_stop, swing_target = stop_target_levels(
             current_price, atr_val, trade_direction, ATR_SWING_MULT, ATR_TARGET_R
@@ -950,7 +970,9 @@ def fetch_with_retry(tickers, max_workers: int = 12, max_retries: int = MAX_RETR
 # Siralama onceligi: en guclu AL en ustte, en guclu SAT en altta - ayni
 # skor grubunun icinde gunluk % buyukten kucuge sıralanir (web/terminal
 # render sort_key'lerinde kullanilir).
-SCORE_ORDER = {"GUCLU_AL": 0, "AL": 1, "NOTR": 2, "SAT": 3, "GUCLU_SAT": 4}
+# GUCLU_SAT artik canli taramada hic uretilmiyor (bkz. confluence_label) ama
+# gecmis DB kayitlarinda/defansif olarak burada duruyor.
+SCORE_ORDER = {"MUTLAK_AL": 0, "GUCLU_AL": 1, "AL": 2, "NOTR": 3, "SAT": 4, "GUCLU_SAT": 5, "MUTLAK_SAT": 6}
 
 
 _last_logged_score = {}  # ticker -> log dosyasina en son yazilan skor
@@ -997,22 +1019,35 @@ def _telegram_send(text: str) -> None:
         print("Telegram bildirimi gonderilemedi:", e)
 
 
+_SIGNAL_NOTIFY_LABELS = {
+    "GUCLU_AL": "GUCLU AL",
+    "MUTLAK_AL": "MUTLAK AL",
+    "GUCLU_SAT": "GUCLU SAT",
+    "MUTLAK_SAT": "MUTLAK SAT",
+}
+
+
 def _send_push_notifications(entries) -> None:
-    """entries (log_signal_changes'in az once tespit ettigi GUCLU_AL/SAT
-    gecisleri) icin Telegram'a bir mesaj gonderir."""
+    """entries (log_signal_changes'in az once tespit ettigi MUTLAK_AL/
+    GUCLU_AL/GUCLU_SAT/MUTLAK_SAT gecisleri) icin Telegram'a bir mesaj
+    gonderir."""
     for entry in entries:
-        # GUCLU_SAT bildirimleri KULLANICI ISTEGIYLE gecici olarak KAPATILDI
-        # (2026-10-30) - GUCLU_SAT cok daha sik tetiklendigi icin (bkz.
-        # CLAUDE.md) Telegram'i spam'liyordu. signal_log'a yazilmasini
+        # GUCLU_SAT/MUTLAK_SAT bildirimleri KULLANICI ISTEGIYLE gecici olarak
+        # KAPATILDI (2026-10-30, MUTLAK_SAT eklenince 2026-11-01'de buraya da
+        # genisletildi) - "SAT" tarafi cok daha sik tetiklendigi icin (bkz.
+        # CLAUDE.md) Telegram'i spam'liyordu. GUCLU_SAT artik canli taramada
+        # hic uretilmiyor (confluence_label artik MUTLAK_SAT'a gidiyor) ama
+        # defansif olarak kontrolde tutuluyor. signal_log'a yazilmasini
         # ETKILEMEZ (bu fonksiyon DB yazimindan SONRA cagriliyor, bkz.
         # log_signal_changes()) - sadece push gonderimi atlaniyor. Tekrar
         # acmak icin asagidaki continue satirini kaldir.
-        if entry["score"] == "GUCLU_SAT":
+        if entry["score"] in ("GUCLU_SAT", "MUTLAK_SAT"):
             continue
         # Telegram mesajlarinda gercek metin rengi desteklenmiyor - yesil/kirmizi
-        # algisi icin renkli daire emoji kullanilir (GUCLU_AL=yesil, GUCLU_SAT=kirmizi).
-        symbol = "🟢" if entry["score"] == "GUCLU_AL" else "🔴"
-        label = "GUCLU AL" if entry["score"] == "GUCLU_AL" else "GUCLU SAT"
+        # algisi icin renkli daire emoji kullanilir (AL taraf=yesil, SAT taraf=kirmizi) -
+        # bu noktada SAT taraf zaten yukarida atlandigi icin pratikte hep yesil.
+        symbol = "🟢" if entry["score"] in ("GUCLU_AL", "MUTLAK_AL") else "🔴"
+        label = _SIGNAL_NOTIFY_LABELS.get(entry["score"], entry["score"])
         text = (
             f"{symbol} {entry['ticker']} -> {label}\n"
             f"{entry['price']:.2f} TL ({entry['daily_pct']:+.2f}%)\n"
@@ -1060,18 +1095,23 @@ def _send_paper_trade_notification(event: dict) -> None:
     _telegram_send(text)
 
 
+_STRONG_SIGNAL_LABELS = ("GUCLU_AL", "MUTLAK_AL", "GUCLU_SAT", "MUTLAK_SAT")
+
+
 def log_signal_changes(rows):
-    """Skoru GUCLU_AL/GUCLU_SAT'a DONEN (onceki dongude farkli olan) hisseleri
-    signal_log tablosuna ekler. Her dongude ayni sinyali tekrar tekrar yazmaz -
-    sadece durum degistiginde kaydeder, boylece log tablosu anlamli kalir ve
-    her satir gercekten "yeni bir sinyal aninı" temsil eder."""
+    """Skoru MUTLAK_AL/GUCLU_AL/GUCLU_SAT/MUTLAK_SAT'a DONEN (onceki dongude
+    farkli olan) hisseleri signal_log tablosuna ekler - GUCLU_AL<->MUTLAK_AL
+    (ya da GUCLU_SAT<->MUTLAK_SAT) arasindaki ESKALASYON/DUSUS de "degisim"
+    sayilir, zira skor degismis olur. Her dongude ayni sinyali tekrar tekrar
+    yazmaz - sadece durum degistiginde kaydeder, boylece log tablosu anlamli
+    kalir ve her satir gercekten "yeni bir sinyal aninı" temsil eder."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     new_entries = []
     for row in rows:
         ticker = row["ticker"]
         score = row["score"]
         prev = _last_logged_score.get(ticker)
-        if score != prev and score in ("GUCLU_AL", "GUCLU_SAT"):
+        if score != prev and score in _STRONG_SIGNAL_LABELS:
             new_entries.append(
                 {
                     "timestamp": now,
@@ -1175,13 +1215,14 @@ def run_paper_trading_cycle(rows) -> None:
     loglama akisini bozmamali.
 
     1) Acik pozisyonlari cikis kurallarina gore kapatir - source='auto'
-       icin stop/hedef/SAT-veya-GUCLU_SAT sinyali/sure asimi (ilk uyan kural
-       kazanir, 2026-10-31'de sinyal kosulu GUCLU_SAT'tan SAT'i da kapsayacak
-       sekilde genisletildi); source='manual' icin SADECE SAT/GUCLU_SAT
+       icin stop/hedef/SAT-veya-GUCLU_SAT-veya-MUTLAK_SAT sinyali/sure asimi
+       (ilk uyan kural kazanir, 2026-10-31'de sinyal kosulu GUCLU_SAT'tan
+       SAT'i de kapsayacak sekilde, 2026-11-01'de MUTLAK_SAT eklenince ona da
+       genisletildi); source='manual' icin SADECE SAT/GUCLU_SAT/MUTLAK_SAT
        sinyali (stop/hedef/sure kurali YOK, bkz. asagida).
-    2) rows'taki YENI GUCLU_AL gecislerini (_paper_last_score ile
-       karsilastirarak) tespit eder, acik slot kadarini sirayla satin
-       alir.
+    2) rows'taki YENI GUCLU_AL/MUTLAK_AL gecislerini (_paper_last_score ile
+       karsilastirarak, ikisi TEK bir "guclu alim bolgesi" sayilir) tespit
+       eder, acik slot kadarini sirayla satin alir.
     3) Her dongude bir equity (nakit + acik pozisyon degeri) satiri
        loglar."""
     now = datetime.now()
@@ -1201,9 +1242,9 @@ def run_paper_trading_cycle(rows) -> None:
             # kontrol edilir, ama cikis kurallari FARKLI (asagidaki dallanmaya
             # bak) - manuel pozisyonlara stop/hedef/sure kurali HALA
             # UYGULANMAZ, kullanicinin "Sat" butonuyla elle kapatmasi hala
-            # gecerli (manual_sell()) - sadece SAT/GUCLU_SAT sinyali artik
-            # EK bir otomatik cikis yolu (2026-10-31'de kullanici istegiyle
-            # eklendi, bkz. CLAUDE.md).
+            # gecerli (manual_sell()) - sadece SAT/GUCLU_SAT/MUTLAK_SAT
+            # sinyali artik EK bir otomatik cikis yolu (2026-10-31'de
+            # kullanici istegiyle eklendi, bkz. CLAUDE.md).
             open_positions = [
                 dict(r)
                 for r in conn.execute(
@@ -1224,11 +1265,11 @@ def run_paper_trading_cycle(rows) -> None:
                         exit_reason = "stop"
                     elif pos["target_price"] is not None and price >= pos["target_price"]:
                         exit_reason = "target"
-                    elif row["score"] in ("SAT", "GUCLU_SAT"):
+                    elif row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
                         exit_reason = "signal_reversal"
                     elif now_str >= pos["max_hold_until"]:
                         exit_reason = "time_stop"
-                elif row["score"] in ("SAT", "GUCLU_SAT"):
+                elif row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
                     exit_reason = "manual_sat_signal"
 
                 if exit_reason is not None:
@@ -1256,15 +1297,19 @@ def run_paper_trading_cycle(rows) -> None:
             open_tickers = {p["ticker"] for p in open_positions if p["source"] == "auto"} - closed_this_cycle
             open_count = len(open_tickers)
 
-            # YENI GUCLU_AL gecislerini tespit et - rows zaten skor gucu +
-            # gunluk % sirali (bkz. web_bistTop100.py: _scan_once()'taki
-            # _sort_key), bu yuzden candidate_tickers de dogal olarak o
-            # oncelik sirasinda.
+            # YENI GUCLU_AL/MUTLAK_AL gecislerini tespit et - ikisi TEK bir
+            # "guclu alim bolgesi" sayilir (frontend'deki markerZone() ile
+            # AYNI mantik): GUCLU_AL<->MUTLAK_AL arasinda (bolgenin
+            # KENDISI degismeden) gidip gelmek YENI alim tetiklemez, sadece
+            # bolgenin DISINDAN (AL/NOTR/SAT/...) icine girmek tetikler.
+            # rows zaten skor gucu + gunluk % sirali (bkz. web_bistTop100.py:
+            # _scan_once()'taki _sort_key), bu yuzden candidate_tickers de
+            # dogal olarak o oncelik sirasinda.
             candidates = []
             for row in rows:
                 ticker = row["ticker"]
                 prev = _paper_last_score.get(ticker)
-                if prev is not None and prev != "GUCLU_AL" and row["score"] == "GUCLU_AL":
+                if prev is not None and prev not in _STRONG_BUY_ZONE and row["score"] in _STRONG_BUY_ZONE:
                     candidates.append(row)
                 _paper_last_score[ticker] = row["score"]
 

@@ -39,10 +39,31 @@ backend/
   device_tokens_bist.json → data/ İÇİNDE DEĞİL, backend/ kökünde (SQLite'a taşınmadı, ayrı tutuldu).
   diger-piyasalar/        → KAPSAM DIŞI (aşağıda ayrıca bahsedilir), sadece klasör düzeni.
 frontend/
-  templates/index.html    → Tek sayfalık web UI (tablo + sekmeler + grafik + skor geçmişi
-                            + piyasa şeridi + Sanal Al-Sat). Tüm JS inline (dosyanın içinde),
-                            CSS ise AYRI bir dosyada (static/style.css) — 2026-10'da inline
-                            <style>'den çıkarıldı (bkz. aşağıda).
+  templates/index.html    → KABUK (shell) şablonu: <head>, header, market-tabs, layout
+                            iskeleti, yan panel (#side, grafik/skor geçmişi), modal, footer.
+                            İKİ inline `<script>` bloğu var: (1) `<body>` açılır açılmaz,
+                            table-wrap'teki iki include'dan ÖNCE, SADECE Jinja'ya ihtiyaç
+                            duyan 5 JS sabiti (REFRESH_SECONDS/LOGGED_IN/AL_SOUND/SAT_SOUND/
+                            FAVICON_URL) — bkz. aşağıda "Frontend dosya bölünmesi"'ndeki
+                            "LOGGED_IN is not defined" dersi, bu sabitlerin NEDEN en başta
+                            olması GEREKTİĞİ orada açıklanıyor. (2) EN ALTTA (footer'dan
+                            SONRA) HER İKİ görünümün de kullandığı ORTAK JS — grafik/
+                            crosshair/legend, Skor Geçmişi, sinyal bildirimleri, market
+                            şeridi, modal, selectTicker()/showView(). Hisse tablosu ve
+                            Sanal Al-Sat bölümleri (HTML'leri VE kendi JS'leri birlikte)
+                            BURADA DEĞİL — 2026-11-01'de önce ayrı dosyalara, SONRA (aynı
+                            gün, kullanıcı "scriptlerle htmllerin ayrı olmasına gerek yok"
+                            deyince) kendi partial'lerinin İÇİNE inline `<script>` olarak
+                            taşındı (bkz. aşağıda "Frontend dosya bölünmesi"). Ayrı
+                            `static/js/*.js` dosyaları YOK — CSS hâlâ `style.css`'te tek
+                            dosyada.
+  templates/_view_stocks.html        → Hisse tablosunun HTML'i + ALTINDA kendi inline
+                            `<script>`'i (sıralama/arama/filtreleme/render). `{% include %}`
+                            ile index.html'e (table-wrap içine) dahil edilir.
+  templates/_view_paper_trading.html → Sanal Al-Sat bölümünün HTML'i + ALTINDA kendi inline
+                            `<script>`'i (manuel alım/satım, nakit düzenleme/sıfırlama).
+                            index.html'de `{% if logged_in %}` ile KOŞULLU include edilir —
+                            script'i de bu yüzden sadece login olana gönderilir.
   static/                 → favicon + web bildirim sesleri + style.css (Flask'ın /static/ rotası).
 ```
 
@@ -63,9 +84,22 @@ VPS de bu yapıya göçürüldü (2026-10-23): `/root/momentum-scanner/backend/`
 
 ## Skor sistemi
 
-Confluence Score: `confluence_score_raw()` (-5..+5) + `confluence_label()` (GUCLU_AL/AL/NOTR/SAT/GUCLU_SAT). `ADX_TREND_THRESHOLD=20` ve `RS_THRESHOLD=0.5` sadece **etiketi** etkiler, hiçbir hisseyi listeden ELEMEZ — liste filtresi değil, güven eşiğidir.
+Confluence Score: `confluence_score_raw()` (-5..+5) + `confluence_label()` (MUTLAK_AL/GUCLU_AL/AL/NOTR/SAT/GUCLU_SAT/MUTLAK_SAT — bkz. aşağıda "MUTLAK AL/SAT etiketleri"). `ADX_TREND_THRESHOLD=20` ve `RS_THRESHOLD=0.5` sadece **etiketi** etkiler, hiçbir hisseyi listeden ELEMEZ — liste filtresi değil, güven eşiğidir.
 
-Varsayılan tablo sıralaması: önce Skor gücü (GUCLU_AL üstte), aynı grup içinde günlük % (yüksekten düşüğe). Bu, `frontend/templates/index.html`'deki `applySort()`'un `sortState.key === null` dalında ve backend'in `_sort_key()`'inde **birebir aynı** tutulmalı.
+Varsayılan tablo sıralaması: önce Skor gücü (MUTLAK_AL üstte), aynı grup içinde günlük % (yüksekten düşüğe). Bu, `frontend/templates/_view_stocks.html`'deki `applySort()`'un `sortState.key === null` dalında (`DEFAULT_SCORE_ORDER`) ve backend'in `_sort_key()`'inde (`scanner.SCORE_ORDER`) **birebir aynı** tutulmalı — fallback değerleri de (NOTR'un pozisyonu, `?? 3` / `.get(..., 3)`) dahil.
+
+### MUTLAK AL/SAT etiketleri (2026-11-01'de eklendi)
+
+Kullanıcı isteği: "5'te 5 (tam mutabakat) olursa MUTLAK AL, -4 ve altı olursa MUTLAK SAT" — GÜÇLÜ_AL/GÜÇLÜ_SAT'ın ÜSTÜNDE, **yeni 2 etiket** (toplam 7: MUTLAK_AL, GUCLU_AL, AL, NOTR, SAT, GUCLU_SAT, MUTLAK_SAT). İki açıklığa AskUserQuestion ile netlik kazandırıldı:
+
+- **AL ve SAT tarafı BİLİNÇLİ olarak SİMETRİK DEĞİL:** `MUTLAK_AL` sadece **skor==5** (tam mutabakat, 5 bileşenin 5'i de AL, sıfır çekimser) gerektirir — `GUCLU_AL` artık SADECE skor==4'ü kapsar (eskiden >=4 idi). `MUTLAK_SAT` ise daha GEVŞEK bir eşikle, **skor<=-4** (yani -4 VEYA -5, eski `GUCLU_SAT`'ın TÜM aralığı) tanımlandı — kullanıcının kendi, bilerek verdiği kararı. **Bunun doğal sonucu: `GUCLU_SAT` artık canlı taramada HİÇ ÜRETİLMEZ** (confluence_label skor<=-4 için direkt MUTLAK_SAT döner) — sadece geçmiş DB kayıtlarında görülebilir, bu yüzden sembol/renk/sıralama tanımları kod ve frontend'den SİLİNMEDİ (geriye dönük uyumluluk).
+- **`confluence_label()`** (`scanner_bistTop100.py`): `score==5 → MUTLAK_AL`, `score==4 → GUCLU_AL`, ..., `score<=-4 → MUTLAK_SAT`. ADX filtresi (`trend_confirmed` değilse) hem `MUTLAK_AL` hem `GUCLU_AL`'ı doğrudan `AL`'a düşürür (tek adımda, ara kademe YOK) — aynı şekilde `MUTLAK_SAT`/`GUCLU_SAT` → `SAT`.
+- **Tutarlılık kontrolü yapılan TÜM yerler** (`grep -rn "GUCLU_AL\|GUCLU_SAT"` ile tarandı): `scanner_bistTop100.py` (`confluence_label`, `SCORE_ORDER`, `trade_direction` (stop/hedef yönü), `_send_push_notifications`/`_SIGNAL_NOTIFY_LABELS`, `log_signal_changes`/`_STRONG_SIGNAL_LABELS`, `run_paper_trading_cycle`'daki exit kuralları VE `_STRONG_BUY_ZONE` ile alım tetikleyicisi), `backfill_daily_bist.py: signal_transitions()` (artık `scanner._STRONG_SIGNAL_LABELS` kullanıyor), `terminal_bistTop100.py` (`SCORE_SYMBOLS`/`SCORE_COLORS`, `_sort_key` fallback), `web_bistTop100.py: _sort_key` fallback, `frontend/templates/index.html` (`SCORE_SYMBOLS`, `MARKER_STYLES`, sinyal bildirimi ses/metin/geçiş tespiti, `scoreLabelFromAvg`, `markerZone`), `frontend/templates/_view_stocks.html` (`SCORE_RANK`, `DEFAULT_SCORE_ORDER`), `frontend/static/style.css` (`.sym-MUTLAK_AL`/`.sym-MUTLAK_SAT`, GUCLU ile AYNI renk).
+- **Sanal Al-Sat otomatik alım:** `GUCLU_AL` ve `MUTLAK_AL`, `_STRONG_BUY_ZONE` ile TEK bir "güçlü alım bölgesi" sayılır (frontend'in `markerZone()`'u ile AYNI mantık) — bu bölgenin DIŞINDAN içine girmek yeni alım tetikler, ikisi arasında (eskalasyon/düşüş) gidip gelmek YENİ alım SAYILMAZ. Çıkış kuralı (`SAT`/`GUCLU_SAT`/`MUTLAK_SAT` sinyali) üçünü de kapsayacak şekilde güncellendi.
+- **Telegram bildirimleri:** `MUTLAK_AL` geçişleri `GUCLU_AL` gibi bildiriliyor (🟢, metin "MUTLAK AL"). `MUTLAK_SAT`, eski `GUCLU_SAT` gibi (spam riski yüzünden) bildirimi KAPALI — `_send_push_notifications()`'daki skip artık `("GUCLU_SAT", "MUTLAK_SAT")` ikisini de kapsıyor. `signal_log` DB yazımı bundan ETKİLENMİYOR (yazım, bildirimden önce yapılıyor).
+- **Skor Geçmişi ortalaması (`scoreLabelFromAvg()`, `index.html`):** Tam sayı skorlar için eşik `==5`/`==4` iken, ORTALAMA (ondalıklı) bir değer için bu ayrımı yapan eşik **4.5** (4 ve 5'in tam ortası) olarak seçildi — `avg>=4.5 → MUTLAK_AL`, `avg>=4 → GUCLU_AL`. SAT tarafında yeni bir eşik YOK (`avg<-3` hâlâ aynı sınır, sadece döndürdüğü isim `GUCLU_SAT`'tan `MUTLAK_SAT`'a değişti).
+- **Semboller:** `MUTLAK_AL`="▲▲▲"/`MUTLAK_SAT`="▼▼▼" (GUCLU'nun "▲▲"/"▼▼"'sinden bir fazla ok) — renk GUCLU ile AYNI (yön zaten renkle anlaşılıyor, sadece sembol sayısı "ne kadar güçlü"yü gösteriyor).
+- **Doğrulama:** `python3 -m py_compile` ile tüm backend dosyaları, gerçek bir Python import ile `confluence_label()`'ın sınır değerleri (skor 4/5/-4/-5, ADX zayıf/güçlü) test edildi. 3 inline frontend script'i `node --check` ile syntax doğrulandı. Yerelde çalıştırılıp Playwright (headless Chromium) ile: sayfa yüklenirken hata YOK, tabloda `sym-MUTLAK_AL`/`sym-MUTLAK_SAT` class'ları gerçek canlı veride görüldü, bu satırlara tıklayınca grafik hatasız açıldı, BIST 30/100/300 sekme geçişi sorunsuz çalıştı doğrulandı.
 
 ### 5 dakikalık bileşen kaldırıldı (2026-10-31)
 
@@ -176,6 +210,28 @@ Kullanıcı isteği: bir muma gelince (hover), o günün TÜM gösterge değerle
 - **`web_bistTop100.py: _ensure_scanned_once()`** — `/api/rows` çağrılan HER istekte en başta çalışır: `_state["updated_at"]` hâlâ `None` ise (yani HENÜZ hiç tarama yapılmadıysa) piyasa saatinden BAĞIMSIZ, **bir kerelik** senkron bir `_scan_once()` tetikler; zaten bir tarama yapılmışsa (en son ne zaman olduğuna bakılmaksızın) hiçbir şey yapmadan hemen döner. `_ensure_scan_lock` ile çift kontrol (double-checked locking) yapılır — aynı anda gelen birden fazla istek, aynı anda birden fazla tarama tetiklemez (biri tararken diğerleri bekler, sonucu paylaşır).
 - **Bilinçli tasarım:** Bu, SÜREKLİ çalışan bir mekanizma DEĞİL — sadece "hiç taranmamış" durumunu bir kez kurtarır. İlk istek sonrası (piyasa kapalıyken bile) `_state["rows"]` dolar ve bir SONRAKİ istek anında (`updated_at` artık `None` olmadığı için) döner, YENİDEN TARAMAZ — "5 dakikada bir çalışmasın" isteği böyle karşılanıyor. Piyasa açıldığında `_scan_loop()` normal akışına (her `BIST_REFRESH_SECONDS`'ta bir tazeleme) kendiliğinden devam eder.
 - **Doğrulandı (2026-11-01, Pazar günü, yerelde):** İlk `/api/rows` isteği ~14 saniye sürdü (353 hisse, piyasa kapalı olduğu için Yahoo'nun elindeki son kapanış verisi), hemen ardından gelen ikinci istek 0.02 saniyede AYNI `updated_at` ile döndü (yeniden tarama YAPILMADI).
+
+## Frontend dosya bölünmesi (2026-11-01'de eklendi, SAME GÜN içinde iki adımda) — yönetim kolaylığı için
+
+**1. adım:** Kullanıcı isteği: `index.html` içindeki iki görünümün (hisse tablosu + Sanal Al-Sat) HTML'i ve JS'i ayrı dosyalara taşınsın, CSS ise (zaten ayrı olan) `style.css`'te tek dosyada kalsın. Bu adımda HTML `_view_stocks.html`/`_view_paper_trading.html` partial'lerine, JS ise `frontend/static/js/core.js`/`view_stocks.js`/`view_paper_trading.js` adında 3 AYRI statik dosyaya (`<script src>` ile yüklenen) taşındı.
+
+**2. adım (hemen ardından, AYNI gün):** Kullanıcı bu 3 statik `.js` dosyasını geri istemedi — "js altındaki .js dosyalarını htmllerin altında script olarak ekler misin, scriptlerle htmllerin ayrı olmasına gerek yok" dedi. Yani HTML bölünmesi (3 template dosyası) KALDI, ama her JS artık kendi partial'inin İÇİNDE, bir inline `<script>` bloğu olarak duruyor — `frontend/static/js/` klasörü TAMAMEN SİLİNDİ. **Güncel/nihai mimari budur**, aşağıdaki açıklamalar buna göre.
+
+Her iki adımda da tek sayfa davranışı (header/footer/yan panel SABİT, `showView()` ile JS tabanlı görünüm değişimi, tam sayfa yönlendirmesi YOK) DEĞİŞMEDİ — bu SADECE bir dosya organizasyonu refaktörü, runtime davranışı birebir aynı.
+
+**⚠️ ÖNEMLİ: Bu tarihten ÖNCEKİ CLAUDE.md notlarında `frontend/templates/index.html: fonksiyonAdı()` şeklinde geçen JS fonksiyon referansları artık YANLIŞ DOSYAYI gösteriyor olabilir** — o fonksiyonlar şimdi aşağıdaki 3 template dosyasından BİRİNİN inline script'ine taşınmış olabilir. Bir fonksiyonu ararken önce aşağıdaki haritaya bak, yoksa `grep -rn "function fonksiyonAdı" frontend/` ile bul.
+
+- **`frontend/templates/index.html`** (dosyanın EN ALTINDAKI inline `<script>`, hem Jinja sabitlerinden hem HTML'in TAMAMINDAN — `#side`/`#modal-overlay` dahil — SONRA gelir) — grafik/crosshair/legend (`wireCrosshairSync`, `updateChartLegend`, `timeKey`, `ensureChart`/`ensureMacdChart`/`ensureRsiChart`, `applyIndicatorData`), Skor Geçmişi (`aggregateBy`, `renderScoreHistory`, `scoreLabelFromAvg`), grafik işaretleri (`updateChartMarkers`, `markerZone`), sinyal bildirimleri (`checkSignalTransitions`, `fireSignalNotification`), market şeridi (`refreshMarketTicker`), modal (`openInModal`/`closeModal`), genel biçimlendiriciler (`escapeHtml`/`fmtPct`/`pctClass`/vb.), `selectTicker()`, `showView()`.
+- **`frontend/templates/_view_stocks.html`** (kendi `<table>` markup'ının ALTINDA inline `<script>`, `{% include %}` ile table-wrap içine, index.html'in script'inden FİZİKSEL olarak ÖNCE basılır) — `applyMarketFilter`, `renderRows`, `applySort`, `renderTable`, `refreshRows`, BIST 30/100/300 sekme/arama/sıralama olay dinleyicileri.
+- **`frontend/templates/_view_paper_trading.html`** (kendi markup'ının ALTINDA inline `<script>`, SADECE login olana gönderilir — `{% if logged_in %}` include'u HTML'i VE script'i birlikte kapsar, `_view_stocks.html`'den SONRA basılır) — `renderPaperSummary`/`Positions`/`Trades`/`Watchlist`, `refreshPaperTrading`, manuel alım/satım, nakit düzenleme/sıfırlama.
+
+**Script SIRASI sorunu ve çözümü:** Render edilen HTML'de 3 script fiziksel olarak şu sırada bulunur: `_view_stocks.html`'in script'i → `_view_paper_trading.html`'in script'i (table-wrap içinde, ikisi de index.html'in kendi script'inden ÖNCE) → index.html'in (ortak/core) script'i (dosyanın en altında, `#side`/`#modal-overlay` HTML'i buradan ÖNCE geldiği için bu script o elemanlara güvenle `addEventListener` ekleyebiliyor). Bu, `_view_stocks.html`/`_view_paper_trading.html`'in kendi bootstrap çağırılarının (`refreshRows()`, `refreshPaperTrading()`) ihtiyaç duyduğu ortak fonksiyonların (`checkSignalTransitions`, `updateWatchlistToggleButton` vb.) DAHA SONRA tanımlanacağı anlamına gelir — ham haliyle "tanımsız fonksiyon" hatası verirdi. **Çözüm:** `_view_stocks.html`'in ve `_view_paper_trading.html`'in script'lerindeki SADECE en alttaki bootstrap çağrısı (`refreshRows()`/`refreshPaperTrading()` + `setInterval`) `document.addEventListener('DOMContentLoaded', () => {...})` ile sarılmıştır — DOMContentLoaded olayı sayfadaki TÜM HTML+script'ler (index.html'in en alttaki ortak script'i DAHİL) parse edildikten SONRA ateşlenir, bu yüzden bu iki satır çalıştığında ortak fonksiyonlar KESİN tanımlı olur. Diğer her şey (fonksiyon tanımları, olay dinleyici EKLEME — çalıştırma değil) script tag sırasından bağımsız güvenlidir, sarmalanmamıştır.
+
+**Neden `openPaperTickers`/`watchlistTickers`/`updateWatchlistToggleButton`/`addToWatchlist`/`removeFromWatchlist` kavramsal olarak "Sanal Al-Sat'a ait" olduğu halde index.html'in (ortak) script'inde (_view_paper_trading.html'de DEĞİL):** `_view_stocks.html`'in KENDİ bootstrap'ı (`refreshRows()`, yukarıdaki DOMContentLoaded sarmalayıcısı sayesinde HER ZAMAN ortak script'ten SONRA çalışır) `applyMarketFilter()` üzerinden `openPaperTickers`'ı okur — bu değişken _view_paper_trading.html'de tanımlı olsaydı (o script DOMContentLoaded'dan ÖNCEKİ anda bile henüz parse edilmemiş/calismamis OLABİLİRDİ, login değilse hiç gönderilmez de), "tanımsız değişken" hatası olurdu. Aynı sebeple `selectTicker()` (ortak script) `updateWatchlistToggleButton()`'ı çağırıyor — o da bu yüzden ortak script'te.
+
+- **⚠️ Jinja sabitleri NEDEN index.html'in EN ALTINDA DEĞİL, `<body>`'nin HEMEN BAŞINDA ayrı bir `<script>`'te tanımlı (gerçek bir hata/ders, 2026-11-01):** İlk denemede `REFRESH_SECONDS`/`LOGGED_IN`/`AL_SOUND`/`SAT_SOUND`/`FAVICON_URL` ortak JS'yle BİRLİKTE index.html'in EN ALTINDAKI script'e kondu — ama `_view_paper_trading.html`'in script'i `if (LOGGED_IN) document.getElementById('paper-view-toggle').addEventListener(...)` satırını (top-level, DOMContentLoaded'a SARILMAMIŞ) kendi fiziksel konumunda (table-wrap içinde, index.html'in alt script'inden ÖNCE) HEMEN çalıştırıyor — `LOGGED_IN` o an henüz tanımlı olmadığı için `ReferenceError: LOGGED_IN is not defined` ile sayfa yüklenirken patlıyordu (Playwright `pageerror` ile yakalandı). Yukarıdaki DOMContentLoaded sarmalaması SADECE fonksiyon ÇAĞRILARI için yeterli — bu satır bir fonksiyon çağırmıyor, DEĞER okuyor, ve bunu KOŞULUN kendisinde (`if (LOGGED_IN)`) yapıyor, yani sarmalamak (listener'i hep ekleyip callback içinde koşullamak gerekirdi) gerekirdi. Daha basit çözüm: bu 5 sabit, TÜM diğer script'lerden (hem table-wrap'teki iki include'dan hem index.html'in kendi alt script'inden) ÖNCE gelecek şekilde `<body>` açılır açılmaz ayrı, küçük bir `<script>` bloğuna taşındı — artık HİÇBİR script tag sırasına bakmadan bu sabitlere güvenle erişebiliyor.
+- **⚠️ `/logout` 500 hatası (gerçek bir hata, bu oturumda bulundu, frontend refaktörüyle İLİNTİSİZ):** Lokalde `FLASK_SECRET_KEY` ortam değişkeni tanımlı değilken `app.secret_key = os.environ.get("FLASK_SECRET_KEY")` → `None` oluyor, Flask'in `session` nesnesi (hem `logout()`'taki `session.clear()` hem `_LOCAL_AUTO_LOGIN`'in `login()`'da yaptığı `session["logged_in"]=True`) bu durumda `RuntimeError: session is unavailable` ile patlıyordu. **Düzeltme (`web_bistTop100.py`):** `app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "local-dev-only-insecure-secret-key"` — SADECE env tanımsızken devreye giren bir lokal-dev fallback'i, VPS'te `FLASK_SECRET_KEY` zaten zorunlu env olarak verildiği için production'ı etkilemez.
+- **Doğrulama:** 3 statik `.js` dosyasıyla şu anki inline halin TOP-LEVEL `function`/`let`/`const` isim kümeleri birebir karşılaştırıldı (otomatik `diff`) — hiçbir fonksiyon/değişken kaybolmadı/çiftlenmedi (sadece Jinja sabitleri fark olarak çıktı, beklenen). 3 inline script de (Jinja ifadeleri geçici degerlerle degistirilerek) `node --check` ile gerçek syntax doğrulamasından geçti. Yukarıdaki iki hata, `node_modules`'e kurulan Playwright (Chromium, headless) ile sayfa açılışı + "Sanal Al-Sat" butonu + "Çıkış Yap" linkine TIKLANARAK (gerçek browser console/pageerror/network hatası yakalanarak) bulundu ve ayni sekilde dogrulanarak kapatildi — statik analiz (grep/diff/node --check) bu TÜRDEKI (script sırasına bağımlı runtime) hataları YAKALAYAMIYOR, bu yüzden büyük bir script-sırası refaktöründen sonra gerçek bir tarayıcıda (ya da headless Playwright ile) uçtan uca tıklama testi YAPILMALI.
 
 ## Deploy süreci (VPS)
 

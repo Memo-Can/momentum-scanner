@@ -80,13 +80,21 @@ RESET = "\033[0m"
 SIGNAL_SYMBOLS = {"AL": "▲", "SAT": "▼", "NOTR": "–"}
 SIGNAL_COLORS = {"AL": GREEN, "SAT": RED, "NOTR": YELLOW}
 
-SCORE_SYMBOLS = {"GUCLU_AL": "▲▲", "AL": "▲", "NOTR": "–", "SAT": "▼", "GUCLU_SAT": "▼▼"}
+# GUCLU_SAT artik canli taramada hic uretilmiyor (bkz. scanner.confluence_label,
+# 2026-11-01'de MUTLAK_AL/MUTLAK_SAT eklendi) ama gecmis veriyle uyumluluk icin
+# burada duruyor.
+SCORE_SYMBOLS = {
+    "MUTLAK_AL": "▲▲▲", "GUCLU_AL": "▲▲", "AL": "▲", "NOTR": "–", "SAT": "▼",
+    "GUCLU_SAT": "▼▼", "MUTLAK_SAT": "▼▼▼",
+}
 SCORE_COLORS = {
+    "MUTLAK_AL": BOLD_GREEN,
     "GUCLU_AL": BOLD_GREEN,
     "AL": GREEN,
     "NOTR": YELLOW,
     "SAT": RED,
     "GUCLU_SAT": BOLD_RED,
+    "MUTLAK_SAT": BOLD_RED,
 }
 
 
@@ -142,7 +150,7 @@ def render(rows, missing_count: int = 0):
     def _sort_key(row):
         daily = row["daily"]
         daily_sort = -daily if daily == daily else float("inf")  # NaN'lari sona at
-        return (scanner.SCORE_ORDER.get(row["score"], 2), daily_sort)
+        return (scanner.SCORE_ORDER.get(row["score"], 3), daily_sort)
 
     rows_sorted = sorted(rows, key=_sort_key)
 

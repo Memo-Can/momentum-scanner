@@ -10,6 +10,20 @@
 </head>
 <body class="{{ 'logged-in' if logged_in else '' }}">
 
+<script>
+// SADECE Jinja'ya ihtiyaci olan degerler - EN BASTA (table-wrap icindeki
+// _view_stocks.html/_view_paper_trading.html include'larindan ONCE) tanimli
+// olmasi SART, cunku o iki partial'in kendi script'leri bunlari KENDI
+// TOP-LEVEL (DOMContentLoaded'a sarilmamis) kodunda kullaniyor - orn.
+// _view_paper_trading.html'deki "if (LOGGED_IN) ..." satiri script
+// calistigi ANDA degerlendiriliyor, daha sonraya birakilamaz.
+const REFRESH_SECONDS = {{ refresh_seconds }};
+const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
+const AL_SOUND = "{{ url_for('static', filename='al_beep.wav') }}";
+const SAT_SOUND = "{{ url_for('static', filename='sat_beep.wav') }}";
+const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
+</script>
+
 <header>
   <div class="header-title-group">
     <img src="{{ url_for('static', filename='favicon.png') }}" alt="" class="app-logo">
@@ -45,107 +59,9 @@
 
 <div class="layout">
   <div id="table-wrap">
-    <div id="view-stocks">
-    <table>
-      <thead>
-        <tr id="head-row">
-          <th class="left" data-key="_default" data-type="default" data-tip="Siralamadaki yeri: once Skor gucu (GUCLU AL en ustte, GUCLU SAT en altta), ayni skor grubu icinde gunluk % degisime gore buyukten kucuge.">#<span class="arrow"></span></th>
-          <th class="left" data-key="ticker" data-type="text" data-tip="Hisse sembolu (ticker).">Hisse<span class="arrow"></span></th>
-          <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kisa sektor kodu - Yahoo Finance'in canli 'sector' alanindan turetilir.">Sektor<span class="arrow"></span></th>
-          <th data-key="score" data-type="score" data-tip="1d, MACD, RSI, BB% ve RS sinyallerinin tek bir konfluens puaninda (-5..+5) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/GUCLU SAT(▼▼). ADX(14), GUCLU AL/SAT etiketini teyit eden bir guven filtresidir - ADX<20 ise 'guclu' etiket normal AL/SAT'a duser.">Skor<span class="arrow"></span></th>
-          <th data-key="signal_1d" data-type="signal" data-tip="Gunluk mumda EMA9/EMA21'e gore surekli trend yonu (AL/SAT/NOTR).">1d<span class="arrow"></span></th>
-          <th data-key="signal_macd" data-type="signal" data-tip="MACD histogramina (12,26,9) gore surekli AL/SAT/NOTR - histogram farki > 0 ise AL. EMA sinyaline ek momentum teyidi.">MACD<span class="arrow"></span></th>
-          <th data-key="price" data-type="num" data-tip="Canli fiyat (Yahoo Finance'in regularMarketPrice alani).">Fiyat<span class="arrow"></span></th>
-          <th data-key="volume_ratio" data-type="num" data-tip="Bugunku islem hacminin, 10 gunluk ortalama hacme orani (orn. 2.3x). Yuksek oran, fiyat hareketinin gercek katilimla desteklendigini gosterir.">Hacim<span class="arrow"></span></th>
-          <th data-key="day_range_pos" data-type="num" data-tip="Fiyatin, gunun dip-zirve araligindaki yeri (%). %100 = gunun zirvesi (alici baskin), %0 = gunun dibi (satici baskin).">GunPoz<span class="arrow"></span></th>
-          <th data-key="rsi" data-type="num" data-tip="Wilder RSI(14) degeri (0-100). >=70 asiri alim, <=30 asiri satim sayilir; momentum taramasinda 50 uzeri boga teyidi.">RSI<span class="arrow"></span></th>
-          <th data-key="bb_percent" data-type="num" data-tip="Bollinger Bantlari (20, 2 sigma) icindeki konum (%). 100% = ust bant, 0% = alt bant. Bandin disina cikan deger (>100%/<0%), hacimle birlikteyse guclu kirilim sayilabilir.">BB%<span class="arrow"></span></th>
-          <th data-key="rel_strength" data-type="num" data-tip="Goreceli guc: hissenin gunluk % degisimi eksi BIST100 endeksinin (XU100) gunluk % degisimi. |RS| < 0.5 NOTR sayilir.">RS<span class="arrow"></span></th>
-          <th data-key="daily" data-type="num" data-tip="Canli fiyat ile Yahoo'nun canli 'onceki kapanis' alani arasindaki yuzde fark. Liste varsayilan olarak (Skor grubu icinde) bu sutuna gore buyukten kucuge siralanir.">Gunluk<span class="arrow"></span></th>
-          <th data-key="d5" data-type="num" data-tip="Son 5 islem gunundeki yuzde degisim - kayan pencere (takvim haftasi degil), Yahoo'nun web sitesindeki '5D' ile ayni mantik.">5D<span class="arrow"></span></th>
-          <th data-key="m1" data-type="num" data-tip="Son 21 islem gunundeki (~1 aylik) yuzde degisim - kayan pencere (takvim ayi degil), Yahoo'nun web sitesindeki '1M' ile ayni mantik.">1M<span class="arrow"></span></th>
-          <th class="login-only-col" data-key="day_stop" data-type="num" data-tip="ATR(14)x1.5 mesafeli, Skor'un yonune (AL/SAT) gore gun ici (day trade) stop-loss fiyati. Skor NOTR ise gosterilmez.">GunStop<span class="arrow"></span></th>
-          <th class="login-only-col" data-key="day_target" data-type="num" data-tip="Gun ici hedef fiyat - stop mesafesinin 3 kati uzaklikta (risk:odul ~1:3).">GunHedef<span class="arrow"></span></th>
-          <th class="login-only-col" data-key="swing_stop" data-type="num" data-tip="ATR(14)x3.0 mesafeli, birkac gun/hafta tasinacak swing pozisyonlar icin stop-loss fiyati.">SwStop<span class="arrow"></span></th>
-          <th class="login-only-col" data-key="swing_target" data-type="num" data-tip="Swing pozisyon icin hedef fiyat - stop mesafesinin 3 kati uzaklikta (risk:odul ~1:3).">SwHedef<span class="arrow"></span></th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-    </div>
-
+    {% include "_view_stocks.html" %}
     {% if logged_in %}
-    <div id="view-paper-trading" hidden>
-      <section id="paper-trading">
-        <div id="paper-trading-header">
-          <h2>Sanal Al-Sat</h2>
-        </div>
-        <div id="paper-body">
-          <div class="sub">GUCLU AL'a yeni gecen hisseler otomatik "satin alinir" - swing stop/hedef, GUCLU SAT'a donus ya da 21 gun asimi ile "satilir". Gercek para degildir, sadece Skor'un performansini olcmek icindir.</div>
-          <div id="paper-summary"></div>
-          <div id="paper-cash-edit">
-            <input type="text" inputmode="decimal" id="paper-cash-input" placeholder="Yeni nakit (TL)">
-            <button id="paper-cash-save" type="button">Nakti Guncelle</button>
-            <span id="paper-cash-msg"></span>
-            <button id="paper-reset" type="button" class="paper-action-btn-muted">Her Seyi Sifirla</button>
-          </div>
-          <h3>Manuel Takip Listesi</h3>
-          <div class="sub">Yan panelden "Sanal Al-Sat Takibine Ekle" ile eklenen hisseler - istedigin an, istedigin tutarla elle al/sat. Otomatik sistemin 5 pozisyon limitine DAHIL DEGIL. Aldigin bir hisse SAT/GUCLU SAT sinyaline donerse otomatik olarak satilir (ayrica elinle de istedigin an satabilirsin).</div>
-          <div id="paper-watchlist-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th class="left">Hisse</th>
-                  <th>Guncel Fiyat</th>
-                  <th>Tutar (TL)</th>
-                  <th class="left">Islem</th>
-                </tr>
-              </thead>
-              <tbody id="paper-watchlist"></tbody>
-            </table>
-            <div id="paper-watchlist-empty" hidden>Takip listesi bos - bir hisseyi secip yan panelden ekleyebilirsin.</div>
-          </div>
-          <h3>Acik Pozisyonlar</h3>
-          <div id="paper-positions-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th class="left">Hisse</th>
-                  <th class="left">Kaynak</th>
-                  <th>Giris Fiyati</th>
-                  <th>Guncel Fiyat</th>
-                  <th>K/Z</th>
-                  <th>Stop</th>
-                  <th>Hedef</th>
-                  <th class="left">Giris Tarihi</th>
-                  <th class="left">Islem</th>
-                </tr>
-              </thead>
-              <tbody id="paper-positions"></tbody>
-            </table>
-            <div id="paper-empty" hidden>Su an acik pozisyon yok.</div>
-          </div>
-          <h3>Kapanan Islemler</h3>
-          <div id="paper-trades-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th class="left">Hisse</th>
-                  <th class="left">Kaynak</th>
-                  <th>Giris Fiyati</th>
-                  <th>Cikis Fiyati</th>
-                  <th>K/Z</th>
-                  <th class="left">Cikis Nedeni</th>
-                  <th class="left">Cikis Tarihi</th>
-                </tr>
-              </thead>
-              <tbody id="paper-trades"></tbody>
-            </table>
-            <div id="paper-trades-empty" hidden>Henuz kapanan islem yok.</div>
-          </div>
-        </div>
-      </section>
-    </div>
+      {% include "_view_paper_trading.html" %}
     {% endif %}
   </div>
 
@@ -202,176 +118,43 @@
 </footer>
 
 <script>
-const REFRESH_SECONDS = {{ refresh_seconds }};
-const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
-const SCORE_SYMBOLS = {GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼", GUCLU_SAT: "▼▼"};
+// ORTAK/PAYLASILAN JS - hisse tablosu (_view_stocks.html) VE Sanal Al-Sat
+// (_view_paper_trading.html) tarafindan birlikte kullanilir: grafik/crosshair/
+// legend, Skor Gecmisi, sinyal bildirimleri, market seridi, modal, ve
+// selectTicker() (her iki görünümün satir tiklamalari da buna yönlenir).
+// Bu script FIZIKSEL olarak index.html'in EN ALTINDA (hem #side/#modal-
+// overlay'in HTML'inden SONRA - asagidaki DOM sorgulari bu yuzden guvenli -
+// hem de table-wrap icindeki iki include'dan SONRA) duruyor. _view_stocks.html/
+// _view_paper_trading.html kendi inline script'lerinin EN ALTINDAKI
+// bootstrap cagrisini (refreshRows/refreshPaperTrading) DOMContentLoaded'a
+// kadar bekletiyor - boylece BURADAKI fonksiyon tanimlari script tag SIRASINA
+// bakilmaksizin, DOMContentLoaded ani geldiginde KESIN hazir olur.
+
+// GUCLU_SAT artik backend'de (scanner.confluence_label) canli taramada hic
+// uretilmiyor (2026-11-01'de MUTLAK_AL/MUTLAK_SAT eklendi, bkz. CLAUDE.md) -
+// ama gecmis Skor Gecmisi kayitlarinda gorulebildigi icin SEMBOL/RENK
+// tanimlari burada kalmali.
+const SCORE_SYMBOLS = {
+  MUTLAK_AL: "▲▲▲", GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼",
+  GUCLU_SAT: "▼▼", MUTLAK_SAT: "▼▼▼",
+};
 const SIGNAL_SYMBOLS = {AL: "▲", SAT: "▼", NOTR: "–"};
-// Grafikte AL/GUCLU_AL/SAT/GUCLU_SAT'a YENI GECIS yapilan mumlarin uzerine
-// konan isaretler (bkz. updateChartMarkers()) - GUCLU varyantlar daha
-// buyuk/belirgin (ayrica tam ok sembolu), duz AL/SAT daha kucuk/soluk.
+// Grafikte AL/GUCLU_AL/MUTLAK_AL/SAT/GUCLU_SAT/MUTLAK_SAT'a YENI GECIS yapilan
+// mumlarin uzerine konan isaretler (bkz. updateChartMarkers()) - MUTLAK/GUCLU
+// varyantlar daha buyuk/belirgin (ayrica tam ok sembolu), duz AL/SAT daha
+// kucuk/soluk. MUTLAK_AL/MUTLAK_SAT, GUCLU_AL/GUCLU_SAT ile AYNI rengi
+// kullanir (yon zaten renkle anlasiliyor), sadece sembol farkli.
 const MARKER_STYLES = {
+  MUTLAK_AL: { position: 'belowBar', color: '#17c964', shape: 'arrowUp', text: '▲▲▲' },
   GUCLU_AL: { position: 'belowBar', color: '#17c964', shape: 'arrowUp', text: '▲▲' },
   AL: { position: 'belowBar', color: '#2ecc71', shape: 'arrowUp', text: '▲' },
   SAT: { position: 'aboveBar', color: '#ff5c5c', shape: 'arrowDown', text: '▼' },
   GUCLU_SAT: { position: 'aboveBar', color: '#ff2d2d', shape: 'arrowDown', text: '▼▼' },
+  MUTLAK_SAT: { position: 'aboveBar', color: '#ff2d2d', shape: 'arrowDown', text: '▼▼▼' },
 };
 
-// Guclu Al/Sat sinyal bildirimleri: hisse skoru GUCLU_AL/GUCLU_SAT'a
-// GECTIGINDE (onceki taramaya gore farkliysa) bir kez bildirim+ses tetiklenir -
-// backend'deki log_signal_changes()'in "sadece durum degistiginde kaydet"
-// mantiginin istemci tarafindaki karsiligi. lastKnownScores sayfa acikken
-// bellekte tutulur (sayfa yenilenince sifirlanir); bu yuzden ilk yuklemede
-// zaten GUCLU_AL/SAT olan hisseler icin spam bildirim atilmaz (asagida
-// notifyBootstrapped ile).
-const AL_SOUND = "{{ url_for('static', filename='al_beep.wav') }}";
-const SAT_SOUND = "{{ url_for('static', filename='sat_beep.wav') }}";
-let notifyEnabled = false;
-try { notifyEnabled = localStorage.getItem('notifyEnabled') === '1' && Notification.permission === 'granted'; } catch (e) {}
-let notifyBootstrapped = false;
-const lastKnownScores = new Map(); // ticker -> son bilinen skor
-
-function updateNotifyButton() {
-  const btn = document.getElementById('notify-toggle');
-  btn.textContent = notifyEnabled ? 'Bildirimler: Acik' : 'Bildirimler: Kapali';
-  btn.classList.toggle('active', notifyEnabled);
-}
-
-function playSignalSound(score) {
-  try {
-    new Audio(score === 'GUCLU_SAT' ? SAT_SOUND : AL_SOUND).play().catch(() => {});
-  } catch (e) {}
-}
-
-function fireSignalNotification(row) {
-  playSignalSound(row.score);
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-  const label = row.score === 'GUCLU_SAT' ? 'GUCLU SAT' : 'GUCLU AL';
-  try {
-    new Notification(`${row.ticker} -> ${label}`, {
-      body: `${row.price != null ? row.price.toFixed(2) : '-'} TL (${row.daily != null ? (row.daily >= 0 ? '+' : '') + row.daily.toFixed(2) : '-'}%)`,
-      icon: "{{ url_for('static', filename='favicon.png') }}",
-      tag: `signal-${row.ticker}`,
-    });
-  } catch (e) {}
-}
-
-function checkSignalTransitions(rows) {
-  if (!notifyBootstrapped) {
-    // Ilk yukleme: mevcut durumu sessizce kaydet, bildirim atma - aksi halde
-    // sayfa her acildiginda o an GUCLU_AL/SAT olan tum hisseler icin spam olur.
-    rows.forEach(r => lastKnownScores.set(r.ticker, r.score));
-    notifyBootstrapped = true;
-    return;
-  }
-  rows.forEach(row => {
-    const prev = lastKnownScores.get(row.ticker);
-    const isNewStrongSignal =
-      (row.score === 'GUCLU_AL' || row.score === 'GUCLU_SAT') && prev !== row.score;
-    lastKnownScores.set(row.ticker, row.score);
-    if (isNewStrongSignal && notifyEnabled) fireSignalNotification(row);
-  });
-}
-
-document.getElementById('notify-toggle').addEventListener('click', () => {
-  if (notifyEnabled) {
-    notifyEnabled = false;
-    try { localStorage.setItem('notifyEnabled', '0'); } catch (e) {}
-    updateNotifyButton();
-    return;
-  }
-  if (typeof Notification === 'undefined') return;
-  Notification.requestPermission().then(perm => {
-    notifyEnabled = perm === 'granted';
-    try { localStorage.setItem('notifyEnabled', notifyEnabled ? '1' : '0'); } catch (e) {}
-    updateNotifyButton();
-  });
-});
-updateNotifyButton();
-// Sembolik sutunlarin sayisal karsiligi - sirala derken "en guclu" once/sonra
-// gelsin diye. Skor icin cift ok, sinyal icin tek ok daha "guclu" sayilir.
-const SCORE_RANK = {GUCLU_AL: 2, AL: 1, NOTR: 0, SAT: -1, GUCLU_SAT: -2};
-const SIGNAL_RANK = {AL: 1, NOTR: 0, SAT: -1};
-
-let selectedTicker = null;
-let chart = null;
-let candleSeries = null;
-// Istege bagli indikator katmanlari - hepsi lazy olusturulur (ilk toggle
-// acildiginda ya da ana grafikle birlikte), asagida ensureChart/ensureMacdChart/
-// ensureRsiChart icinde atanir.
-let ema9Series = null, ema21Series = null;
-let bbUpperSeries = null, bbMidSeries = null, bbLowerSeries = null;
-let macdChart = null, macdHistSeries = null, macdLineSeries = null, macdSignalSeries = null;
-let rsiChart = null, rsiSeries = null;
-// Ana/MACD/RSI grafiklerinin crosshair'ini (imlec dikey cizgisi) birbirine
-// senkronize ederken sonsuz dongu olusmasin diye (bir grafigin crosshair'ini
-// programatik tasimak kendi subscribeCrosshairMove'unu da tetikler) kilit.
-let crosshairSyncing = false;
-// Mum/indikator degerlerini zamana (backend'in "time" alanina, ayni gunun
-// tum serilerinde birebir ayni string/sayi) gore ani eristirmek icin - her
-// selectTicker'da (candle/indikator verisi gelince) yeniden olusturulur.
-// Boylece hangi grafigin crosshair'i tetiklerse tetiklesin (ana/MACD/RSI),
-// legend AYNI kaynaktan okur.
-let candleTimeMap = new Map();
-let indicatorTimeMaps = {};
-let latestRows = [];
-// key=null -> varsayilan siralama (Skor gucu, sonra gunluk %).
-// Bir basliga tiklaninca o sutuna gore siralamaya gecilir.
-let sortState = { key: null, dir: 'desc' };
-let searchQuery = '';
-let lastUpdatedAt = null;
-let lastMissingCount = 0;
-// Backend'den gelen TEK BIRLESIK havuz (BIST100 + gunluk % ilk 300, bkz.
-// web_bistTop100.py _scan_once()) - hangi sekmenin secili oldugu sadece bu
-// havuzu ISTEMCI TARAFINDA filtreler, yeniden istek gerekmez.
-let activeMarket = 'bist100';
-// Su an acik sanal al-sat pozisyonu olan ticker'lar - refreshPaperTrading()
-// her dongude gunceller. BIST 300 sekmesinin "ilk 300" kesmesi bu ticker'lari
-// ATLAMAMALI (cok dusen bir hisse sekmeden kaybolmasin, satisi yapilana kadar
-// gorunur kalsin) - bkz. applyMarketFilter().
-let openPaperTickers = new Set();
-// Manuel takip listesindeki ticker'lar - yan paneldeki "Sanal Al-Sat
-// Takibine Ekle/Cikar" butonunun metnini/davranisini belirler.
-let watchlistTickers = new Set();
-
-function applyMarketFilter(rows) {
-  if (activeMarket === 'bist30') return rows.filter(r => r.bist30);
-  if (activeMarket === 'bist100') return rows.filter(r => r.bist100);
-  // bist300: havuzun tamami zaten "gunluk % ilk 300" taramasindan geliyor -
-  // gunluk %'ye gore siralayip ilk 300'u aliyoruz (BIST100'den gelip ilk
-  // 300'e girmeyen olasi ek satirlari da eler) - AMA acik pozisyonu olan bir
-  // ticker bu kesmede disarida kalirsa (cok dustuyse) listeye yine de eklenir.
-  const sorted = rows.slice().sort((a, b) => {
-    const ad = a.daily === null || a.daily === undefined ? -Infinity : a.daily;
-    const bd = b.daily === null || b.daily === undefined ? -Infinity : b.daily;
-    return bd - ad;
-  });
-  const top300 = sorted.slice(0, 300);
-  if (openPaperTickers.size === 0) return top300;
-  const shown = new Set(top300.map(r => r.ticker));
-  const extras = sorted.filter(r => openPaperTickers.has(r.ticker) && !shown.has(r.ticker));
-  return top300.concat(extras);
-}
-
-document.querySelectorAll('.market-tab-btn[data-market]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    activeMarket = btn.dataset.market;
-    document.querySelectorAll('.market-tab-btn[data-market]').forEach(b => b.classList.toggle('active', b === btn));
-    showView('stocks'); // bir BIST sekmesine tiklamak, Sanal Al-Sat ekraninda olsa bile hisse tablosuna geri doner
-    renderTable();
-  });
-});
-
-// Arama kutusu: hisse sembolu VEYA sektor koduna gore anlik filtreler
-// (buyuk/kucuk harf duyarsiz, "icerir" eslesmesi).
-function applySearch(rows) {
-  if (!searchQuery) return rows;
-  const q = searchQuery.toLowerCase();
-  return rows.filter(r =>
-    (r.ticker || '').toLowerCase().includes(q) ||
-    (r.sector || '').toLowerCase().includes(q)
-  );
-}
-
+// Genel bicimlendirme yardimcilari - tablo, Sanal Al-Sat ve Skor Gecmisi
+// ayni fonksiyonlari kullanir.
 function fmtPct(v) {
   if (v === null || v === undefined) return '-';
   const sign = v >= 0 ? '+' : '';
@@ -394,404 +177,133 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-function renderRows(rows) {
-  const tbody = document.getElementById('rows');
-  tbody.innerHTML = '';
-  rows.forEach((r, i) => {
-    const tr = document.createElement('tr');
-    if (r.ticker === selectedTicker) tr.classList.add('selected');
-    tr.onclick = () => selectTicker(r.ticker);
-    tr.innerHTML = `
-      <td class="left">${i + 1}</td>
-      <td class="left">${escapeHtml(r.ticker)}</td>
-      <td class="left">${escapeHtml(r.sector || '-')}</td>
-      <td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>
-      <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
-      <td class="sym-${r.signal_macd}">${SIGNAL_SYMBOLS[r.signal_macd] || r.signal_macd}</td>
-      <td>${fmtPrice(r.price)}</td>
-      <td>${fmtRatio(r.volume_ratio)}</td>
-      <td>${fmtRangePos(r.day_range_pos)}</td>
-      <td>${fmtRsi(r.rsi)}</td>
-      <td>${fmtRangePos(r.bb_percent)}</td>
-      <td>${fmtPct(r.rel_strength)}</td>
-      <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
-      <td class="${pctClass(r.d5)}">${fmtPct(r.d5)}</td>
-      <td class="${pctClass(r.m1)}">${fmtPct(r.m1)}</td>
-      <td class="login-only-col ${r.day_stop === null ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
-      <td class="login-only-col ${r.day_target === null ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
-      <td class="login-only-col ${r.swing_stop === null ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
-      <td class="login-only-col ${r.swing_target === null ? 'dash' : ''}">${fmtPrice(r.swing_target)}</td>
-    `;
-    tbody.appendChild(tr);
-  });
+// Guclu Al/Sat sinyal bildirimleri: hisse skoru GUCLU_AL/GUCLU_SAT'a
+// GECTIGINDE (onceki taramaya gore farkliysa) bir kez bildirim+ses tetiklenir -
+// backend'deki log_signal_changes()'in "sadece durum degistiginde kaydet"
+// mantiginin istemci tarafindaki karsiligi. lastKnownScores sayfa acikken
+// bellekte tutulur (sayfa yenilenince sifirlanir); bu yuzden ilk yuklemede
+// zaten GUCLU_AL/SAT olan hisseler icin spam bildirim atilmaz (asagida
+// notifyBootstrapped ile).
+let notifyEnabled = false;
+try { notifyEnabled = localStorage.getItem('notifyEnabled') === '1' && Notification.permission === 'granted'; } catch (e) {}
+let notifyBootstrapped = false;
+const lastKnownScores = new Map(); // ticker -> son bilinen skor
+
+function updateNotifyButton() {
+  const btn = document.getElementById('notify-toggle');
+  btn.textContent = notifyEnabled ? 'Bildirimler: Acik' : 'Bildirimler: Kapali';
+  btn.classList.toggle('active', notifyEnabled);
 }
 
-function sortValue(row, key, type) {
-  if (type === 'score') return SCORE_RANK[row[key]] ?? 0;
-  if (type === 'signal') return SIGNAL_RANK[row[key]] ?? 0;
-  if (type === 'text') return (row[key] || '').toString();
-  return row[key];  // num: null'lar asagida ayri ele alinir
+const STRONG_SAT_LABELS = ['GUCLU_SAT', 'MUTLAK_SAT'];
+const STRONG_SIGNAL_TEXT = {
+  MUTLAK_AL: 'MUTLAK AL', GUCLU_AL: 'GUCLU AL', GUCLU_SAT: 'GUCLU SAT', MUTLAK_SAT: 'MUTLAK SAT',
+};
+
+function playSignalSound(score) {
+  try {
+    new Audio(STRONG_SAT_LABELS.includes(score) ? SAT_SOUND : AL_SOUND).play().catch(() => {});
+  } catch (e) {}
 }
 
-const DEFAULT_SCORE_ORDER = {GUCLU_AL: 0, AL: 1, NOTR: 2, SAT: 3, GUCLU_SAT: 4};
-
-function applySort(rows) {
-  const sorted = rows.slice();
-  if (sortState.key === null) {
-    // Varsayilan: once Skor gucu (GUCLU AL en ustte), sonra gunluk % (buyukten kucuge)
-    sorted.sort((a, b) => {
-      const byScore = (DEFAULT_SCORE_ORDER[a.score] ?? 2) - (DEFAULT_SCORE_ORDER[b.score] ?? 2);
-      if (byScore !== 0) return byScore;
-      const ad = a.daily === null || a.daily === undefined ? -Infinity : a.daily;
-      const bd = b.daily === null || b.daily === undefined ? -Infinity : b.daily;
-      return bd - ad;
+function fireSignalNotification(row) {
+  playSignalSound(row.score);
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const label = STRONG_SIGNAL_TEXT[row.score] || row.score;
+  try {
+    new Notification(`${row.ticker} -> ${label}`, {
+      body: `${row.price != null ? row.price.toFixed(2) : '-'} TL (${row.daily != null ? (row.daily >= 0 ? '+' : '') + row.daily.toFixed(2) : '-'}%)`,
+      icon: FAVICON_URL,
+      tag: `signal-${row.ticker}`,
     });
-    return sorted;
-  }
-
-  const th = document.querySelector(`th[data-key="${sortState.key}"]`);
-  const type = th ? th.dataset.type : 'num';
-  const dirMult = sortState.dir === 'asc' ? 1 : -1;
-
-  sorted.sort((a, b) => {
-    let va = sortValue(a, sortState.key, type);
-    let vb = sortValue(b, sortState.key, type);
-    if (type === 'text') return dirMult * va.localeCompare(vb);
-    // null/undefined degerler siralama yonunden bagimsiz her zaman en sona
-    const aNull = va === null || va === undefined;
-    const bNull = vb === null || vb === undefined;
-    if (aNull && bNull) return 0;
-    if (aNull) return 1;
-    if (bNull) return -1;
-    return dirMult * (va - vb);
-  });
-  return sorted;
+  } catch (e) {}
 }
 
-function updateHeaderIndicators() {
-  document.querySelectorAll('#head-row th').forEach(th => {
-    const arrow = th.querySelector('.arrow');
-    const isActive = th.dataset.key === (sortState.key === null ? '_default' : sortState.key);
-    th.classList.toggle('sorted', isActive);
-    if (!arrow) return;
-    arrow.textContent = isActive ? (sortState.dir === 'asc' ? '▲' : '▼') : '';
-  });
-}
-
-function renderTable() {
-  const marketRows = applyMarketFilter(latestRows);
-  const filtered = applySearch(marketRows);
-  renderRows(applySort(filtered));
-  updateHeaderIndicators();
-
-  const countText = searchQuery
-    ? `${filtered.length}/${marketRows.length} hisse (filtrelendi)`
-    : `${marketRows.length} hisse`;
-  document.getElementById('meta').textContent =
-    `${countText} | guncelleme: ${lastUpdatedAt || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
-  document.getElementById('warning').textContent =
-    lastMissingCount ? `Uyari: ${lastMissingCount} hisse icin veri alinamadi, hedeflenen sayiya ulasilamadi.` : '';
-}
-
-document.getElementById('search-input').addEventListener('input', (e) => {
-  searchQuery = e.target.value.trim();
-  document.getElementById('search-clear').style.display = searchQuery ? 'block' : 'none';
-  renderTable();
-});
-document.getElementById('search-clear').addEventListener('click', () => {
-  const input = document.getElementById('search-input');
-  input.value = '';
-  searchQuery = '';
-  document.getElementById('search-clear').style.display = 'none';
-  renderTable();
-  input.focus();
-});
-
-document.querySelectorAll('#head-row th').forEach(th => {
-  th.addEventListener('click', () => {
-    const key = th.dataset.key;
-    if (key === '_default') {
-      sortState = { key: null, dir: 'desc' };
-    } else if (sortState.key === key) {
-      sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
-    } else {
-      // Metin sutunu varsayilan A->Z, sayisal/sembolik sutun varsayilan buyukten kucuge
-      sortState = { key, dir: th.dataset.type === 'text' ? 'asc' : 'desc' };
-    }
-    renderTable();
-  });
-});
-
-async function refreshRows() {
-  try {
-    const res = await fetch('/api/rows');
-    const data = await res.json();
-    latestRows = data.rows || [];
-    lastUpdatedAt = data.updated_at || null;
-    lastMissingCount = data.missing_count || 0;
-    checkSignalTransitions(latestRows);
-    renderTable();
-  } catch (e) {
-    document.getElementById('meta').textContent = 'Veri alinamadi, tekrar denenecek...';
-  }
-}
-
-// BIST sekmelerinin sagindaki doviz/emtia/BIST100/BTC seridi - hisse
-// tablosundan bagimsiz, kendi backend dongusunden (ayni REFRESH_SECONDS
-// ritmiyle) besleniyor.
-function fmtMarketPrice(v) {
-  if (v === null || v === undefined) return '-';
-  const opts = Math.abs(v) >= 1000
-    ? { maximumFractionDigits: 0 }
-    : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
-  return v.toLocaleString('tr-TR', opts);
-}
-
-async function refreshMarketTicker() {
-  try {
-    const res = await fetch('/api/market-indicators');
-    const data = await res.json();
-    const items = data.indicators || [];
-    const wrap = document.getElementById('market-ticker');
-    wrap.innerHTML = items.map(it => {
-      const hasPct = it.pct !== null && it.pct !== undefined;
-      const pctClass = hasPct ? (it.pct >= 0 ? 'pos' : 'neg') : 'dash';
-      const pctTxt = hasPct ? `${it.pct >= 0 ? '+' : ''}${it.pct.toFixed(2)}%` : '-';
-      const unitTxt = it.unit ? ' ' + escapeHtml(it.unit) : '';
-      return `
-        <div class="ticker-item">
-          <span class="ticker-label">${escapeHtml(it.label)}</span>
-          <span class="ticker-value">${fmtMarketPrice(it.price)}${unitTxt}<span class="ticker-pct ${pctClass}">${pctTxt}</span></span>
-        </div>`;
-    }).join('');
-  } catch (e) {
-    // sessizce gec - ust serit ikincil bir gosterge, ana tabloyu etkilemesin
-  }
-}
-
-// Sanal Al-Sat (paper trading) - ana tablo ile AYNI sayfada, header/footer/
-// yan panel (#side) SABIT kalirken sadece #table-wrap'in icindeki goruntu
-// (#view-stocks <-> #view-paper-trading) degisir (2026-10-30'da ayri sayfadan
-// buraya geri tasindi - tek fark: artik tam sayfa yeniden yuklemesi yok).
-function showView(view) {
-  const isPaper = view === 'paper';
-  document.getElementById('view-stocks').hidden = isPaper;
-  const paperView = document.getElementById('view-paper-trading');
-  if (paperView) paperView.hidden = !isPaper;
-  const toggleBtn = document.getElementById('paper-view-toggle');
-  if (toggleBtn) toggleBtn.classList.toggle('active', isPaper);
-}
-
-if (LOGGED_IN) document.getElementById('paper-view-toggle').addEventListener('click', () => {
-  const isPaper = !document.getElementById('view-paper-trading').hidden;
-  showView(isPaper ? 'stocks' : 'paper');
-});
-
-function fmtPaperPrice(v) {
-  return (v === null || v === undefined) ? '-' : v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function fmtPaperMoney(v) {
-  return (v === null || v === undefined) ? '-' : v.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) + ' TL';
-}
-// TL tutar input'lari (nakit duzenleme, manuel alim) icin: TR para birimi
-// kurallarina gore CANLI bicimlendirme - binlik ayiraci NOKTA, ondalik
-// ayiraci VIRGUL (en fazla 2 hane). Orn. yazarken "1234567,5" -> "1.234.567,5".
-function attachTLInputMask(input) {
-  input.addEventListener('input', () => {
-    let v = input.value.replace(/[^\d,]/g, '');
-    const commaIdx = v.indexOf(',');
-    if (commaIdx !== -1) {
-      // sadece ILK virgul ondalik ayiraci sayilir, sonrakiler atilir; ondalik
-      // kismi en fazla 2 hane ile sinirlanir (kurus hassasiyeti).
-      v = v.slice(0, commaIdx + 1) + v.slice(commaIdx + 1).replace(/,/g, '').slice(0, 2);
-    }
-    const [intPart, decPart] = v.split(',');
-    const intDigits = intPart.replace(/\D/g, '');
-    const formattedInt = intDigits ? parseInt(intDigits, 10).toLocaleString('tr-TR') : '';
-    input.value = decPart !== undefined ? `${formattedInt},${decPart}` : formattedInt;
-  });
-}
-// attachTLInputMask'in ciktisini (TR formati: nokta binlik, virgul ondalik)
-// sayiya cevirir - oncelik noktalari siler, virgulu ondalik noktaya cevirir.
-function parseTLAmount(str) {
-  if (!str) return NaN;
-  const normalized = str.replace(/\./g, '').replace(',', '.');
-  const val = parseFloat(normalized);
-  return isNaN(val) ? NaN : val;
-}
-const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Sure Asimi', manual_sat_signal: 'Sinyal (SAT)' };
-const PAPER_SOURCE_LABELS = { auto: 'Otomatik', manual: 'Manuel' };
-
-function renderPaperSummary(s) {
-  const wrap = document.getElementById('paper-summary');
-  if (!s) { wrap.innerHTML = ''; return; }
-  const totalPct = s.starting_balance ? (s.total_pnl / s.starting_balance * 100) : null;
-  wrap.innerHTML = `
-    <div class="stat">Nakit<b>${fmtPaperMoney(s.cash)}</b></div>
-    <div class="stat">Acik Pozisyon Degeri<b>${fmtPaperMoney(s.positions_value)}</b></div>
-    <div class="stat">Toplam Deger<b>${fmtPaperMoney(s.equity)}</b></div>
-    <div class="stat">Toplam K/Z<b class="${pctClass(s.total_pnl)}">${fmtPaperMoney(s.total_pnl)} (${fmtPct(totalPct)})</b></div>
-    <div class="stat">Acik Pozisyon<b>${s.open_positions} / 5</b></div>
-    <div class="stat">Kapanan Islem<b>${s.closed_trades}</b></div>
-    <div class="stat">Kazanma Orani<b>${s.win_rate === null || s.win_rate === undefined ? '-' : s.win_rate.toFixed(0) + '%'}</b></div>
-  `;
-}
-
-// Pozisyon/islem/takip listesi satirlarina tiklamak Sanal Al-Sat ekranindan
-// CIKMADAN o hissenin grafigini yan panelde (#side, zaten sabit) acar -
-// ayri sayfa doneminde (window.open ile yeni sekme) oldugundan farkli,
-// artik AYNI sayfada oldugumuz icin dogrudan secim yapiliyor.
-function openTickerFromPaper(ticker) {
-  // Sanal Al-Sat ekranindan cikilmaz - sadece yan paneldeki (#side, zaten
-  // sabit/her zaman gorunur) grafik/skor gecmisi o hisseye gunceller.
-  selectTicker(ticker);
-}
-
-function renderPaperPositions(positions) {
-  const tbody = document.getElementById('paper-positions');
-  const empty = document.getElementById('paper-empty');
-  tbody.innerHTML = '';
-  empty.hidden = positions.length > 0;
-  positions.forEach(p => {
-    const tr = document.createElement('tr');
-    tr.classList.add('paper-row');
-    if (p.ticker === selectedTicker) tr.classList.add('selected');
-    tr.onclick = () => openTickerFromPaper(p.ticker);
-    tr.innerHTML = `
-      <td class="left">${escapeHtml(p.ticker)}</td>
-      <td class="left">${PAPER_SOURCE_LABELS[p.source] || p.source}</td>
-      <td>${fmtPaperPrice(p.entry_price)}</td>
-      <td>${fmtPaperPrice(p.current_price)}</td>
-      <td class="${pctClass(p.unrealized_pnl)}">${fmtPaperMoney(p.unrealized_pnl)} (${fmtPct(p.unrealized_pnl_pct)})</td>
-      <td>${fmtPaperPrice(p.stop_price)}</td>
-      <td>${fmtPaperPrice(p.target_price)}</td>
-      <td class="left">${escapeHtml((p.entry_time || '').slice(0, 16))}</td>
-      <td class="left"></td>
-    `;
-    if (p.source === 'manual') {
-      const sellBtn = document.createElement('button');
-      sellBtn.type = 'button';
-      sellBtn.className = 'paper-action-btn';
-      sellBtn.textContent = 'Sat';
-      sellBtn.onclick = (e) => { e.stopPropagation(); manualSellTrade(p.id); };
-      tr.lastElementChild.appendChild(sellBtn);
-    }
-    tbody.appendChild(tr);
-  });
-}
-
-function renderPaperTrades(trades) {
-  const tbody = document.getElementById('paper-trades');
-  const empty = document.getElementById('paper-trades-empty');
-  tbody.innerHTML = '';
-  empty.hidden = trades.length > 0;
-  trades.forEach(t => {
-    const tr = document.createElement('tr');
-    tr.classList.add('paper-row');
-    if (t.ticker === selectedTicker) tr.classList.add('selected');
-    tr.onclick = () => openTickerFromPaper(t.ticker);
-    tr.innerHTML = `
-      <td class="left">${escapeHtml(t.ticker)}</td>
-      <td class="left">${PAPER_SOURCE_LABELS[t.source] || t.source}</td>
-      <td>${fmtPaperPrice(t.entry_price)}</td>
-      <td>${fmtPaperPrice(t.exit_price)}</td>
-      <td class="${pctClass(t.pnl)}">${fmtPaperMoney(t.pnl)}</td>
-      <td class="left">${escapeHtml(PAPER_EXIT_LABELS[t.exit_reason] || t.exit_reason || '-')}</td>
-      <td class="left">${escapeHtml((t.exit_time || '').slice(0, 16))}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function renderPaperWatchlist(items) {
-  const tbody = document.getElementById('paper-watchlist');
-  const empty = document.getElementById('paper-watchlist-empty');
-  tbody.innerHTML = '';
-  empty.hidden = items.length > 0;
-  items.forEach(w => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="left" style="cursor:pointer">${escapeHtml(w.ticker)}</td>
-      <td>${fmtPaperPrice(w.current_price)}</td>
-      <td></td>
-      <td class="left"></td>
-    `;
-    tr.children[0].onclick = () => openTickerFromPaper(w.ticker);
-    const amountTd = tr.children[2];
-    const actionTd = tr.children[3];
-
-    if (w.has_open_position) {
-      amountTd.textContent = '-';
-      const info = document.createElement('span');
-      info.textContent = "Pozisyon acik (Acik Pozisyonlar'dan satabilirsin)";
-      actionTd.appendChild(info);
-    } else {
-      const amountInput = document.createElement('input');
-      amountInput.type = 'text';
-      amountInput.inputMode = 'decimal';
-      amountInput.placeholder = 'Tutar (TL)';
-      amountInput.className = 'paper-amount-input';
-      attachTLInputMask(amountInput);
-      amountTd.appendChild(amountInput);
-
-      const buyBtn = document.createElement('button');
-      buyBtn.type = 'button';
-      buyBtn.className = 'paper-action-btn';
-      buyBtn.textContent = 'Al';
-      buyBtn.onclick = () => manualBuyFromWatchlist(w.ticker, amountInput.value);
-      actionTd.appendChild(buyBtn);
-    }
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'paper-action-btn paper-action-btn-muted';
-    removeBtn.textContent = 'Cikar';
-    removeBtn.onclick = () => removeFromWatchlist(w.ticker);
-    actionTd.appendChild(removeBtn);
-
-    tbody.appendChild(tr);
-  });
-}
-
-async function manualBuyFromWatchlist(ticker, amountStr) {
-  const allocation = parseTLAmount(amountStr);
-  if (!allocation || allocation <= 0) {
-    alert('Gecerli bir tutar gir.');
+function checkSignalTransitions(rows) {
+  if (!notifyBootstrapped) {
+    // Ilk yukleme: mevcut durumu sessizce kaydet, bildirim atma - aksi halde
+    // sayfa her acildiginda o an GUCLU_AL/SAT olan tum hisseler icin spam olur.
+    rows.forEach(r => lastKnownScores.set(r.ticker, r.score));
+    notifyBootstrapped = true;
     return;
   }
-  try {
-    const res = await fetch('/api/paper/manual-buy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker, allocation }),
-    });
-    const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Alim basarisiz.'); return; }
-    refreshPaperTrading();
-  } catch (e) {
-    alert('Alim basarisiz.');
-  }
+  rows.forEach(row => {
+    const prev = lastKnownScores.get(row.ticker);
+    const isNewStrongSignal =
+      (row.score in STRONG_SIGNAL_TEXT) && prev !== row.score;
+    lastKnownScores.set(row.ticker, row.score);
+    if (isNewStrongSignal && notifyEnabled) fireSignalNotification(row);
+  });
 }
 
-async function manualSellTrade(tradeId) {
-  try {
-    const res = await fetch('/api/paper/manual-sell', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trade_id: tradeId }),
-    });
-    const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Satis basarisiz.'); return; }
-    refreshPaperTrading();
-  } catch (e) {
-    alert('Satis basarisiz.');
+document.getElementById('notify-toggle').addEventListener('click', () => {
+  if (notifyEnabled) {
+    notifyEnabled = false;
+    try { localStorage.setItem('notifyEnabled', '0'); } catch (e) {}
+    updateNotifyButton();
+    return;
   }
-}
+  if (typeof Notification === 'undefined') return;
+  Notification.requestPermission().then(perm => {
+    notifyEnabled = perm === 'granted';
+    try { localStorage.setItem('notifyEnabled', notifyEnabled ? '1' : '0'); } catch (e) {}
+    updateNotifyButton();
+  });
+});
+updateNotifyButton();
+
+let selectedTicker = null;
+let chart = null;
+let candleSeries = null;
+// Istege bagli indikator katmanlari - hepsi lazy olusturulur (ilk toggle
+// acildiginda ya da ana grafikle birlikte), asagida ensureChart/ensureMacdChart/
+// ensureRsiChart icinde atanir.
+let ema9Series = null, ema21Series = null;
+let bbUpperSeries = null, bbMidSeries = null, bbLowerSeries = null;
+let macdChart = null, macdHistSeries = null, macdLineSeries = null, macdSignalSeries = null;
+let rsiChart = null, rsiSeries = null;
+// Ana/MACD/RSI grafiklerinin crosshair'ini (imlec dikey cizgisi) birbirine
+// senkronize ederken sonsuz dongu olusmasin diye (bir grafigin crosshair'ini
+// programatik tasimak kendi subscribeCrosshairMove'unu da tetikler) kilit.
+let crosshairSyncing = false;
+// Mum/indikator degerlerini zamana (backend'in "time" alanina, ayni gunun
+// tum serilerinde birebir ayni string/sayi) gore ani eristirmek icin - her
+// selectTicker'da (candle/indikator verisi gelince) yeniden olusturulur.
+// Boylece hangi grafigin crosshair'i tetiklerse tetiklesin (ana/MACD/RSI),
+// legend AYNI kaynaktan okur.
+let candleTimeMap = new Map();
+let indicatorTimeMaps = {};
+let indicatorData = null;
+// Skor Gecmisi sekmeleri: backend'den TEK bir 5 dakikalik ham skor listesi
+// gelir (score-history), gunluk/saatlik ortalamalar bu tek listeden burada
+// (istemci tarafinda) hesaplanir - ayri API cagrisi gerekmez, sekmeler
+// arasi gecis aninda olur.
+let scoreHistoryRaw = [];
+// Hizli art arda farkli hisselere tiklandiginda, gec gelen ESKI bir cevabin
+// az once secilen YENI hisseyi ezmesini onlemek icin her selectTicker
+// cagrisina artan bir kimlik verilir - sonuc uygulanmadan once hala "guncel
+// secim" olup olmadigi kontrol edilir.
+let chartRequestId = 0;
+
+// Su an acik sanal al-sat pozisyonu olan ticker'lar - refreshPaperTrading()
+// (_view_paper_trading.html) her dongude gunceller. BIST 300 sekmesinin "ilk
+// 300" kesmesi bu ticker'lari ATLAMAMALI (cok dusen bir hisse sekmeden
+// kaybolmasin, satisi yapilana kadar gorunur kalsin) - bkz. _view_stocks.html:
+// applyMarketFilter(). BURADA (bu ortak script'te) tanimli olma sebebi:
+// _view_stocks.html'in kendi script'i bunu YUKLENIR YUKLENMEZ (ilk
+// refreshRows() cagrisinda) okuyor - eger _view_paper_trading.html'de tanimli
+// olsaydi (o DAHA SONRA parse edilir, table-wrap'ta view-stocks'tan sonra
+// gelir), ilk okuma aninda "tanimsiz degisken" hatasi olurdu.
+let openPaperTickers = new Set();
+// Manuel takip listesindeki ticker'lar - yan paneldeki "Sanal Al-Sat
+// Takibine Ekle/Cikar" butonunun metnini/davranisini belirler. Ayni sebeple
+// (selectTicker asagida bunu hemen kullanabiliyor) burada.
+let watchlistTickers = new Set();
 
 async function removeFromWatchlist(ticker) {
   try {
     await fetch(`/api/paper/watchlist/${ticker}`, { method: 'DELETE' });
-    refreshPaperTrading();
+    if (typeof refreshPaperTrading === 'function') refreshPaperTrading();
   } catch (e) {
     // sessizce gec
   }
@@ -804,7 +316,7 @@ async function addToWatchlist(ticker) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ticker }),
     });
-    refreshPaperTrading();
+    if (typeof refreshPaperTrading === 'function') refreshPaperTrading();
   } catch (e) {
     // sessizce gec
   }
@@ -819,165 +331,16 @@ function updateWatchlistToggleButton() {
   btn.onclick = () => (inWatchlist ? removeFromWatchlist(selectedTicker) : addToWatchlist(selectedTicker));
 }
 
-async function refreshPaperTrading() {
-  try {
-    const [summaryRes, positionsRes, tradesRes, watchlistRes] = await Promise.all([
-      fetch('/api/paper/summary'),
-      fetch('/api/paper/positions'),
-      fetch('/api/paper/trades'),
-      fetch('/api/paper/watchlist'),
-    ]);
-    const positions = await positionsRes.json();
-    const watchlist = await watchlistRes.json();
-    renderPaperSummary(await summaryRes.json());
-    renderPaperPositions(positions);
-    renderPaperTrades(await tradesRes.json());
-    renderPaperWatchlist(watchlist);
-
-    // acik pozisyon seti degistiyse (yeni alim/satis) BIST 300 sekmesinin
-    // "ilk 300" kesmesi de buna gore guncellensin diye ana tablo yeniden cizilir.
-    openPaperTickers = new Set(positions.map(p => p.ticker));
-    watchlistTickers = new Set(watchlist.map(w => w.ticker));
-    updateWatchlistToggleButton();
-    if (activeMarket === 'bist300') renderTable();
-  } catch (e) {
-    // sessizce basarisiz ol - ana tablo deneyimini bozmasin
-  }
-}
-
-if (LOGGED_IN) {
-  attachTLInputMask(document.getElementById('paper-cash-input'));
-
-  document.getElementById('paper-cash-save').addEventListener('click', async () => {
-    const input = document.getElementById('paper-cash-input');
-    const msg = document.getElementById('paper-cash-msg');
-    const amount = parseTLAmount(input.value);
-    if (!(amount >= 0)) {
-      msg.textContent = 'Gecerli bir tutar gir.';
-      return;
-    }
-    try {
-      const res = await fetch('/api/paper/cash', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount }),
-      });
-      if (!res.ok) { msg.textContent = 'Guncellenemedi.'; return; }
-      input.value = '';
-      msg.textContent = 'Guncellendi.';
-      refreshPaperTrading();
-    } catch (e) {
-      msg.textContent = 'Guncellenemedi.';
-    }
-  });
-
-  document.getElementById('paper-reset').addEventListener('click', async () => {
-    // Baslangic tutari sabit 1.000.000 degil - "Yeni nakit (TL)" kutusuna
-    // zaten bir deger yazilmissa onu kullanir, yazilmamissa sorar.
-    const cashInput = document.getElementById('paper-cash-input');
-    let amountStr = cashInput.value;
-    if (!amountStr) {
-      amountStr = prompt('Sifirlama sonrasi baslangic nakti (TL) ne olsun?', '1000000');
-      if (amountStr === null) return;
-    }
-    const amount = parseTLAmount(amountStr);
-    if (!(amount > 0)) {
-      alert('Gecerli bir tutar gir.');
-      return;
-    }
-    const ok = confirm(
-      `Bu islem TUM Sanal Al-Sat verilerini sifirlar: acik/kapali tum islemler, ` +
-      `equity gecmisi ve manuel takip listesi SILINIR, nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanir. ` +
-      `Bu islem GERI ALINAMAZ. Emin misin?`
-    );
-    if (!ok) return;
-    try {
-      const res = await fetch('/api/paper/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount }),
-      });
-      if (!res.ok) { alert('Sifirlama basarisiz.'); return; }
-      cashInput.value = '';
-      refreshPaperTrading();
-    } catch (e) {
-      alert('Sifirlama basarisiz.');
-    }
-  });
-}
-
-// Crosshair bir mumun/noktanin ustune gelince (ya da ayni "time" degerine
-// sahip MACD/RSI noktasina) o anin TUM gostergelerini (OHLC + EMA9/21 +
-// MACD/Sinyal + RSI) tek bir satirda gosterir - hangi grafigin crosshair'i
-// tetiklerse tetiklesin AYNI candleTimeMap/indicatorTimeMaps'ten okur.
-function fmtLegendNum(v) {
-  return (v === null || v === undefined || Number.isNaN(v)) ? '-' : v.toFixed(2);
-}
-
-// lightweight-charts, "YYYY-MM-DD" string verilen seriler icin crosshair
-// param.time'i bazen AYNI string, bazen {year,month,day} nesnesi olarak
-// dondurebiliyor - candleTimeMap/indicatorTimeMaps ise backend'den gelen
-// ORIJINAL string'lerle anahtarlanmis. Map aramasi patlamadan calissin diye
-// (nesne referans esitligi string'le asla eslesmez) her zaman "YYYY-MM-DD"
-// string'ine normalize edilir.
-function timeKey(t) {
-  if (t === undefined || t === null) return undefined;
-  if (typeof t === 'object' && 'year' in t) {
-    return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
-  }
-  return String(t);
-}
-
-function updateChartLegend(rawTime) {
-  const legend = document.getElementById('chart-legend');
-  if (!legend) return;
-  const time = timeKey(rawTime);
-  if (time === undefined) {
-    legend.innerHTML = '';
-    return;
-  }
-  const c = candleTimeMap.get(time);
-  const ema9v = indicatorTimeMaps.ema9 ? indicatorTimeMaps.ema9.get(time) : undefined;
-  const ema21v = indicatorTimeMaps.ema21 ? indicatorTimeMaps.ema21.get(time) : undefined;
-  const macdv = indicatorTimeMaps.macd ? indicatorTimeMaps.macd.get(time) : undefined;
-  const macdsv = indicatorTimeMaps.macd_signal ? indicatorTimeMaps.macd_signal.get(time) : undefined;
-  const rsiv = indicatorTimeMaps.rsi ? indicatorTimeMaps.rsi.get(time) : undefined;
-  legend.innerHTML = `
-    <span class="legend-date">${time}</span>
-    ${c ? `<span>A:${fmtLegendNum(c.open)} Y:${fmtLegendNum(c.high)} D:${fmtLegendNum(c.low)} K:${fmtLegendNum(c.close)}</span>` : ''}
-    <span style="color:#e8c547">EMA9: ${fmtLegendNum(ema9v)}</span>
-    <span style="color:#ff9f43">EMA21: ${fmtLegendNum(ema21v)}</span>
-    <span style="color:#5b9bd5">MACD: ${fmtLegendNum(macdv)}</span>
-    <span style="color:#ff9f43">Sinyal: ${fmtLegendNum(macdsv)}</span>
-    <span style="color:#e8c547">RSI: ${fmtLegendNum(rsiv)}</span>
-  `;
-}
-
-// Ana/MACD/RSI grafiklerinden biri olusturulunca cagrilir - o grafigin
-// crosshair hareketini dinler, legend'i gunceller VE diger iki grafigin
-// crosshair'ini AYNI zaman noktasina tasir (dikey cizgiler birlikte hareket
-// eder). crosshairSyncing kilidi, programatik tasimanin kendi
-// subscribeCrosshairMove'unu tekrar tetikleyip sonsuz dongu olusturmasini
-// onler. targetSeries fonksiyon CAGRILDIGINDA (closure degil) okunur, boylece
-// MACD/RSI serileri daha sonra olusturulsa bile guncel degerleri yakalar.
-function wireCrosshairSync(sourceChart) {
-  sourceChart.subscribeCrosshairMove(param => {
-    updateChartLegend(param.time);
-    if (crosshairSyncing) return;
-    crosshairSyncing = true;
-    try {
-      [[chart, candleSeries], [macdChart, macdHistSeries], [rsiChart, rsiSeries]].forEach(([c, s]) => {
-        if (!c || c === sourceChart) return;
-        if (param.time === undefined || !s) {
-          c.clearCrosshairPosition();
-        } else {
-          c.setCrosshairPosition(0, param.time, s);
-        }
-      });
-    } finally {
-      crosshairSyncing = false;
-    }
-  });
+// Sanal Al-Sat (paper trading) - ana tablo ile AYNI sayfada, header/footer/
+// yan panel (#side) SABIT kalirken sadece #table-wrap'in icindeki goruntu
+// (#view-stocks <-> #view-paper-trading) degisir.
+function showView(view) {
+  const isPaper = view === 'paper';
+  document.getElementById('view-stocks').hidden = isPaper;
+  const paperView = document.getElementById('view-paper-trading');
+  if (paperView) paperView.hidden = !isPaper;
+  const toggleBtn = document.getElementById('paper-view-toggle');
+  if (toggleBtn) toggleBtn.classList.toggle('active', isPaper);
 }
 
 function ensureChart() {
@@ -1075,8 +438,6 @@ function buildTimeMap(arr) {
   (arr || []).forEach(p => { if (p.value !== null && p.value !== undefined) m.set(p.time, p.value); });
   return m;
 }
-
-let indicatorData = null;
 
 function applyIndicatorData() {
   if (!indicatorData) return;
@@ -1187,22 +548,22 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeModal();
 });
 
-// Skor Gecmisi sekmeleri: backend'den TEK bir 5 dakikalik ham skor listesi
-// gelir (score-history), gunluk/saatlik ortalamalar bu tek listeden burada
-// (istemci tarafinda) hesaplanir - ayri API cagrisi gerekmez, sekmeler
-// arasi gecis aninda olur.
-let scoreHistoryRaw = [];
-
 // confluence_label ile AYNI esikler (bkz. scanner_*.py) - ortalama ham skoru
 // (-5..+5, 2026-10-31'de signal_5m kaldirilinca 6'dan 5'e dustu) ayni AL/SAT
 // etiketine cevirmek icin burada tekrarlanir. ADX filtresi burada YOK: ADX
 // aninlik bir guven filtresi, ortalamaya uygun degil.
+// 2026-11-01'de MUTLAK_AL/MUTLAK_SAT eklendi: backend'de tam sayi skorlar
+// icin skor==5 MUTLAK_AL, skor==4 GUCLU_AL - burada ORTALAMA (ondalikli)
+// kullanildigi icin 4 ve 5'in TAM ORTASI (4.5) esik olarak secildi. SAT
+// tarafinda yeni bir esik YOK - backend'de MUTLAK_SAT zaten eski GUCLU_SAT'in
+// (skor<-3) TUM araligini kapsadigi icin sadece isim degisti.
 function scoreLabelFromAvg(avg) {
+  if (avg >= 4.5) return 'MUTLAK_AL';
   if (avg >= 4) return 'GUCLU_AL';
   if (avg >= 2) return 'AL';
   if (avg >= -1) return 'NOTR';
   if (avg >= -3) return 'SAT';
-  return 'GUCLU_SAT';
+  return 'MUTLAK_SAT';
 }
 
 function dayKey(t) { return t.slice(0, 10); }
@@ -1267,8 +628,8 @@ function renderScoreHistory() {
 // boylece tekrar tekrar isaretlenmiyor, sadece bolgenin kendisi degisince
 // (orn. NOTR/SAT'tan AL bolgesine girildiginde) yeni isaret konuyor.
 function markerZone(label) {
-  if (label === 'AL' || label === 'GUCLU_AL') return 'AL_ZONE';
-  if (label === 'SAT' || label === 'GUCLU_SAT') return 'SAT_ZONE';
+  if (label === 'AL' || label === 'GUCLU_AL' || label === 'MUTLAK_AL') return 'AL_ZONE';
+  if (label === 'SAT' || label === 'GUCLU_SAT' || label === 'MUTLAK_SAT') return 'SAT_ZONE';
   return 'NOTR';
 }
 
@@ -1301,6 +662,80 @@ document.querySelectorAll('#score-tabs .tab-btn').forEach(btn => {
   });
 });
 
+// Crosshair bir mumun/noktanin ustune gelince (ya da ayni "time" degerine
+// sahip MACD/RSI noktasina) o anin TUM gostergelerini (OHLC + EMA9/21 +
+// MACD/Sinyal + RSI) tek bir satirda gosterir - hangi grafigin crosshair'i
+// tetiklerse tetiklesin AYNI candleTimeMap/indicatorTimeMaps'ten okur.
+function fmtLegendNum(v) {
+  return (v === null || v === undefined || Number.isNaN(v)) ? '-' : v.toFixed(2);
+}
+
+// lightweight-charts, "YYYY-MM-DD" string verilen seriler icin crosshair
+// param.time'i bazen AYNI string, bazen {year,month,day} nesnesi olarak
+// dondurebiliyor - candleTimeMap/indicatorTimeMaps ise backend'den gelen
+// ORIJINAL string'lerle anahtarlanmis. Map aramasi patlamadan calissin diye
+// (nesne referans esitligi string'le asla eslesmez) her zaman "YYYY-MM-DD"
+// string'ine normalize edilir.
+function timeKey(t) {
+  if (t === undefined || t === null) return undefined;
+  if (typeof t === 'object' && 'year' in t) {
+    return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
+  }
+  return String(t);
+}
+
+function updateChartLegend(rawTime) {
+  const legend = document.getElementById('chart-legend');
+  if (!legend) return;
+  const time = timeKey(rawTime);
+  if (time === undefined) {
+    legend.innerHTML = '';
+    return;
+  }
+  const c = candleTimeMap.get(time);
+  const ema9v = indicatorTimeMaps.ema9 ? indicatorTimeMaps.ema9.get(time) : undefined;
+  const ema21v = indicatorTimeMaps.ema21 ? indicatorTimeMaps.ema21.get(time) : undefined;
+  const macdv = indicatorTimeMaps.macd ? indicatorTimeMaps.macd.get(time) : undefined;
+  const macdsv = indicatorTimeMaps.macd_signal ? indicatorTimeMaps.macd_signal.get(time) : undefined;
+  const rsiv = indicatorTimeMaps.rsi ? indicatorTimeMaps.rsi.get(time) : undefined;
+  legend.innerHTML = `
+    <span class="legend-date">${time}</span>
+    ${c ? `<span>A:${fmtLegendNum(c.open)} Y:${fmtLegendNum(c.high)} D:${fmtLegendNum(c.low)} K:${fmtLegendNum(c.close)}</span>` : ''}
+    <span style="color:#e8c547">EMA9: ${fmtLegendNum(ema9v)}</span>
+    <span style="color:#ff9f43">EMA21: ${fmtLegendNum(ema21v)}</span>
+    <span style="color:#5b9bd5">MACD: ${fmtLegendNum(macdv)}</span>
+    <span style="color:#ff9f43">Sinyal: ${fmtLegendNum(macdsv)}</span>
+    <span style="color:#e8c547">RSI: ${fmtLegendNum(rsiv)}</span>
+  `;
+}
+
+// Ana/MACD/RSI grafiklerinden biri olusturulunca cagrilir - o grafigin
+// crosshair hareketini dinler, legend'i gunceller VE diger iki grafigin
+// crosshair'ini AYNI zaman noktasina tasir (dikey cizgiler birlikte hareket
+// eder). crosshairSyncing kilidi, programatik tasimanin kendi
+// subscribeCrosshairMove'unu tekrar tetikleyip sonsuz dongu olusturmasini
+// onler. targetSeries fonksiyon CAGRILDIGINDA (closure degil) okunur, boylece
+// MACD/RSI serileri daha sonra olusturulsa bile guncel degerleri yakalar.
+function wireCrosshairSync(sourceChart) {
+  sourceChart.subscribeCrosshairMove(param => {
+    updateChartLegend(param.time);
+    if (crosshairSyncing) return;
+    crosshairSyncing = true;
+    try {
+      [[chart, candleSeries], [macdChart, macdHistSeries], [rsiChart, rsiSeries]].forEach(([c, s]) => {
+        if (!c || c === sourceChart) return;
+        if (param.time === undefined || !s) {
+          c.clearCrosshairPosition();
+        } else {
+          c.setCrosshairPosition(0, param.time, s);
+        }
+      });
+    } finally {
+      crosshairSyncing = false;
+    }
+  });
+}
+
 // Grafik alaninin uzerine binen durum katmani: sadece veri gelmedi/hata
 // mesaji icin kullanilir. mode: 'error' | 'hidden'.
 function setChartStatus(mode, message) {
@@ -1321,12 +756,6 @@ function fetchWithTimeout(url, ms = 15000) {
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-// Hizli art arda farkli hisselere tiklandiginda, gec gelen ESKI bir cevabin
-// az once secilen YENI hisseyi ezmesini onlemek icin her selectTicker
-// cagrisina artan bir kimlik verilir - sonuc uygulanmadan once hala "guncel
-// secim" olup olmadigi kontrol edilir.
-let chartRequestId = 0;
-
 async function selectTicker(ticker) {
   selectedTicker = ticker;
   document.getElementById('side-empty').style.display = 'none';
@@ -1340,7 +769,7 @@ async function selectTicker(ticker) {
   history.replaceState(null, '', '#' + ticker.toLowerCase());
   // Secili satirin vurgusu bir sonraki 5 dakikalik yenilemeyi beklemeden
   // aninda gorunsun diye tabloyu hemen yeniden ciziyoruz.
-  renderTable();
+  if (typeof renderTable === 'function') renderTable();
 
   ensureChart();
   // Checkbox'lar defaultta isaretli oldugu icin MACD/RSI panelleri de ilk
@@ -1397,20 +826,42 @@ async function selectTicker(ticker) {
   }
 }
 
-// Sayfa acilirken URL'de bir hisse varsa (orn. #thyao, selectTicker'in
-// kendisinin ekledigi) tablo ilk kez dolduktan sonra o hisse otomatik
-// secilir - boylece bir hissenin linki paylasilinca dogrudan o grafikle acilir.
-refreshRows().then(() => {
-  const hashTicker = location.hash.slice(1);
-  if (hashTicker) selectTicker(hashTicker.toUpperCase());
-});
-setInterval(refreshRows, REFRESH_SECONDS * 1000);
+// BIST sekmelerinin sagindaki doviz/emtia/BIST100/BTC seridi - hisse
+// tablosundan bagimsiz, kendi backend dongusunden (ayni REFRESH_SECONDS
+// ritmiyle) besleniyor.
+function fmtMarketPrice(v) {
+  if (v === null || v === undefined) return '-';
+  const opts = Math.abs(v) >= 1000
+    ? { maximumFractionDigits: 0 }
+    : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+  return v.toLocaleString('tr-TR', opts);
+}
+
+async function refreshMarketTicker() {
+  try {
+    const res = await fetch('/api/market-indicators');
+    const data = await res.json();
+    const items = data.indicators || [];
+    const wrap = document.getElementById('market-ticker');
+    wrap.innerHTML = items.map(it => {
+      const hasPct = it.pct !== null && it.pct !== undefined;
+      const pctClass = hasPct ? (it.pct >= 0 ? 'pos' : 'neg') : 'dash';
+      const pctTxt = hasPct ? `${it.pct >= 0 ? '+' : ''}${it.pct.toFixed(2)}%` : '-';
+      const unitTxt = it.unit ? ' ' + escapeHtml(it.unit) : '';
+      return `
+        <div class="ticker-item">
+          <span class="ticker-label">${escapeHtml(it.label)}</span>
+          <span class="ticker-value">${fmtMarketPrice(it.price)}${unitTxt}<span class="ticker-pct ${pctClass}">${pctTxt}</span></span>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    // sessizce gec - ust serit ikincil bir gosterge, ana tabloyu etkilemesin
+  }
+}
+
 refreshMarketTicker();
 setInterval(refreshMarketTicker, REFRESH_SECONDS * 1000);
-if (LOGGED_IN) {
-  refreshPaperTrading();
-  setInterval(refreshPaperTrading, REFRESH_SECONDS * 1000);
-}
 </script>
 </body>
 </html>
+

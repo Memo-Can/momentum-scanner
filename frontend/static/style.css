@@ -167,6 +167,8 @@
   .sym-NOTR { color: var(--yellow); }
   .sym-GUCLU_AL { color: var(--green-strong); font-weight: 700; }
   .sym-GUCLU_SAT { color: var(--red-strong); font-weight: 700; }
+  .sym-MUTLAK_AL { color: var(--green-strong); font-weight: 700; }
+  .sym-MUTLAK_SAT { color: var(--red-strong); font-weight: 700; }
   .dash { color: var(--muted); }
 
   /* #table-wrap'in ICINDE, hisse tablosunun YERINE gecen bir goruntu (bkz.

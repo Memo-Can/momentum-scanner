@@ -98,12 +98,13 @@ def compute_daily_rows(ticker: str, benchmark_pct):
 
 
 def signal_transitions(rows):
-    """Bir hissenin gunluk skor dizisinden SADECE GUCLU_AL/SAT'a GECIS
-    gunlerini cikarir - log_signal_changes()'in gecmise donuk karsiligi."""
+    """Bir hissenin gunluk skor dizisinden SADECE MUTLAK_AL/GUCLU_AL/
+    GUCLU_SAT/MUTLAK_SAT'a GECIS gunlerini cikarir - log_signal_changes()'in
+    gecmise donuk karsiligi (bkz. scanner._STRONG_SIGNAL_LABELS)."""
     transitions = []
     prev_score = None
     for row in rows:
-        if row["score"] != prev_score and row["score"] in ("GUCLU_AL", "GUCLU_SAT"):
+        if row["score"] != prev_score and row["score"] in scanner._STRONG_SIGNAL_LABELS:
             transitions.append(row)
         prev_score = row["score"]
     return transitions

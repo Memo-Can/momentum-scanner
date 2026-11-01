@@ -37,7 +37,13 @@ app = Flask(
 # Sadece tooltip'ler + Sanal Al-Sat bolumu icin tek-kullanicili basit giris -
 # coklu kullanici/kayit sistemi YOK. Sir (hash) asla koda/repoya yazilmaz,
 # Telegram bot token/Firebase kimlik dosyasiyla AYNI desen: ortam degiskeni.
-app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+# FLASK_SECRET_KEY tanimli DEGILSE (lokal gelistirme, VPS'teki systemd servisi
+# bunu HER ZAMAN env ile verir) sabit bir lokal-dev anahtari kullanilir -
+# aksi halde secret_key=None oldugunda Flask'in session'i (session.clear() /
+# session["logged_in"]=True, _LOCAL_AUTO_LOGIN'in login()/logout()'ta
+# kullandigi) RuntimeError ile patlar. Bu anahtar ASLA production'da
+# kullanilmaz (VPS'te FLASK_SECRET_KEY zaten zorunlu/farkli bir deger).
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "local-dev-only-insecure-secret-key"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
@@ -148,7 +154,7 @@ def _scan_once():
     def _sort_key(row):
         daily = row["daily"]
         daily_sort = -daily if daily == daily else float("inf")
-        return (scanner.SCORE_ORDER.get(row["score"], 2), daily_sort)
+        return (scanner.SCORE_ORDER.get(row["score"], 3), daily_sort)
 
     top_rows = sorted(rows_by_ticker.values(), key=_sort_key)
     for row in top_rows:

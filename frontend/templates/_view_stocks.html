@@ -1,0 +1,251 @@
+<div id="view-stocks">
+<table>
+  <thead>
+    <tr id="head-row">
+      <th class="left" data-key="_default" data-type="default" data-tip="Siralamadaki yeri: once Skor gucu (GUCLU AL en ustte, GUCLU SAT en altta), ayni skor grubu icinde gunluk % degisime gore buyukten kucuge.">#<span class="arrow"></span></th>
+      <th class="left" data-key="ticker" data-type="text" data-tip="Hisse sembolu (ticker).">Hisse<span class="arrow"></span></th>
+      <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kisa sektor kodu - Yahoo Finance'in canli 'sector' alanindan turetilir.">Sektor<span class="arrow"></span></th>
+      <th data-key="score" data-type="score" data-tip="1d, MACD, RSI, BB% ve RS sinyallerinin tek bir konfluens puaninda (-5..+5) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/GUCLU SAT(▼▼). ADX(14), GUCLU AL/SAT etiketini teyit eden bir guven filtresidir - ADX<20 ise 'guclu' etiket normal AL/SAT'a duser.">Skor<span class="arrow"></span></th>
+      <th data-key="signal_1d" data-type="signal" data-tip="Gunluk mumda EMA9/EMA21'e gore surekli trend yonu (AL/SAT/NOTR).">1d<span class="arrow"></span></th>
+      <th data-key="signal_macd" data-type="signal" data-tip="MACD histogramina (12,26,9) gore surekli AL/SAT/NOTR - histogram farki > 0 ise AL. EMA sinyaline ek momentum teyidi.">MACD<span class="arrow"></span></th>
+      <th data-key="price" data-type="num" data-tip="Canli fiyat (Yahoo Finance'in regularMarketPrice alani).">Fiyat<span class="arrow"></span></th>
+      <th data-key="volume_ratio" data-type="num" data-tip="Bugunku islem hacminin, 10 gunluk ortalama hacme orani (orn. 2.3x). Yuksek oran, fiyat hareketinin gercek katilimla desteklendigini gosterir.">Hacim<span class="arrow"></span></th>
+      <th data-key="day_range_pos" data-type="num" data-tip="Fiyatin, gunun dip-zirve araligindaki yeri (%). %100 = gunun zirvesi (alici baskin), %0 = gunun dibi (satici baskin).">GunPoz<span class="arrow"></span></th>
+      <th data-key="rsi" data-type="num" data-tip="Wilder RSI(14) degeri (0-100). >=70 asiri alim, <=30 asiri satim sayilir; momentum taramasinda 50 uzeri boga teyidi.">RSI<span class="arrow"></span></th>
+      <th data-key="bb_percent" data-type="num" data-tip="Bollinger Bantlari (20, 2 sigma) icindeki konum (%). 100% = ust bant, 0% = alt bant. Bandin disina cikan deger (>100%/<0%), hacimle birlikteyse guclu kirilim sayilabilir.">BB%<span class="arrow"></span></th>
+      <th data-key="rel_strength" data-type="num" data-tip="Goreceli guc: hissenin gunluk % degisimi eksi BIST100 endeksinin (XU100) gunluk % degisimi. |RS| < 0.5 NOTR sayilir.">RS<span class="arrow"></span></th>
+      <th data-key="daily" data-type="num" data-tip="Canli fiyat ile Yahoo'nun canli 'onceki kapanis' alani arasindaki yuzde fark. Liste varsayilan olarak (Skor grubu icinde) bu sutuna gore buyukten kucuge siralanir.">Gunluk<span class="arrow"></span></th>
+      <th data-key="d5" data-type="num" data-tip="Son 5 islem gunundeki yuzde degisim - kayan pencere (takvim haftasi degil), Yahoo'nun web sitesindeki '5D' ile ayni mantik.">5D<span class="arrow"></span></th>
+      <th data-key="m1" data-type="num" data-tip="Son 21 islem gunundeki (~1 aylik) yuzde degisim - kayan pencere (takvim ayi degil), Yahoo'nun web sitesindeki '1M' ile ayni mantik.">1M<span class="arrow"></span></th>
+      <th class="login-only-col" data-key="day_stop" data-type="num" data-tip="ATR(14)x1.5 mesafeli, Skor'un yonune (AL/SAT) gore gun ici (day trade) stop-loss fiyati. Skor NOTR ise gosterilmez.">GunStop<span class="arrow"></span></th>
+      <th class="login-only-col" data-key="day_target" data-type="num" data-tip="Gun ici hedef fiyat - stop mesafesinin 3 kati uzaklikta (risk:odul ~1:3).">GunHedef<span class="arrow"></span></th>
+      <th class="login-only-col" data-key="swing_stop" data-type="num" data-tip="ATR(14)x3.0 mesafeli, birkac gun/hafta tasinacak swing pozisyonlar icin stop-loss fiyati.">SwStop<span class="arrow"></span></th>
+      <th class="login-only-col" data-key="swing_target" data-type="num" data-tip="Swing pozisyon icin hedef fiyat - stop mesafesinin 3 kati uzaklikta (risk:odul ~1:3).">SwHedef<span class="arrow"></span></th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+</div>
+
+<script>
+// HISSE TABLOSU GORUNUMUNE OZEL JS - sadece bu goruntunun tablosunu,
+// siralama/arama/filtreleme mantigini ve BIST 30/100/300 sekmelerini
+// kapsar. index.html'deki core script'ten (escapeHtml/fmtPct/selectTicker/
+// showView/SCORE_SYMBOLS/openPaperTickers vb.) SONRA calisir - core script
+// index.html'in EN ALTINDA (bu include'dan SONRA) oldugu icin, en alttaki
+// bootstrap cagrisi (asagida) DOMContentLoaded'a kadar beklenir (core'un
+// fonksiyonlari o ana kadar kesin tanimlanmis olur).
+
+// Sembolik sutunlarin sayisal karsiligi - sirala derken "en guclu" once/sonra
+// gelsin diye. Skor icin cift ok, sinyal icin tek ok daha "guclu" sayilir.
+const SCORE_RANK = {MUTLAK_AL: 3, GUCLU_AL: 2, AL: 1, NOTR: 0, SAT: -1, GUCLU_SAT: -2, MUTLAK_SAT: -3};
+const SIGNAL_RANK = {AL: 1, NOTR: 0, SAT: -1};
+
+let latestRows = [];
+// key=null -> varsayilan siralama (Skor gucu, sonra gunluk %).
+// Bir basliga tiklaninca o sutuna gore siralamaya gecilir.
+let sortState = { key: null, dir: 'desc' };
+let searchQuery = '';
+let lastUpdatedAt = null;
+let lastMissingCount = 0;
+// Backend'den gelen TEK BIRLESIK havuz (BIST100 + gunluk % ilk 300, bkz.
+// web_bistTop100.py _scan_once()) - hangi sekmenin secili oldugu sadece bu
+// havuzu ISTEMCI TARAFINDA filtreler, yeniden istek gerekmez.
+let activeMarket = 'bist100';
+
+function applyMarketFilter(rows) {
+  if (activeMarket === 'bist30') return rows.filter(r => r.bist30);
+  if (activeMarket === 'bist100') return rows.filter(r => r.bist100);
+  // bist300: havuzun tamami zaten "gunluk % ilk 300" taramasindan geliyor -
+  // gunluk %'ye gore siralayip ilk 300'u aliyoruz (BIST100'den gelip ilk
+  // 300'e girmeyen olasi ek satirlari da eler) - AMA acik pozisyonu olan bir
+  // ticker bu kesmede disarida kalirsa (cok dustuyse) listeye yine de eklenir.
+  const sorted = rows.slice().sort((a, b) => {
+    const ad = a.daily === null || a.daily === undefined ? -Infinity : a.daily;
+    const bd = b.daily === null || b.daily === undefined ? -Infinity : b.daily;
+    return bd - ad;
+  });
+  const top300 = sorted.slice(0, 300);
+  if (openPaperTickers.size === 0) return top300;
+  const shown = new Set(top300.map(r => r.ticker));
+  const extras = sorted.filter(r => openPaperTickers.has(r.ticker) && !shown.has(r.ticker));
+  return top300.concat(extras);
+}
+
+document.querySelectorAll('.market-tab-btn[data-market]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    activeMarket = btn.dataset.market;
+    document.querySelectorAll('.market-tab-btn[data-market]').forEach(b => b.classList.toggle('active', b === btn));
+    showView('stocks'); // bir BIST sekmesine tiklamak, Sanal Al-Sat ekraninda olsa bile hisse tablosuna geri doner
+    renderTable();
+  });
+});
+
+// Arama kutusu: hisse sembolu VEYA sektor koduna gore anlik filtreler
+// (buyuk/kucuk harf duyarsiz, "icerir" eslesmesi).
+function applySearch(rows) {
+  if (!searchQuery) return rows;
+  const q = searchQuery.toLowerCase();
+  return rows.filter(r =>
+    (r.ticker || '').toLowerCase().includes(q) ||
+    (r.sector || '').toLowerCase().includes(q)
+  );
+}
+
+function renderRows(rows) {
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = '';
+  rows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    if (r.ticker === selectedTicker) tr.classList.add('selected');
+    tr.onclick = () => selectTicker(r.ticker);
+    tr.innerHTML = `
+      <td class="left">${i + 1}</td>
+      <td class="left">${escapeHtml(r.ticker)}</td>
+      <td class="left">${escapeHtml(r.sector || '-')}</td>
+      <td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>
+      <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
+      <td class="sym-${r.signal_macd}">${SIGNAL_SYMBOLS[r.signal_macd] || r.signal_macd}</td>
+      <td>${fmtPrice(r.price)}</td>
+      <td>${fmtRatio(r.volume_ratio)}</td>
+      <td>${fmtRangePos(r.day_range_pos)}</td>
+      <td>${fmtRsi(r.rsi)}</td>
+      <td>${fmtRangePos(r.bb_percent)}</td>
+      <td>${fmtPct(r.rel_strength)}</td>
+      <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
+      <td class="${pctClass(r.d5)}">${fmtPct(r.d5)}</td>
+      <td class="${pctClass(r.m1)}">${fmtPct(r.m1)}</td>
+      <td class="login-only-col ${r.day_stop === null ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
+      <td class="login-only-col ${r.day_target === null ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
+      <td class="login-only-col ${r.swing_stop === null ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
+      <td class="login-only-col ${r.swing_target === null ? 'dash' : ''}">${fmtPrice(r.swing_target)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function sortValue(row, key, type) {
+  if (type === 'score') return SCORE_RANK[row[key]] ?? 0;
+  if (type === 'signal') return SIGNAL_RANK[row[key]] ?? 0;
+  if (type === 'text') return (row[key] || '').toString();
+  return row[key];  // num: null'lar asagida ayri ele alinir
+}
+
+// backend'deki scanner.SCORE_ORDER ile BIREBIR AYNI tutulmali (bkz. CLAUDE.md).
+const DEFAULT_SCORE_ORDER = {MUTLAK_AL: 0, GUCLU_AL: 1, AL: 2, NOTR: 3, SAT: 4, GUCLU_SAT: 5, MUTLAK_SAT: 6};
+
+function applySort(rows) {
+  const sorted = rows.slice();
+  if (sortState.key === null) {
+    // Varsayilan: once Skor gucu (GUCLU AL en ustte), sonra gunluk % (buyukten kucuge)
+    sorted.sort((a, b) => {
+      const byScore = (DEFAULT_SCORE_ORDER[a.score] ?? 3) - (DEFAULT_SCORE_ORDER[b.score] ?? 3);
+      if (byScore !== 0) return byScore;
+      const ad = a.daily === null || a.daily === undefined ? -Infinity : a.daily;
+      const bd = b.daily === null || b.daily === undefined ? -Infinity : b.daily;
+      return bd - ad;
+    });
+    return sorted;
+  }
+
+  const th = document.querySelector(`th[data-key="${sortState.key}"]`);
+  const type = th ? th.dataset.type : 'num';
+  const dirMult = sortState.dir === 'asc' ? 1 : -1;
+
+  sorted.sort((a, b) => {
+    let va = sortValue(a, sortState.key, type);
+    let vb = sortValue(b, sortState.key, type);
+    if (type === 'text') return dirMult * va.localeCompare(vb);
+    // null/undefined degerler siralama yonunden bagimsiz her zaman en sona
+    const aNull = va === null || va === undefined;
+    const bNull = vb === null || vb === undefined;
+    if (aNull && bNull) return 0;
+    if (aNull) return 1;
+    if (bNull) return -1;
+    return dirMult * (va - vb);
+  });
+  return sorted;
+}
+
+function updateHeaderIndicators() {
+  document.querySelectorAll('#head-row th').forEach(th => {
+    const arrow = th.querySelector('.arrow');
+    const isActive = th.dataset.key === (sortState.key === null ? '_default' : sortState.key);
+    th.classList.toggle('sorted', isActive);
+    if (!arrow) return;
+    arrow.textContent = isActive ? (sortState.dir === 'asc' ? '▲' : '▼') : '';
+  });
+}
+
+function renderTable() {
+  const marketRows = applyMarketFilter(latestRows);
+  const filtered = applySearch(marketRows);
+  renderRows(applySort(filtered));
+  updateHeaderIndicators();
+
+  const countText = searchQuery
+    ? `${filtered.length}/${marketRows.length} hisse (filtrelendi)`
+    : `${marketRows.length} hisse`;
+  document.getElementById('meta').textContent =
+    `${countText} | guncelleme: ${lastUpdatedAt || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
+  document.getElementById('warning').textContent =
+    lastMissingCount ? `Uyari: ${lastMissingCount} hisse icin veri alinamadi, hedeflenen sayiya ulasilamadi.` : '';
+}
+
+document.getElementById('search-input').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim();
+  document.getElementById('search-clear').style.display = searchQuery ? 'block' : 'none';
+  renderTable();
+});
+document.getElementById('search-clear').addEventListener('click', () => {
+  const input = document.getElementById('search-input');
+  input.value = '';
+  searchQuery = '';
+  document.getElementById('search-clear').style.display = 'none';
+  renderTable();
+  input.focus();
+});
+
+document.querySelectorAll('#head-row th').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.key;
+    if (key === '_default') {
+      sortState = { key: null, dir: 'desc' };
+    } else if (sortState.key === key) {
+      sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      // Metin sutunu varsayilan A->Z, sayisal/sembolik sutun varsayilan buyukten kucuge
+      sortState = { key, dir: th.dataset.type === 'text' ? 'asc' : 'desc' };
+    }
+    renderTable();
+  });
+});
+
+async function refreshRows() {
+  try {
+    const res = await fetch('/api/rows');
+    const data = await res.json();
+    latestRows = data.rows || [];
+    lastUpdatedAt = data.updated_at || null;
+    lastMissingCount = data.missing_count || 0;
+    checkSignalTransitions(latestRows);
+    renderTable();
+  } catch (e) {
+    document.getElementById('meta').textContent = 'Veri alinamadi, tekrar denenecek...';
+  }
+}
+
+// Sayfa acilirken URL'de bir hisse varsa (orn. #thyao, selectTicker'in
+// kendisinin ekledigi) tablo ilk kez dolduktan sonra o hisse otomatik
+// secilir - boylece bir hissenin linki paylasilinca dogrudan o grafikle acilir.
+// DOMContentLoaded'a kadar beklenir - index.html'in en altindaki core
+// script'i (selectTicker/checkSignalTransitions tanimlari) bu noktada
+// KESIN calismis olur (script tag sirasina BAGIMLI olmadan).
+document.addEventListener('DOMContentLoaded', () => {
+  refreshRows().then(() => {
+    const hashTicker = location.hash.slice(1);
+    if (hashTicker) selectTicker(hashTicker.toUpperCase());
+  });
+  setInterval(refreshRows, REFRESH_SECONDS * 1000);
+});
+</script>

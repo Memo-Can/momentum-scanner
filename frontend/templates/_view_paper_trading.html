@@ -1,0 +1,386 @@
+<div id="view-paper-trading" hidden>
+  <section id="paper-trading">
+    <div id="paper-trading-header">
+      <h2>Sanal Al-Sat</h2>
+    </div>
+    <div id="paper-body">
+      <div class="sub">GUCLU AL'a yeni gecen hisseler otomatik "satin alinir" - swing stop/hedef, GUCLU SAT'a donus ya da 21 gun asimi ile "satilir". Gercek para degildir, sadece Skor'un performansini olcmek icindir.</div>
+      <div id="paper-summary"></div>
+      <div id="paper-cash-edit">
+        <input type="text" inputmode="decimal" id="paper-cash-input" placeholder="Yeni nakit (TL)">
+        <button id="paper-cash-save" type="button">Nakti Guncelle</button>
+        <span id="paper-cash-msg"></span>
+        <button id="paper-reset" type="button" class="paper-action-btn-muted">Her Seyi Sifirla</button>
+      </div>
+      <h3>Manuel Takip Listesi</h3>
+      <div class="sub">Yan panelden "Sanal Al-Sat Takibine Ekle" ile eklenen hisseler - istedigin an, istedigin tutarla elle al/sat. Otomatik sistemin 5 pozisyon limitine DAHIL DEGIL. Aldigin bir hisse SAT/GUCLU SAT sinyaline donerse otomatik olarak satilir (ayrica elinle de istedigin an satabilirsin).</div>
+      <div id="paper-watchlist-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="left">Hisse</th>
+              <th>Guncel Fiyat</th>
+              <th>Tutar (TL)</th>
+              <th class="left">Islem</th>
+            </tr>
+          </thead>
+          <tbody id="paper-watchlist"></tbody>
+        </table>
+        <div id="paper-watchlist-empty" hidden>Takip listesi bos - bir hisseyi secip yan panelden ekleyebilirsin.</div>
+      </div>
+      <h3>Acik Pozisyonlar</h3>
+      <div id="paper-positions-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="left">Hisse</th>
+              <th class="left">Kaynak</th>
+              <th>Giris Fiyati</th>
+              <th>Guncel Fiyat</th>
+              <th>K/Z</th>
+              <th>Stop</th>
+              <th>Hedef</th>
+              <th class="left">Giris Tarihi</th>
+              <th class="left">Islem</th>
+            </tr>
+          </thead>
+          <tbody id="paper-positions"></tbody>
+        </table>
+        <div id="paper-empty" hidden>Su an acik pozisyon yok.</div>
+      </div>
+      <h3>Kapanan Islemler</h3>
+      <div id="paper-trades-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="left">Hisse</th>
+              <th class="left">Kaynak</th>
+              <th>Giris Fiyati</th>
+              <th>Cikis Fiyati</th>
+              <th>K/Z</th>
+              <th class="left">Cikis Nedeni</th>
+              <th class="left">Cikis Tarihi</th>
+            </tr>
+          </thead>
+          <tbody id="paper-trades"></tbody>
+        </table>
+        <div id="paper-trades-empty" hidden>Henuz kapanan islem yok.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+// SANAL AL-SAT GORUNUMUNE OZEL JS - bu partial sadece login olana
+// gonderildigi icin (bkz. index.html'deki logged_in kontrolu) bu script de
+// sadece o durumda calisir. index.html'in en altindaki ortak script'in ve
+// _view_stocks.html'in altindaki script'in fonksiyonlarini kullanir -
+// bu dosya ikisinden de SONRA parse edilir (table-wrap icinde, view-stocks'tan
+// sonra), asil cross-dosya BAGIMLILIK sadece en alttaki bootstrap cagrisinda
+// (refreshPaperTrading) oldugu icin SADECE o kisim DOMContentLoaded'a kadar
+// beklenir - geri kalani (DOM dinleyicileri, fonksiyon tanimlari) kendi
+// partial'inin HTML'i zaten mevcut oldugu icin aninda calisabilir.
+
+if (LOGGED_IN) document.getElementById('paper-view-toggle').addEventListener('click', () => {
+  const isPaper = !document.getElementById('view-paper-trading').hidden;
+  showView(isPaper ? 'stocks' : 'paper');
+});
+
+function fmtPaperPrice(v) {
+  return (v === null || v === undefined) ? '-' : v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtPaperMoney(v) {
+  return (v === null || v === undefined) ? '-' : v.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) + ' TL';
+}
+// TL tutar input'lari (nakit duzenleme, manuel alim) icin: TR para birimi
+// kurallarina gore CANLI bicimlendirme - binlik ayiraci NOKTA, ondalik
+// ayiraci VIRGUL (en fazla 2 hane). Orn. yazarken "1234567,5" -> "1.234.567,5".
+function attachTLInputMask(input) {
+  input.addEventListener('input', () => {
+    let v = input.value.replace(/[^\d,]/g, '');
+    const commaIdx = v.indexOf(',');
+    if (commaIdx !== -1) {
+      // sadece ILK virgul ondalik ayiraci sayilir, sonrakiler atilir; ondalik
+      // kismi en fazla 2 hane ile sinirlanir (kurus hassasiyeti).
+      v = v.slice(0, commaIdx + 1) + v.slice(commaIdx + 1).replace(/,/g, '').slice(0, 2);
+    }
+    const [intPart, decPart] = v.split(',');
+    const intDigits = intPart.replace(/\D/g, '');
+    const formattedInt = intDigits ? parseInt(intDigits, 10).toLocaleString('tr-TR') : '';
+    input.value = decPart !== undefined ? `${formattedInt},${decPart}` : formattedInt;
+  });
+}
+// attachTLInputMask'in ciktisini (TR formati: nokta binlik, virgul ondalik)
+// sayiya cevirir - oncelik noktalari siler, virgulu ondalik noktaya cevirir.
+function parseTLAmount(str) {
+  if (!str) return NaN;
+  const normalized = str.replace(/\./g, '').replace(',', '.');
+  const val = parseFloat(normalized);
+  return isNaN(val) ? NaN : val;
+}
+const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Sure Asimi', manual_sat_signal: 'Sinyal (SAT)' };
+const PAPER_SOURCE_LABELS = { auto: 'Otomatik', manual: 'Manuel' };
+
+function renderPaperSummary(s) {
+  const wrap = document.getElementById('paper-summary');
+  if (!s) { wrap.innerHTML = ''; return; }
+  const totalPct = s.starting_balance ? (s.total_pnl / s.starting_balance * 100) : null;
+  wrap.innerHTML = `
+    <div class="stat">Nakit<b>${fmtPaperMoney(s.cash)}</b></div>
+    <div class="stat">Acik Pozisyon Degeri<b>${fmtPaperMoney(s.positions_value)}</b></div>
+    <div class="stat">Toplam Deger<b>${fmtPaperMoney(s.equity)}</b></div>
+    <div class="stat">Toplam K/Z<b class="${pctClass(s.total_pnl)}">${fmtPaperMoney(s.total_pnl)} (${fmtPct(totalPct)})</b></div>
+    <div class="stat">Acik Pozisyon<b>${s.open_positions} / 5</b></div>
+    <div class="stat">Kapanan Islem<b>${s.closed_trades}</b></div>
+    <div class="stat">Kazanma Orani<b>${s.win_rate === null || s.win_rate === undefined ? '-' : s.win_rate.toFixed(0) + '%'}</b></div>
+  `;
+}
+
+// Pozisyon/islem/takip listesi satirlarina tiklamak Sanal Al-Sat ekranindan
+// CIKMADAN o hissenin grafigini yan panelde (#side, zaten sabit) acar -
+// ayri sayfa doneminde (window.open ile yeni sekme) oldugundan farkli,
+// artik AYNI sayfada oldugumuz icin dogrudan secim yapiliyor.
+function openTickerFromPaper(ticker) {
+  // Sanal Al-Sat ekranindan cikilmaz - sadece yan paneldeki (#side, zaten
+  // sabit/her zaman gorunur) grafik/skor gecmisi o hisseye gunceller.
+  selectTicker(ticker);
+}
+
+function renderPaperPositions(positions) {
+  const tbody = document.getElementById('paper-positions');
+  const empty = document.getElementById('paper-empty');
+  tbody.innerHTML = '';
+  empty.hidden = positions.length > 0;
+  positions.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.classList.add('paper-row');
+    if (p.ticker === selectedTicker) tr.classList.add('selected');
+    tr.onclick = () => openTickerFromPaper(p.ticker);
+    tr.innerHTML = `
+      <td class="left">${escapeHtml(p.ticker)}</td>
+      <td class="left">${PAPER_SOURCE_LABELS[p.source] || p.source}</td>
+      <td>${fmtPaperPrice(p.entry_price)}</td>
+      <td>${fmtPaperPrice(p.current_price)}</td>
+      <td class="${pctClass(p.unrealized_pnl)}">${fmtPaperMoney(p.unrealized_pnl)} (${fmtPct(p.unrealized_pnl_pct)})</td>
+      <td>${fmtPaperPrice(p.stop_price)}</td>
+      <td>${fmtPaperPrice(p.target_price)}</td>
+      <td class="left">${escapeHtml((p.entry_time || '').slice(0, 16))}</td>
+      <td class="left"></td>
+    `;
+    if (p.source === 'manual') {
+      const sellBtn = document.createElement('button');
+      sellBtn.type = 'button';
+      sellBtn.className = 'paper-action-btn';
+      sellBtn.textContent = 'Sat';
+      sellBtn.onclick = (e) => { e.stopPropagation(); manualSellTrade(p.id); };
+      tr.lastElementChild.appendChild(sellBtn);
+    }
+    tbody.appendChild(tr);
+  });
+}
+
+function renderPaperTrades(trades) {
+  const tbody = document.getElementById('paper-trades');
+  const empty = document.getElementById('paper-trades-empty');
+  tbody.innerHTML = '';
+  empty.hidden = trades.length > 0;
+  trades.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.classList.add('paper-row');
+    if (t.ticker === selectedTicker) tr.classList.add('selected');
+    tr.onclick = () => openTickerFromPaper(t.ticker);
+    tr.innerHTML = `
+      <td class="left">${escapeHtml(t.ticker)}</td>
+      <td class="left">${PAPER_SOURCE_LABELS[t.source] || t.source}</td>
+      <td>${fmtPaperPrice(t.entry_price)}</td>
+      <td>${fmtPaperPrice(t.exit_price)}</td>
+      <td class="${pctClass(t.pnl)}">${fmtPaperMoney(t.pnl)}</td>
+      <td class="left">${escapeHtml(PAPER_EXIT_LABELS[t.exit_reason] || t.exit_reason || '-')}</td>
+      <td class="left">${escapeHtml((t.exit_time || '').slice(0, 16))}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderPaperWatchlist(items) {
+  const tbody = document.getElementById('paper-watchlist');
+  const empty = document.getElementById('paper-watchlist-empty');
+  tbody.innerHTML = '';
+  empty.hidden = items.length > 0;
+  items.forEach(w => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="left" style="cursor:pointer">${escapeHtml(w.ticker)}</td>
+      <td>${fmtPaperPrice(w.current_price)}</td>
+      <td></td>
+      <td class="left"></td>
+    `;
+    tr.children[0].onclick = () => openTickerFromPaper(w.ticker);
+    const amountTd = tr.children[2];
+    const actionTd = tr.children[3];
+
+    if (w.has_open_position) {
+      amountTd.textContent = '-';
+      const info = document.createElement('span');
+      info.textContent = "Pozisyon acik (Acik Pozisyonlar'dan satabilirsin)";
+      actionTd.appendChild(info);
+    } else {
+      const amountInput = document.createElement('input');
+      amountInput.type = 'text';
+      amountInput.inputMode = 'decimal';
+      amountInput.placeholder = 'Tutar (TL)';
+      amountInput.className = 'paper-amount-input';
+      attachTLInputMask(amountInput);
+      amountTd.appendChild(amountInput);
+
+      const buyBtn = document.createElement('button');
+      buyBtn.type = 'button';
+      buyBtn.className = 'paper-action-btn';
+      buyBtn.textContent = 'Al';
+      buyBtn.onclick = () => manualBuyFromWatchlist(w.ticker, amountInput.value);
+      actionTd.appendChild(buyBtn);
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'paper-action-btn paper-action-btn-muted';
+    removeBtn.textContent = 'Cikar';
+    removeBtn.onclick = () => removeFromWatchlist(w.ticker);
+    actionTd.appendChild(removeBtn);
+
+    tbody.appendChild(tr);
+  });
+}
+
+async function manualBuyFromWatchlist(ticker, amountStr) {
+  const allocation = parseTLAmount(amountStr);
+  if (!allocation || allocation <= 0) {
+    alert('Gecerli bir tutar gir.');
+    return;
+  }
+  try {
+    const res = await fetch('/api/paper/manual-buy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker, allocation }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Alim basarisiz.'); return; }
+    refreshPaperTrading();
+  } catch (e) {
+    alert('Alim basarisiz.');
+  }
+}
+
+async function manualSellTrade(tradeId) {
+  try {
+    const res = await fetch('/api/paper/manual-sell', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trade_id: tradeId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Satis basarisiz.'); return; }
+    refreshPaperTrading();
+  } catch (e) {
+    alert('Satis basarisiz.');
+  }
+}
+
+async function refreshPaperTrading() {
+  try {
+    const [summaryRes, positionsRes, tradesRes, watchlistRes] = await Promise.all([
+      fetch('/api/paper/summary'),
+      fetch('/api/paper/positions'),
+      fetch('/api/paper/trades'),
+      fetch('/api/paper/watchlist'),
+    ]);
+    const positions = await positionsRes.json();
+    const watchlist = await watchlistRes.json();
+    renderPaperSummary(await summaryRes.json());
+    renderPaperPositions(positions);
+    renderPaperTrades(await tradesRes.json());
+    renderPaperWatchlist(watchlist);
+
+    // acik pozisyon seti degistiyse (yeni alim/satis) BIST 300 sekmesinin
+    // "ilk 300" kesmesi de buna gore guncellensin diye ana tablo yeniden cizilir.
+    openPaperTickers = new Set(positions.map(p => p.ticker));
+    watchlistTickers = new Set(watchlist.map(w => w.ticker));
+    updateWatchlistToggleButton();
+    if (activeMarket === 'bist300') renderTable();
+  } catch (e) {
+    // sessizce basarisiz ol - ana tablo deneyimini bozmasin
+  }
+}
+
+if (LOGGED_IN) {
+  attachTLInputMask(document.getElementById('paper-cash-input'));
+
+  document.getElementById('paper-cash-save').addEventListener('click', async () => {
+    const input = document.getElementById('paper-cash-input');
+    const msg = document.getElementById('paper-cash-msg');
+    const amount = parseTLAmount(input.value);
+    if (!(amount >= 0)) {
+      msg.textContent = 'Gecerli bir tutar gir.';
+      return;
+    }
+    try {
+      const res = await fetch('/api/paper/cash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+      if (!res.ok) { msg.textContent = 'Guncellenemedi.'; return; }
+      input.value = '';
+      msg.textContent = 'Guncellendi.';
+      refreshPaperTrading();
+    } catch (e) {
+      msg.textContent = 'Guncellenemedi.';
+    }
+  });
+
+  document.getElementById('paper-reset').addEventListener('click', async () => {
+    // Baslangic tutari sabit 1.000.000 degil - "Yeni nakit (TL)" kutusuna
+    // zaten bir deger yazilmissa onu kullanir, yazilmamissa sorar.
+    const cashInput = document.getElementById('paper-cash-input');
+    let amountStr = cashInput.value;
+    if (!amountStr) {
+      amountStr = prompt('Sifirlama sonrasi baslangic nakti (TL) ne olsun?', '1000000');
+      if (amountStr === null) return;
+    }
+    const amount = parseTLAmount(amountStr);
+    if (!(amount > 0)) {
+      alert('Gecerli bir tutar gir.');
+      return;
+    }
+    const ok = confirm(
+      `Bu islem TUM Sanal Al-Sat verilerini sifirlar: acik/kapali tum islemler, ` +
+      `equity gecmisi ve manuel takip listesi SILINIR, nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanir. ` +
+      `Bu islem GERI ALINAMAZ. Emin misin?`
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch('/api/paper/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+      if (!res.ok) { alert('Sifirlama basarisiz.'); return; }
+      cashInput.value = '';
+      refreshPaperTrading();
+    } catch (e) {
+      alert('Sifirlama basarisiz.');
+    }
+  });
+
+  // core.js (index.html'in en altinda) HENUZ calismamis olabilir (bu script
+  // fiziksel olarak ONDAN once parse ediliyor, table-wrap icinde) - bu yuzden
+  // core'un fonksiyonlarini (updateWatchlistToggleButton) cagiran TEK satir
+  // DOMContentLoaded'a kadar beklenir, boylece script tag sirasindan BAGIMSIZ
+  // calisir (core'un tanimlari o ana kadar kesin tamamlanmis olur).
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshPaperTrading();
+    setInterval(refreshPaperTrading, REFRESH_SECONDS * 1000);
+  });
+}
+</script>
