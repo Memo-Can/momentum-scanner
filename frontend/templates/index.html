@@ -65,41 +65,7 @@ const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
     {% endif %}
   </div>
 
-  <div id="side">
-    <div id="side-empty" class="placeholder">Grafik ve sinyal gecmisi icin<br>bir hisseye tiklayin</div>
-    <div id="side-content" style="display:none">
-      <h2 id="side-ticker">-</h2>
-      {% if logged_in %}
-      <button id="watchlist-toggle" type="button">Sanal Al-Sat Takibine Ekle</button>
-      {% endif %}
-      <div class="sub" id="side-sub" title="Buyutmek icin tiklayin">3 aylik gunluk mum</div>
-      <div id="chart-group">
-        <div id="indicator-toggles">
-          <label><input type="checkbox" id="ind-ema" checked> EMA 9/21</label>
-          <label><input type="checkbox" id="ind-bb" checked> Bollinger</label>
-          <label><input type="checkbox" id="ind-macd" checked> MACD</label>
-          <label><input type="checkbox" id="ind-rsi" checked> RSI</label>
-        </div>
-        <div id="chart-legend"></div>
-        <div id="chart">
-          <div id="chart-status" class="chart-status" hidden></div>
-        </div>
-        <div id="macd-chart"></div>
-        <div id="rsi-chart"></div>
-      </div>
-      <div id="score-history">
-        <h3 title="Buyutmek icin tiklayin">Skor Gecmisi</h3>
-        <div class="tabs" id="score-tabs">
-          <button class="tab-btn active" data-tab="daily">Gunluk</button>
-          <button class="tab-btn" data-tab="hourly">Saatlik</button>
-          <button class="tab-btn" data-tab="raw">5 Dakikalik</button>
-        </div>
-        <div id="tab-daily" class="tab-panel"></div>
-        <div id="tab-hourly" class="tab-panel" hidden></div>
-        <div id="tab-raw" class="tab-panel" hidden></div>
-      </div>
-    </div>
-  </div>
+  {% include "_view_graphic.html" %}
 </div>
 
 <div id="modal-overlay" class="modal-overlay" hidden>
@@ -118,40 +84,29 @@ const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
 </footer>
 
 <script>
-// ORTAK/PAYLASILAN JS - hisse tablosu (_view_stocks.html) VE Sanal Al-Sat
-// (_view_paper_trading.html) tarafindan birlikte kullanilir: grafik/crosshair/
-// legend, Skor Gecmisi, sinyal bildirimleri, market seridi, modal, ve
-// selectTicker() (her iki görünümün satir tiklamalari da buna yönlenir).
-// Bu script FIZIKSEL olarak index.html'in EN ALTINDA (hem #side/#modal-
-// overlay'in HTML'inden SONRA - asagidaki DOM sorgulari bu yuzden guvenli -
-// hem de table-wrap icindeki iki include'dan SONRA) duruyor. _view_stocks.html/
-// _view_paper_trading.html kendi inline script'lerinin EN ALTINDAKI
-// bootstrap cagrisini (refreshRows/refreshPaperTrading) DOMContentLoaded'a
-// kadar bekletiyor - boylece BURADAKI fonksiyon tanimlari script tag SIRASINA
-// bakilmaksizin, DOMContentLoaded ani geldiginde KESIN hazir olur.
+// ORTAK/PAYLASILAN JS - hisse tablosu (_view_stocks.html), Sanal Al-Sat
+// (_view_paper_trading.html) VE yan panel (_view_graphic.html) tarafindan
+// birlikte kullanilir: genel bicimlendiriciler, sinyal bildirimleri, market
+// seridi, showView() ve paylasilan Sanal Al-Sat state'i (openPaperTickers/
+// watchlistTickers). Grafik/crosshair/legend/Skor Gecmisi/modal/
+// selectTicker() gibi yan panele OZEL mantik artik burada DEGIL,
+// _view_graphic.html'in KENDI script'inde (bkz. CLAUDE.md "Yan panel
+// ayrilmasi"). Bu script FIZIKSEL olarak index.html'in EN ALTINDA duruyor -
+// _view_stocks.html/_view_paper_trading.html/_view_graphic.html kendi inline
+// script'lerinin (varsa) cross-dosya bagimli kisimlarini DOMContentLoaded'a
+// kadar bekletiyor - boylece BURADAKI fonksiyon tanimlari script tag
+// SIRASINA bakilmaksizin, DOMContentLoaded ani geldiginde KESIN hazir olur.
 
 // GUCLU_SAT artik backend'de (scanner.confluence_label) canli taramada hic
 // uretilmiyor (2026-11-01'de MUTLAK_AL/MUTLAK_SAT eklendi, bkz. CLAUDE.md) -
 // ama gecmis Skor Gecmisi kayitlarinda gorulebildigi icin SEMBOL/RENK
-// tanimlari burada kalmali.
+// tanimlari burada kalmali. Hem tablo (_view_stocks.html) hem yan panelin
+// Skor Gecmisi paneli (_view_graphic.html) bunu kullandigi icin ORTAK.
 const SCORE_SYMBOLS = {
   MUTLAK_AL: "▲▲▲", GUCLU_AL: "▲▲", AL: "▲", NOTR: "–", SAT: "▼",
   GUCLU_SAT: "▼▼", MUTLAK_SAT: "▼▼▼",
 };
 const SIGNAL_SYMBOLS = {AL: "▲", SAT: "▼", NOTR: "–"};
-// Grafikte AL/GUCLU_AL/MUTLAK_AL/SAT/GUCLU_SAT/MUTLAK_SAT'a YENI GECIS yapilan
-// mumlarin uzerine konan isaretler (bkz. updateChartMarkers()) - MUTLAK/GUCLU
-// varyantlar daha buyuk/belirgin (ayrica tam ok sembolu), duz AL/SAT daha
-// kucuk/soluk. MUTLAK_AL/MUTLAK_SAT, GUCLU_AL/GUCLU_SAT ile AYNI rengi
-// kullanir (yon zaten renkle anlasiliyor), sadece sembol farkli.
-const MARKER_STYLES = {
-  MUTLAK_AL: { position: 'belowBar', color: '#17c964', shape: 'arrowUp', text: '▲▲▲' },
-  GUCLU_AL: { position: 'belowBar', color: '#17c964', shape: 'arrowUp', text: '▲▲' },
-  AL: { position: 'belowBar', color: '#2ecc71', shape: 'arrowUp', text: '▲' },
-  SAT: { position: 'aboveBar', color: '#ff5c5c', shape: 'arrowDown', text: '▼' },
-  GUCLU_SAT: { position: 'aboveBar', color: '#ff2d2d', shape: 'arrowDown', text: '▼▼' },
-  MUTLAK_SAT: { position: 'aboveBar', color: '#ff2d2d', shape: 'arrowDown', text: '▼▼▼' },
-};
 
 // Genel bicimlendirme yardimcilari - tablo, Sanal Al-Sat ve Skor Gecmisi
 // ayni fonksiyonlari kullanir.
@@ -252,88 +207,24 @@ document.getElementById('notify-toggle').addEventListener('click', () => {
 });
 updateNotifyButton();
 
-let selectedTicker = null;
-let chart = null;
-let candleSeries = null;
-// Istege bagli indikator katmanlari - hepsi lazy olusturulur (ilk toggle
-// acildiginda ya da ana grafikle birlikte), asagida ensureChart/ensureMacdChart/
-// ensureRsiChart icinde atanir.
-let ema9Series = null, ema21Series = null;
-let bbUpperSeries = null, bbMidSeries = null, bbLowerSeries = null;
-let macdChart = null, macdHistSeries = null, macdLineSeries = null, macdSignalSeries = null;
-let rsiChart = null, rsiSeries = null;
-// Ana/MACD/RSI grafiklerinin crosshair'ini (imlec dikey cizgisi) birbirine
-// senkronize ederken sonsuz dongu olusmasin diye (bir grafigin crosshair'ini
-// programatik tasimak kendi subscribeCrosshairMove'unu da tetikler) kilit.
-let crosshairSyncing = false;
-// Mum/indikator degerlerini zamana (backend'in "time" alanina, ayni gunun
-// tum serilerinde birebir ayni string/sayi) gore ani eristirmek icin - her
-// selectTicker'da (candle/indikator verisi gelince) yeniden olusturulur.
-// Boylece hangi grafigin crosshair'i tetiklerse tetiklesin (ana/MACD/RSI),
-// legend AYNI kaynaktan okur.
-let candleTimeMap = new Map();
-let indicatorTimeMaps = {};
-let indicatorData = null;
-// Skor Gecmisi sekmeleri: backend'den TEK bir 5 dakikalik ham skor listesi
-// gelir (score-history), gunluk/saatlik ortalamalar bu tek listeden burada
-// (istemci tarafinda) hesaplanir - ayri API cagrisi gerekmez, sekmeler
-// arasi gecis aninda olur.
-let scoreHistoryRaw = [];
-// Hizli art arda farkli hisselere tiklandiginda, gec gelen ESKI bir cevabin
-// az once secilen YENI hisseyi ezmesini onlemek icin her selectTicker
-// cagrisina artan bir kimlik verilir - sonuc uygulanmadan once hala "guncel
-// secim" olup olmadigi kontrol edilir.
-let chartRequestId = 0;
-
 // Su an acik sanal al-sat pozisyonu olan ticker'lar - refreshPaperTrading()
 // (_view_paper_trading.html) her dongude gunceller. BIST 300 sekmesinin "ilk
 // 300" kesmesi bu ticker'lari ATLAMAMALI (cok dusen bir hisse sekmeden
 // kaybolmasin, satisi yapilana kadar gorunur kalsin) - bkz. _view_stocks.html:
 // applyMarketFilter(). BURADA (bu ortak script'te) tanimli olma sebebi:
 // _view_stocks.html'in kendi script'i bunu YUKLENIR YUKLENMEZ (ilk
-// refreshRows() cagrisinda) okuyor - eger _view_paper_trading.html'de tanimli
-// olsaydi (o DAHA SONRA parse edilir, table-wrap'ta view-stocks'tan sonra
-// gelir), ilk okuma aninda "tanimsiz degisken" hatasi olurdu.
+// refreshRows() cagrisinda) okuyor, _view_graphic.html'in updateWatchlistToggleButton()'u
+// da bunu OKUYOR (yazmiyor) - iki farkli dosyanin PAYLASTIGI tek state
+// burada durmali, hangisinde tanimli olsaydi diger(leri) "tanimsiz degisken"
+// hatasi alirdi.
 let openPaperTickers = new Set();
-// Manuel takip listesindeki ticker'lar - yan paneldeki "Sanal Al-Sat
-// Takibine Ekle/Cikar" butonunun metnini/davranisini belirler. Ayni sebeple
-// (selectTicker asagida bunu hemen kullanabiliyor) burada.
+// Manuel takip listesindeki ticker'lar - ayni sebeple (hem _view_stocks.html
+// hem _view_graphic.html okuyor, _view_paper_trading.html yaziyor) burada.
 let watchlistTickers = new Set();
 
-async function removeFromWatchlist(ticker) {
-  try {
-    await fetch(`/api/paper/watchlist/${ticker}`, { method: 'DELETE' });
-    if (typeof refreshPaperTrading === 'function') refreshPaperTrading();
-  } catch (e) {
-    // sessizce gec
-  }
-}
-
-async function addToWatchlist(ticker) {
-  try {
-    await fetch('/api/paper/watchlist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker }),
-    });
-    if (typeof refreshPaperTrading === 'function') refreshPaperTrading();
-  } catch (e) {
-    // sessizce gec
-  }
-}
-
-function updateWatchlistToggleButton() {
-  const btn = document.getElementById('watchlist-toggle');
-  if (!btn || !selectedTicker) return;
-  const inWatchlist = watchlistTickers.has(selectedTicker);
-  btn.textContent = inWatchlist ? 'Sanal Al-Sat Takibinden Cikar' : 'Sanal Al-Sat Takibine Ekle';
-  btn.classList.toggle('in-watchlist', inWatchlist);
-  btn.onclick = () => (inWatchlist ? removeFromWatchlist(selectedTicker) : addToWatchlist(selectedTicker));
-}
-
 // Sanal Al-Sat (paper trading) - ana tablo ile AYNI sayfada, header/footer/
-// yan panel (#side) SABIT kalirken sadece #table-wrap'in icindeki goruntu
-// (#view-stocks <-> #view-paper-trading) degisir.
+// yan panel (_view_graphic.html) SABIT kalirken sadece #table-wrap'in icindeki
+// goruntu (#view-stocks <-> #view-paper-trading) degisir.
 function showView(view) {
   const isPaper = view === 'paper';
   document.getElementById('view-stocks').hidden = isPaper;
@@ -341,489 +232,6 @@ function showView(view) {
   if (paperView) paperView.hidden = !isPaper;
   const toggleBtn = document.getElementById('paper-view-toggle');
   if (toggleBtn) toggleBtn.classList.toggle('active', isPaper);
-}
-
-function ensureChart() {
-  if (chart) return;
-  const container = document.getElementById('chart');
-  // Yukseklik container'in GERCEK (CSS media query'lerin belirledigi) yuksekligi
-  // ile aliniyor - sabit bir sayi (orn. 280) verilirse mobilde CSS #chart'i
-  // kucultse bile grafik sabit boyutta kalir ve alttaki "Skor Gecmisi"
-  // basligiyla cakisir/onune gecer.
-  chart = LightweightCharts.createChart(container, {
-    layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
-    grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
-    timeScale: { borderColor: '#2a2e38' },
-    rightPriceScale: { borderColor: '#2a2e38' },
-    height: container.clientHeight,
-  });
-  candleSeries = chart.addCandlestickSeries({
-    upColor: '#2ecc71', downColor: '#ff5c5c',
-    borderVisible: false,
-    wickUpColor: '#2ecc71', wickDownColor: '#ff5c5c',
-  });
-  // Container boyutu degistiginde (viewport genislik/yukseklik degisimi,
-  // ekran donmesi vb.) hem genislik hem yukseklik grafige yansitilir.
-  new ResizeObserver(entries => {
-    for (const entry of entries) {
-      chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
-    }
-  }).observe(container);
-
-  // EMA9/21 ve Bollinger bantlari - ana fiyat grafiginin USTUNE binen katmanlar
-  // (ayni fiyat olcegi). Bir kere olusturulur, acilir/kapanir toggle'lar sadece
-  // visible: true/false yapar - veri her selectTicker'da tekrar setData edilir.
-  ema9Series = chart.addLineSeries({ color: '#e8c547', lineWidth: 1, visible: true, priceLineVisible: false, lastValueVisible: false });
-  ema21Series = chart.addLineSeries({ color: '#ff9f43', lineWidth: 1, visible: true, priceLineVisible: false, lastValueVisible: false });
-  bbUpperSeries = chart.addLineSeries({ color: '#5b9bd5', lineWidth: 1, lineStyle: 2, visible: true, priceLineVisible: false, lastValueVisible: false });
-  bbMidSeries = chart.addLineSeries({ color: '#8b93a3', lineWidth: 1, lineStyle: 2, visible: true, priceLineVisible: false, lastValueVisible: false });
-  bbLowerSeries = chart.addLineSeries({ color: '#5b9bd5', lineWidth: 1, lineStyle: 2, visible: true, priceLineVisible: false, lastValueVisible: false });
-  wireCrosshairSync(chart);
-}
-
-function ensureMacdChart() {
-  if (macdChart) return;
-  const container = document.getElementById('macd-chart');
-  macdChart = LightweightCharts.createChart(container, {
-    layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
-    grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
-    timeScale: { borderColor: '#2a2e38' },
-    rightPriceScale: { borderColor: '#2a2e38' },
-    height: container.clientHeight,
-  });
-  macdHistSeries = macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
-  macdLineSeries = macdChart.addLineSeries({ color: '#5b9bd5', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-  macdSignalSeries = macdChart.addLineSeries({ color: '#ff9f43', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-  new ResizeObserver(entries => {
-    for (const entry of entries) {
-      macdChart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
-    }
-  }).observe(container);
-  wireCrosshairSync(macdChart);
-}
-
-function ensureRsiChart() {
-  if (rsiChart) return;
-  const container = document.getElementById('rsi-chart');
-  rsiChart = LightweightCharts.createChart(container, {
-    layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
-    grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
-    timeScale: { borderColor: '#2a2e38' },
-    rightPriceScale: { borderColor: '#2a2e38' },
-    height: container.clientHeight,
-  });
-  rsiSeries = rsiChart.addLineSeries({ color: '#e8c547', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-  // Asiri alim/satim referans cizgileri (70/30) - RSI'nin standart okunma esikleri.
-  rsiSeries.createPriceLine({ price: 70, color: '#8b93a3', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
-  rsiSeries.createPriceLine({ price: 30, color: '#8b93a3', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
-  new ResizeObserver(entries => {
-    for (const entry of entries) {
-      rsiChart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
-    }
-  }).observe(container);
-  wireCrosshairSync(rsiChart);
-}
-
-// Backend'den gelen [{time, value}] dizisini lightweight-charts'in bekledigi
-// formata cevirir - null value'lu (NaN kaynakli, orn. isinma donemi) satirlar
-// atlanir, cizgi bos noktadan basliyormus gibi dogal gorunur.
-function toSeriesData(arr) {
-  return (arr || []).filter(p => p.value !== null).map(p => ({ time: p.time, value: p.value }));
-}
-
-// toSeriesData ile AYNI diziden, crosshair legend'inin "time" ile O(1)
-// deger okuyabilmesi icin bir Map olusturur (null'lar burada da atlanir).
-function buildTimeMap(arr) {
-  const m = new Map();
-  (arr || []).forEach(p => { if (p.value !== null && p.value !== undefined) m.set(p.time, p.value); });
-  return m;
-}
-
-function applyIndicatorData() {
-  if (!indicatorData) return;
-  indicatorTimeMaps = {
-    ema9: buildTimeMap(indicatorData.ema9),
-    ema21: buildTimeMap(indicatorData.ema21),
-    macd: buildTimeMap(indicatorData.macd),
-    macd_signal: buildTimeMap(indicatorData.macd_signal),
-    rsi: buildTimeMap(indicatorData.rsi),
-  };
-  ema9Series.setData(toSeriesData(indicatorData.ema9));
-  ema21Series.setData(toSeriesData(indicatorData.ema21));
-  bbUpperSeries.setData(toSeriesData(indicatorData.bb_upper));
-  bbMidSeries.setData(toSeriesData(indicatorData.bb_mid));
-  bbLowerSeries.setData(toSeriesData(indicatorData.bb_lower));
-  if (macdHistSeries) {
-    macdHistSeries.setData(toSeriesData(indicatorData.macd_hist).map(p => ({
-      time: p.time, value: p.value, color: p.value >= 0 ? '#2ecc71' : '#ff5c5c',
-    })));
-    macdLineSeries.setData(toSeriesData(indicatorData.macd));
-    macdSignalSeries.setData(toSeriesData(indicatorData.macd_signal));
-    macdChart.timeScale().fitContent();
-  }
-  if (rsiSeries) {
-    rsiSeries.setData(toSeriesData(indicatorData.rsi));
-    rsiChart.timeScale().fitContent();
-  }
-}
-
-document.getElementById('ind-ema').addEventListener('change', (e) => {
-  ema9Series.applyOptions({ visible: e.target.checked });
-  ema21Series.applyOptions({ visible: e.target.checked });
-});
-document.getElementById('ind-bb').addEventListener('change', (e) => {
-  bbUpperSeries.applyOptions({ visible: e.target.checked });
-  bbMidSeries.applyOptions({ visible: e.target.checked });
-  bbLowerSeries.applyOptions({ visible: e.target.checked });
-});
-document.getElementById('ind-macd').addEventListener('change', (e) => {
-  document.getElementById('macd-chart').hidden = !e.target.checked;
-  if (e.target.checked) { ensureMacdChart(); applyIndicatorData(); }
-});
-document.getElementById('ind-rsi').addEventListener('change', (e) => {
-  document.getElementById('rsi-chart').hidden = !e.target.checked;
-  if (e.target.checked) { ensureRsiChart(); applyIndicatorData(); }
-});
-
-// Grafik/Skor Gecmisi basliklarina tiklaninca ilgili bolumu buyutulmus bir
-// popup icinde gosterir - DOM dugumu KOPYALANMAZ, oldugu gibi modal'in
-// icine tasinir (bir yer tutucu Comment dugumu birakilir) ve kapatilinca
-// tam olarak eski yerine geri konur. Boylece grafikteki lightweight-charts
-// orneklerini yeniden olusturmaya gerek kalmaz - mevcut ResizeObserver'lar
-// konteynerin buyudugunu/kucüldugunu algilayip grafigi otomatik yeniden
-// boyutlandirir.
-let modalPlaceholder = null;
-let modalActiveEl = null;
-
-// Grafik konteynerleri genisleyip/kucüldugunde (ResizeObserver) lightweight-
-// charts CANVAS'i dogru boyuta getirir ama GORUNEN ZAMAN ARALIGINI (zoom
-// seviyesini) OTOMATIK YENIDEN SIGDIRMAZ - eski (dar) genislige gore
-// hesaplanmis zoom, konteyner genisleyince mumlari bir kenara yigip geri
-// kalan alani bos birakir (popup'ta grafigin yarisi bos gorunmesinin sebebi
-// buydu). Bu yuzden konteyner boyutu degistikten (ve ResizeObserver'in yeni
-// genisligi uygulamasi icin bir sonraki frame'e kadar beklendikten) SONRA
-// fitContent() ile zoom yeniden tum genisligi kullanacak sekilde ayarlanir.
-function refitCharts() {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      if (chart) chart.timeScale().fitContent();
-      if (macdChart) macdChart.timeScale().fitContent();
-      if (rsiChart) rsiChart.timeScale().fitContent();
-    });
-  });
-}
-
-function openInModal(el, extraClass) {
-  if (modalActiveEl) closeModal();
-  modalPlaceholder = document.createComment('modal-placeholder');
-  el.replaceWith(modalPlaceholder);
-  const modalBody = document.getElementById('modal-body');
-  modalBody.className = extraClass || '';
-  modalBody.appendChild(el);
-  modalActiveEl = el;
-  document.getElementById('modal-overlay').hidden = false;
-  refitCharts();
-}
-
-function closeModal() {
-  if (!modalActiveEl || !modalPlaceholder) return;
-  modalPlaceholder.replaceWith(modalActiveEl);
-  modalActiveEl = null;
-  modalPlaceholder = null;
-  document.getElementById('modal-overlay').hidden = true;
-  refitCharts();
-}
-
-document.getElementById('side-sub').addEventListener('click', () => {
-  openInModal(document.getElementById('chart-group'), 'modal-chart');
-});
-document.querySelector('#score-history h3').addEventListener('click', () => {
-  openInModal(document.getElementById('score-history'), 'modal-score-history');
-});
-document.getElementById('modal-close').addEventListener('click', closeModal);
-document.getElementById('modal-overlay').addEventListener('click', (e) => {
-  if (e.target.id === 'modal-overlay') closeModal(); // sadece koyu arka plana tiklaninca kapat
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal();
-});
-
-// confluence_label ile AYNI esikler (bkz. scanner_*.py) - ortalama ham skoru
-// (-5..+5, 2026-10-31'de signal_5m kaldirilinca 6'dan 5'e dustu) ayni AL/SAT
-// etiketine cevirmek icin burada tekrarlanir. ADX filtresi burada YOK: ADX
-// aninlik bir guven filtresi, ortalamaya uygun degil.
-// 2026-11-01'de MUTLAK_AL/MUTLAK_SAT eklendi: backend'de tam sayi skorlar
-// icin skor==5 MUTLAK_AL, skor==4 GUCLU_AL - burada ORTALAMA (ondalikli)
-// kullanildigi icin 4 ve 5'in TAM ORTASI (4.5) esik olarak secildi. SAT
-// tarafinda yeni bir esik YOK - backend'de MUTLAK_SAT zaten eski GUCLU_SAT'in
-// (skor<-3) TUM araligini kapsadigi icin sadece isim degisti.
-function scoreLabelFromAvg(avg) {
-  if (avg >= 4.5) return 'MUTLAK_AL';
-  if (avg >= 4) return 'GUCLU_AL';
-  if (avg >= 2) return 'AL';
-  if (avg >= -1) return 'NOTR';
-  if (avg >= -3) return 'SAT';
-  return 'MUTLAK_SAT';
-}
-
-function dayKey(t) { return t.slice(0, 10); }
-function hourKey(t) { return t.slice(0, 13) + ':00'; }
-
-function aggregateBy(rows, keyFn) {
-  const order = [];
-  const groups = {};
-  rows.forEach(r => {
-    const k = keyFn(r.time);
-    if (!groups[k]) { groups[k] = { sum: 0, count: 0, price: r.price }; order.push(k); }
-    groups[k].sum += r.score_raw;
-    groups[k].count += 1;
-    groups[k].price = r.price; // satirlar zaman sirali geldigi icin grup icindeki en guncel fiyat kalir
-  });
-  return order.map(k => ({ label: k, avg: groups[k].sum / groups[k].count, price: groups[k].price })).reverse();
-}
-
-function renderHistPanel(panelId, items) {
-  const wrap = document.getElementById(panelId);
-  if (!items.length) {
-    wrap.innerHTML = '<div class="sig-empty">Henuz veri yok.</div>';
-    return;
-  }
-  wrap.innerHTML = items.map(it => {
-    const scoreLabel = scoreLabelFromAvg(it.avg);
-    const avgTxt = (it.avg >= 0 ? '+' : '') + it.avg.toFixed(1);
-    return `
-      <div class="hist-row">
-        <span class="sym-${scoreLabel}">${SCORE_SYMBOLS[scoreLabel] || scoreLabel}</span>
-        <span class="hist-label">${it.label}</span>
-        <span class="hist-score">${avgTxt}</span>
-        <span class="hist-price">${parseFloat(it.price).toFixed(2)}</span>
-      </div>`;
-  }).join('');
-}
-
-function renderScoreHistory() {
-  // Gunluk sekme backfill (gecmise donuk, gunde tek kayit) + canli veriyi
-  // birlikte kullanir. Saatlik/5-Dakikalik sekmeler SADECE canli (gercek
-  // gun-ici granulariteli) kayitlari kullanir - backfill'in gunde tek
-  // "00:00" kaydi bu sekmelerde yaniltici tek noktalar olarak gorunurdu.
-  const intraday = scoreHistoryRaw.filter(r => r.source !== 'backfill');
-  renderHistPanel('tab-daily', aggregateBy(scoreHistoryRaw, dayKey));
-  renderHistPanel('tab-hourly', aggregateBy(intraday, hourKey));
-  // 5 dakikalik ham veri: en son 300 kayit (yakl. son 25 saat), en yeni once
-  renderHistPanel('tab-raw', intraday.slice(-300).slice().reverse().map(r => ({
-    label: r.time, avg: r.score_raw, price: r.price,
-  })));
-}
-
-// Ana grafikteki mumlarin uzerine, skorun AL/GUCLU_AL/SAT/GUCLU_SAT'a YENI
-// GECTIGI gunlerde (onceki gune gore farkliysa - log_signal_changes()'in
-// "sadece durum degistiginde" mantigiyla AYNI, ama GUCLU disinda duz AL/SAT
-// gecislerini de kapsar) bir isaret koyar. Gunluk aggregateBy() ZATEN
-// backfill+canli veriyi birlestirip her gun icin tek bir ortalama skor
-// uretiyor (ayni Skor Gecmisi "Gunluk" sekmesinin kullandigi veri) - ekstra
-// bir istek/hesaplama gerekmez.
-// AL/GUCLU_AL tek bir "yukselis bolgesi", SAT/GUCLU_SAT tek bir "dusus
-// bolgesi" sayilir - ADX'in GUCLU esiginin (20) hemen etrafinda gun gun
-// gidip gelmesi (ayni trend surerken AL<->GUCLU_AL arasinda "titreme")
-// boylece tekrar tekrar isaretlenmiyor, sadece bolgenin kendisi degisince
-// (orn. NOTR/SAT'tan AL bolgesine girildiginde) yeni isaret konuyor.
-function markerZone(label) {
-  if (label === 'AL' || label === 'GUCLU_AL' || label === 'MUTLAK_AL') return 'AL_ZONE';
-  if (label === 'SAT' || label === 'GUCLU_SAT' || label === 'MUTLAK_SAT') return 'SAT_ZONE';
-  return 'NOTR';
-}
-
-function updateChartMarkers() {
-  if (!candleSeries) return;
-  // Skor Gecmisi 1 yil geriye gidiyor (SCORE_HISTORY_WINDOW_DAYS=365) ama
-  // grafikteki mumlar sadece ~3 ay - prevZone'u DOGRU takip etmek icin
-  // TUM yili kronolojik gezip geciSleri tespit ediyoruz, ama bir isaret
-  // SADECE o gun grafikte GERCEKTEN bir mum varsa (candleTimeMap'te) eklenir.
-  // Aksi halde lightweight-charts, grafigin disinda kalan (cok eski) tum
-  // isaretleri ilk muma yigip orada bir sembol yiginina donusturuyordu.
-  const daily = aggregateBy(scoreHistoryRaw, dayKey).slice().reverse(); // kronolojik (eskiden -> yeniye)
-  const markers = [];
-  let prevZone = null;
-  daily.forEach(d => {
-    const label = scoreLabelFromAvg(d.avg);
-    const zone = markerZone(label);
-    if (zone !== prevZone && MARKER_STYLES[label] && candleTimeMap.has(d.label)) {
-      markers.push({ time: d.label, ...MARKER_STYLES[label] });
-    }
-    prevZone = zone;
-  });
-  candleSeries.setMarkers(markers);
-}
-
-document.querySelectorAll('#score-tabs .tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('#score-tabs .tab-btn').forEach(b => b.classList.toggle('active', b === btn));
-    document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== `tab-${btn.dataset.tab}`; });
-  });
-});
-
-// Crosshair bir mumun/noktanin ustune gelince (ya da ayni "time" degerine
-// sahip MACD/RSI noktasina) o anin TUM gostergelerini (OHLC + EMA9/21 +
-// MACD/Sinyal + RSI) tek bir satirda gosterir - hangi grafigin crosshair'i
-// tetiklerse tetiklesin AYNI candleTimeMap/indicatorTimeMaps'ten okur.
-function fmtLegendNum(v) {
-  return (v === null || v === undefined || Number.isNaN(v)) ? '-' : v.toFixed(2);
-}
-
-// lightweight-charts, "YYYY-MM-DD" string verilen seriler icin crosshair
-// param.time'i bazen AYNI string, bazen {year,month,day} nesnesi olarak
-// dondurebiliyor - candleTimeMap/indicatorTimeMaps ise backend'den gelen
-// ORIJINAL string'lerle anahtarlanmis. Map aramasi patlamadan calissin diye
-// (nesne referans esitligi string'le asla eslesmez) her zaman "YYYY-MM-DD"
-// string'ine normalize edilir.
-function timeKey(t) {
-  if (t === undefined || t === null) return undefined;
-  if (typeof t === 'object' && 'year' in t) {
-    return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
-  }
-  return String(t);
-}
-
-function updateChartLegend(rawTime) {
-  const legend = document.getElementById('chart-legend');
-  if (!legend) return;
-  const time = timeKey(rawTime);
-  if (time === undefined) {
-    legend.innerHTML = '';
-    return;
-  }
-  const c = candleTimeMap.get(time);
-  const ema9v = indicatorTimeMaps.ema9 ? indicatorTimeMaps.ema9.get(time) : undefined;
-  const ema21v = indicatorTimeMaps.ema21 ? indicatorTimeMaps.ema21.get(time) : undefined;
-  const macdv = indicatorTimeMaps.macd ? indicatorTimeMaps.macd.get(time) : undefined;
-  const macdsv = indicatorTimeMaps.macd_signal ? indicatorTimeMaps.macd_signal.get(time) : undefined;
-  const rsiv = indicatorTimeMaps.rsi ? indicatorTimeMaps.rsi.get(time) : undefined;
-  legend.innerHTML = `
-    <span class="legend-date">${time}</span>
-    ${c ? `<span>A:${fmtLegendNum(c.open)} Y:${fmtLegendNum(c.high)} D:${fmtLegendNum(c.low)} K:${fmtLegendNum(c.close)}</span>` : ''}
-    <span style="color:#e8c547">EMA9: ${fmtLegendNum(ema9v)}</span>
-    <span style="color:#ff9f43">EMA21: ${fmtLegendNum(ema21v)}</span>
-    <span style="color:#5b9bd5">MACD: ${fmtLegendNum(macdv)}</span>
-    <span style="color:#ff9f43">Sinyal: ${fmtLegendNum(macdsv)}</span>
-    <span style="color:#e8c547">RSI: ${fmtLegendNum(rsiv)}</span>
-  `;
-}
-
-// Ana/MACD/RSI grafiklerinden biri olusturulunca cagrilir - o grafigin
-// crosshair hareketini dinler, legend'i gunceller VE diger iki grafigin
-// crosshair'ini AYNI zaman noktasina tasir (dikey cizgiler birlikte hareket
-// eder). crosshairSyncing kilidi, programatik tasimanin kendi
-// subscribeCrosshairMove'unu tekrar tetikleyip sonsuz dongu olusturmasini
-// onler. targetSeries fonksiyon CAGRILDIGINDA (closure degil) okunur, boylece
-// MACD/RSI serileri daha sonra olusturulsa bile guncel degerleri yakalar.
-function wireCrosshairSync(sourceChart) {
-  sourceChart.subscribeCrosshairMove(param => {
-    updateChartLegend(param.time);
-    if (crosshairSyncing) return;
-    crosshairSyncing = true;
-    try {
-      [[chart, candleSeries], [macdChart, macdHistSeries], [rsiChart, rsiSeries]].forEach(([c, s]) => {
-        if (!c || c === sourceChart) return;
-        if (param.time === undefined || !s) {
-          c.clearCrosshairPosition();
-        } else {
-          c.setCrosshairPosition(0, param.time, s);
-        }
-      });
-    } finally {
-      crosshairSyncing = false;
-    }
-  });
-}
-
-// Grafik alaninin uzerine binen durum katmani: sadece veri gelmedi/hata
-// mesaji icin kullanilir. mode: 'error' | 'hidden'.
-function setChartStatus(mode, message) {
-  const el = document.getElementById('chart-status');
-  if (mode === 'hidden') { el.hidden = true; return; }
-  el.hidden = false;
-  el.classList.add('error');
-  el.innerHTML = `<div>${message}</div>`;
-}
-
-// fetch()'in varsayilan davranisinda ZAMAN ASIMI YOK - Yahoo Finance yavas
-// yanit verirse (bu projede sikca yasandigi gibi) istek sonsuza kadar
-// bekleyip hic sonuclanmayabilir. AbortController ile sabit bir sure sonra
-// istek iptal edilip hata durumuna dusuluyor.
-function fetchWithTimeout(url, ms = 15000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
-}
-
-async function selectTicker(ticker) {
-  selectedTicker = ticker;
-  document.getElementById('side-empty').style.display = 'none';
-  document.getElementById('side-content').style.display = 'block';
-  document.getElementById('side-ticker').textContent = ticker;
-  updateWatchlistToggleButton();
-  // URL'nin sonuna secili hisseyi kucuk harfle ekler (orn. #thyao) - sayfa
-  // yeniden yuklendiginde ayni hisseyi otomatik acabilmek icin (asagida) ve
-  // linki paylasilabilir/yer imine eklenebilir yapmak icin. replaceState
-  // kullanilir, her tiklamada tarayici gecmisine yeni bir kayit eklenmez.
-  history.replaceState(null, '', '#' + ticker.toLowerCase());
-  // Secili satirin vurgusu bir sonraki 5 dakikalik yenilemeyi beklemeden
-  // aninda gorunsun diye tabloyu hemen yeniden ciziyoruz.
-  if (typeof renderTable === 'function') renderTable();
-
-  ensureChart();
-  // Checkbox'lar defaultta isaretli oldugu icin MACD/RSI panelleri de ilk
-  // hisse secildiginde (checkbox'a dokunulmadan) hazir olmali.
-  ensureMacdChart();
-  ensureRsiChart();
-
-  const myRequestId = ++chartRequestId;
-  // Onceki hissenin grafigi/indikatorleri hemen temizlenir, yeni veri gelene
-  // kadar eski hissenin mumlari arkada asili kalmaz.
-  candleSeries.setData([]);
-  candleSeries.setMarkers([]);
-  ema9Series.setData([]); ema21Series.setData([]);
-  bbUpperSeries.setData([]); bbMidSeries.setData([]); bbLowerSeries.setData([]);
-  if (macdHistSeries) { macdHistSeries.setData([]); macdLineSeries.setData([]); macdSignalSeries.setData([]); }
-  if (rsiSeries) rsiSeries.setData([]);
-  // Onceki secimden kalmis olabilecek hata mesaji varsa temizlenir - yukleme
-  // sirasinda herhangi bir gostergemiz yok, sadece hata olursa gorunur.
-  setChartStatus('hidden');
-
-  try {
-    const [histRes, scoreHistRes, indRes] = await Promise.all([
-      fetchWithTimeout(`/api/history/${ticker}`),
-      fetchWithTimeout(`/api/score-history/${ticker}`),
-      fetchWithTimeout(`/api/indicators/${ticker}`),
-    ]);
-    const candles = await histRes.json();
-    const scoreHist = await scoreHistRes.json();
-    const indData = await indRes.json();
-
-    if (myRequestId !== chartRequestId) return; // bu arada baska bir hisse secildi, bu sonuc artik eski
-
-    scoreHistoryRaw = scoreHist;
-    indicatorData = indData;
-
-    if (!Array.isArray(candles) || candles.length === 0) {
-      setChartStatus('error', 'Bu hisse icin grafik verisi bulunamadi.');
-      candleTimeMap = new Map();
-    } else {
-      candleSeries.setData(candles);
-      candleTimeMap = new Map(candles.map(c => [c.time, c]));
-      // Onceki hissede yapilmis olabilecek zoom/pan yeni hisseye tasinmasin -
-      // her hisse secildiginde grafik varsayilan (tum veriyi gosteren) goruntuye
-      // doner. Checkbox secimleri (EMA/BB/MACD/RSI acik/kapali) bundan etkilenmez.
-      chart.timeScale().fitContent();
-      setChartStatus('hidden');
-    }
-    applyIndicatorData();
-    renderScoreHistory();
-    updateChartMarkers();
-  } catch (e) {
-    if (myRequestId !== chartRequestId) return;
-    setChartStatus('error', 'Grafik yuklenemedi. Tekrar deneyin.');
-  }
 }
 
 // BIST sekmelerinin sagindaki doviz/emtia/BIST100/BTC seridi - hisse
