@@ -1552,10 +1552,11 @@ def manual_buy(ticker: str, allocation: float, price: float):
 
 
 def manual_sell(trade_id: int, price: float):
-    """Kullanicinin elle, istedigi an satmasi - sadece source='manual' VE
-    status='open' olan bir satir icin calisir (otomatik pozisyonlari
-    kullanici buradan kapatamaz, sadece kendi actiklarini). Basarisizsa
-    (satir yok/zaten kapali/baska birinin otomatik pozisyonu) None doner."""
+    """Kullanicinin elle, istedigi an satmasi - status='open' olan HERHANGI
+    bir pozisyon icin calisir, kaynagi (auto/manual) FARKETMEZ (2026-11-02'de
+    genisletildi - eskiden sadece source='manual' icin calisiyordu, kullanici
+    "otomatik ve manuel pozisyonlarda da Sat butonu aktif olsun" istedi).
+    Basarisizsa (satir yok/zaten kapali) None doner."""
     if price != price or price <= 0:
         return None
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1563,7 +1564,7 @@ def manual_sell(trade_id: int, price: float):
         conn = get_db_connection()
         try:
             pos = conn.execute(
-                "SELECT * FROM paper_trades WHERE id = ? AND status = 'open' AND source = 'manual'",
+                "SELECT * FROM paper_trades WHERE id = ? AND status = 'open'",
                 (trade_id,),
             ).fetchone()
             if pos is None:

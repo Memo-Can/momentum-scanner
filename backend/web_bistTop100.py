@@ -601,8 +601,9 @@ def api_paper_manual_buy():
 @app.route("/api/paper/manual-sell", methods=["POST"])
 @_login_required
 def api_paper_manual_sell():
-    """Kullanicinin elle, istedigi an satmasi - sadece kendi actigi
-    (source='manual') acik bir pozisyon icin calisir."""
+    """Kullanicinin elle, istedigi an satmasi - acik olan HERHANGI bir
+    pozisyon icin calisir, kaynagi (auto/manual) farketmez (2026-11-02'de
+    genisletildi, bkz. scanner.manual_sell())."""
     data = request.get_json(silent=True) or {}
     try:
         trade_id = int(data.get("trade_id"))

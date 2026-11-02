@@ -118,7 +118,7 @@ function parseTLAmount(str) {
   const val = parseFloat(normalized);
   return isNaN(val) ? NaN : val;
 }
-const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Sure Asimi', manual_sat_signal: 'Sinyal (SAT)' };
+const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Sure Asimi', manual_sat_signal: 'Sinyal (SAT)', manual: 'Elle Satis' };
 const PAPER_SOURCE_LABELS = { auto: 'Otomatik', manual: 'Manuel' };
 
 function renderPaperSummary(s) {
@@ -167,14 +167,16 @@ function renderPaperPositions(positions) {
       <td class="left">${escapeHtml((p.entry_time || '').slice(0, 16))}</td>
       <td class="left"></td>
     `;
-    if (p.source === 'manual') {
-      const sellBtn = document.createElement('button');
-      sellBtn.type = 'button';
-      sellBtn.className = 'paper-action-btn';
-      sellBtn.textContent = 'Sat';
-      sellBtn.onclick = (e) => { e.stopPropagation(); manualSellTrade(p.id); };
-      tr.lastElementChild.appendChild(sellBtn);
-    }
+    // "Sat" butonu artik KAYNAK FARKI OLMADAN (hem auto hem manual) acik
+    // pozisyonlarda gosteriliyor - kullanici istedigi an herhangi bir
+    // pozisyonu elle kapatabilsin diye (2026-11-02'de eklendi). manualSellTrade()
+    // zaten kendi icinde bir onay (confirm()) soruyor.
+    const sellBtn = document.createElement('button');
+    sellBtn.type = 'button';
+    sellBtn.className = 'paper-action-btn';
+    sellBtn.textContent = 'Sat';
+    sellBtn.onclick = (e) => { e.stopPropagation(); manualSellTrade(p.id, p.ticker); };
+    tr.lastElementChild.appendChild(sellBtn);
     tbody.appendChild(tr);
   });
 }
@@ -272,7 +274,12 @@ async function manualBuyFromWatchlist(ticker, amountStr) {
   }
 }
 
-async function manualSellTrade(tradeId) {
+async function manualSellTrade(tradeId, ticker) {
+  // Hem otomatik hem manuel pozisyonlar artik buradan kapatilabildigi icin
+  // (2026-11-02'de eklendi) yanlislikla tiklamaya karsi bir onay sorulur -
+  // GERI ALINAMAZ bir islem (satis).
+  const ok = confirm(`${ticker || 'Bu pozisyonu'} satmak istediginize emin misiniz? Bu islem geri alinamaz.`);
+  if (!ok) return;
   try {
     const res = await fetch('/api/paper/manual-sell', {
       method: 'POST',
