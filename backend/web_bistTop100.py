@@ -7,9 +7,13 @@ sadece bu veriyi bir arka plan thread'inde BIST_REFRESH_SECONDS'ta bir tazeleyip
 basit bir JSON API + HTML sayfasi uzerinden sunuyoruz. Tarama mantigi
 degismedi, sadece terminal yerine tarayicida gosteriliyor.
 
-Calistirmak icin:
+Lokal gelistirme icin calistirmak:
     python3 web_bistTop100.py
 Sonra tarayicida: http://127.0.0.1:5000
+
+Production'da (VPS) artik gunicorn kullaniliyor (bkz. CLAUDE.md "Deploy
+sureci" - TEK worker VE yuksek timeout ZORUNLU, nedeni orada aciklaniyor):
+    gunicorn -w 1 --worker-class gthread --threads 4 --timeout 180 -b 127.0.0.1:5000 web_bistTop100:app
 
 Sayfa acikken tablo BIST_REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
@@ -26,6 +30,7 @@ from datetime import datetime, timedelta
 import scanner_bistTop100 as scanner
 import yfinance as yf
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
@@ -34,16 +39,14 @@ app = Flask(
     template_folder=os.path.join(_FRONTEND_DIR, "templates"),
     static_folder=os.path.join(_FRONTEND_DIR, "static"),
 )
+# nginx reverse proxy X-Real-IP/X-Forwarded-For/X-Forwarded-Proto gonderiyor
+# (bkz. /etc/nginx/sites-available) - bu olmadan request.remote_addr HER ZAMAN
+# nginx'in kendi IP'sini (127.0.0.1) gorur, asagidaki login rate-limit'i de
+# gercek istemciyi degil tek bir "sahte" IP'yi sinirlardi.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 # Sadece tooltip'ler + Sanal Al-Sat bolumu icin tek-kullanicili basit giris -
 # coklu kullanici/kayit sistemi YOK. Sir (hash) asla koda/repoya yazilmaz,
 # Telegram bot token/Firebase kimlik dosyasiyla AYNI desen: ortam degiskeni.
-# FLASK_SECRET_KEY tanimli DEGILSE (lokal gelistirme, VPS'teki systemd servisi
-# bunu HER ZAMAN env ile verir) sabit bir lokal-dev anahtari kullanilir -
-# aksi halde secret_key=None oldugunda Flask'in session'i (session.clear() /
-# session["logged_in"]=True, _LOCAL_AUTO_LOGIN'in login()/logout()'ta
-# kullandigi) RuntimeError ile patlar. Bu anahtar ASLA production'da
-# kullanilmaz (VPS'te FLASK_SECRET_KEY zaten zorunlu/farkli bir deger).
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "local-dev-only-insecure-secret-key"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
@@ -53,6 +56,35 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 # sorulmadan otomatik giris yapilmis kabul edilir. Boylece lokalde her hisse
 # detayini/Sanal Al-Sat'i test etmek icin sir yonetmeye gerek kalmaz.
 _LOCAL_AUTO_LOGIN = not ADMIN_PASSWORD_HASH
+
+# FLASK_SECRET_KEY tanimliysa HER ZAMAN o kullanilir. Tanimli DEGILSE, SADECE
+# _LOCAL_AUTO_LOGIN (yani ADMIN_PASSWORD_HASH da tanimsiz - lokal gelistirme)
+# durumunda sabit bir lokal-dev anahtarina dusulur. ADMIN_PASSWORD_HASH
+# tanimliyken (= "production" sayilan her ortam, VPS'teki systemd dahil)
+# FLASK_SECRET_KEY eksikse uygulama ANINDA (import sirasinda) patlar - bu
+# BILINCLI bir fail-fast: eskiden boyle bir durumda sessizce bu sabit (git'te
+# herkese acik) anahtara dusuluyordu, bu da session cookie'lerinin sahte
+# imzalanip login'in tamamen atlanabilmesi anlamina gelirdi (2026-11-02'de
+# guvenlik taramasinda bulundu, bkz. CLAUDE.md). O sessiz dusus artik YASAK.
+_FLASK_SECRET_KEY_ENV = os.environ.get("FLASK_SECRET_KEY")
+if _FLASK_SECRET_KEY_ENV:
+    app.secret_key = _FLASK_SECRET_KEY_ENV
+elif _LOCAL_AUTO_LOGIN:
+    app.secret_key = "local-dev-only-insecure-secret-key"
+else:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY ortam degiskeni tanimli degil. ADMIN_PASSWORD_HASH "
+        "tanimli oldugu icin bu ortam production sayiliyor ve sabit/bilinen "
+        "bir anahtara sessizce dusulmesine izin verilmiyor - once FLASK_SECRET_KEY'i "
+        "export edin."
+    )
+
+# Sanal Al-Sat gibi para-benzeri verilere iliskin session cookie'si, production'da
+# (ADMIN_PASSWORD_HASH tanimliyken) SADECE HTTPS uzerinden gonderilsin diye
+# Secure isaretleniyor - lokal gelistirmede (http://127.0.0.1) bu True olsaydi
+# tarayici cookie'yi hic göndermez, login hemen kirilirdi, bu yuzden SADECE
+# production'da acik.
+app.config["SESSION_COOKIE_SECURE"] = not _LOCAL_AUTO_LOGIN
 
 
 def _is_logged_in():
@@ -244,6 +276,44 @@ def index():
     )
 
 
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5 dakika
+_login_attempts_lock = threading.Lock()
+_login_attempts = {}  # ip -> (pencere_baslangici, basarisiz_deneme_sayisi)
+
+
+def _login_rate_limited(ip: str) -> bool:
+    """Tek admin hesabina karsi sinirsiz sifre denemesini (online brute-force)
+    engellemek icin basit, bagimsizlik gerektirmeyen bir pencereli sayac -
+    2026-11-02'deki guvenlik taramasinda eklendi. gunicorn tek worker (-w 1)
+    ile calistigi icin bu bellek-ici dict process'ler arasinda bolunmuyor."""
+    now = time.time()
+    with _login_attempts_lock:
+        entry = _login_attempts.get(ip)
+        if entry is None:
+            return False
+        window_start, count = entry
+        if now - window_start > _LOGIN_WINDOW_SECONDS:
+            del _login_attempts[ip]
+            return False
+        return count >= _LOGIN_MAX_ATTEMPTS
+
+
+def _record_login_failure(ip: str) -> None:
+    now = time.time()
+    with _login_attempts_lock:
+        entry = _login_attempts.get(ip)
+        if entry is None or now - entry[0] > _LOGIN_WINDOW_SECONDS:
+            _login_attempts[ip] = (now, 1)
+        else:
+            _login_attempts[ip] = (entry[0], entry[1] + 1)
+
+
+def _clear_login_failures(ip: str) -> None:
+    with _login_attempts_lock:
+        _login_attempts.pop(ip, None)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     # Lokalde ADMIN_PASSWORD_HASH tanimli degilse (_LOCAL_AUTO_LOGIN) bu
@@ -256,6 +326,10 @@ def login():
         return redirect(url_for("index"))
     error = None
     if request.method == "POST":
+        ip = request.remote_addr or "unknown"
+        if _login_rate_limited(ip):
+            error = "Cok fazla basarisiz deneme yapildi - birkac dakika sonra tekrar deneyin."
+            return render_template("login.html", error=error), 429
         username = request.form.get("username", "")
         password = request.form.get("password", "")
         if (
@@ -263,9 +337,11 @@ def login():
             and username == ADMIN_USERNAME
             and check_password_hash(ADMIN_PASSWORD_HASH, password)
         ):
+            _clear_login_failures(ip)
             session.permanent = True
             session["logged_in"] = True
             return redirect(url_for("index"))
+        _record_login_failure(ip)
         error = "Kullanici adi veya sifre hatali."
     return render_template("login.html", error=error)
 
@@ -333,7 +409,11 @@ def api_history(ticker: str):
     try:
         hist = _get_raw_history(ticker)
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        # Ham exception metni (Yahoo/yfinance ic detaylari) istemciye
+        # sizdirilmiyor - sadece sunucu logunda tutulur (2026-11-02, guvenlik
+        # taramasi bulgusu).
+        print(f"api_history({ticker}) hatasi:", e)
+        return jsonify({"error": "veri alinamadi"}), 502
     if hist.empty:
         return jsonify(_cache_set(cache_key, []))
     recent = hist.tail(65)  # ~3 aylik islem gunu (6 aylik ham veriden son kismi)
@@ -414,7 +494,8 @@ def api_indicators(ticker: str):
     try:
         hist = _get_raw_history(ticker)
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        print(f"api_indicators({ticker}) hatasi:", e)
+        return jsonify({"error": "veri alinamadi"}), 502
     if hist.empty:
         return jsonify(_cache_set(cache_key, {}))
 
@@ -627,50 +708,28 @@ def api_paper_manual_sell():
     return jsonify(result)
 
 
-@app.route("/api/debug/test-telegram")
-@_login_required
-def api_debug_test_telegram():
-    """GECICI test endpoint'i (2026-10-28) - Telegram mesaj formatlarinin
-    hepsini (sinyal AL/SAT + otomatik alim/kar satisi/zarar satisi) gercek
-    gonderim fonksiyonlariyla (sahte ama belirgin TEST ticker'lariyla) bir
-    kez tetikler, boylece telefon uzerinden formati/ikonlari kontrol etmek
-    icin tarama dongusunun gercek bir sinyal/islem uretmesini beklemeye
-    gerek kalmaz. Kontrol bitince bu route KALDIRILACAK."""
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    scanner._send_push_notifications([
-        {"timestamp": now_str, "ticker": "TESTAL", "score": "GUCLU_AL", "price": 123.45, "daily_pct": 3.2},
-        {"timestamp": now_str, "ticker": "TESTSAT", "score": "GUCLU_SAT", "price": 67.89, "daily_pct": -2.5},
-    ])
-    scanner._send_paper_trade_notification({
-        "kind": "buy", "ticker": "TESTBUY", "price": 50.0, "shares": 2000.0,
-        "allocation": 100000.0, "timestamp": now_str,
-    })
-    scanner._send_paper_trade_notification({
-        "kind": "sell", "ticker": "TESTKAR", "entry_price": 50.0, "exit_price": 56.0,
-        "exit_reason": "target", "pnl": 12000.0, "timestamp": now_str,
-    })
-    scanner._send_paper_trade_notification({
-        "kind": "sell", "ticker": "TESTZARAR", "entry_price": 50.0, "exit_price": 46.0,
-        "exit_reason": "stop", "pnl": -8000.0, "timestamp": now_str,
-    })
-    return jsonify({"sent": 5})
-
+# scanner_bistTop100 import edilirken DB/tablolar zaten hazirlandi (bkz.
+# scanner._init_db()). Arka plan tarama thread'leri modul SEVIYESINDE
+# baslatiliyor (fonksiyon/if __name__ icinde DEGIL) - boylece hem
+# "python3 web_bistTop100.py" ile dogrudan calistirmada (asagidaki
+# __main__ bloğu) HEM DE "gunicorn web_bistTop100:app" ile (2026-11-02'de
+# Flask'in gelistirme sunucusu yerine gecildi, bkz. CLAUDE.md "Deploy
+# sureci" - Werkzeug dev sunucusu production icin tasarlanmamis) import
+# edildiginde thread'ler calismaya baslar - gunicorn __main__ bloğunu HIC
+# calistirmaz, modul import'u tek tetikleyicidir. gunicorn TEK worker
+# (-w 1) ile calistirilmali: birden fazla worker, her biri kendi
+# _scan_loop/_market_scan_loop kopyasini baslatip Yahoo'ya KAT KAT istek
+# atar VE her worker'in kendi bellek-ici _state/_chart_cache/_paper_last_score
+# kopyasi birbirinden habersiz kalir (bkz. scanner_bistTop100.py'deki
+# modul-seviyesi state'ler) - bu TEK process/TEK worker varsayimiyla
+# tasarlandi, degistirilmemeli.
+threading.Thread(target=_scan_loop, daemon=True).start()
+threading.Thread(target=_market_scan_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    # scanner_bistTop100 import edilirken DB/tablolar zaten hazirlandi
-    # (bkz. scanner._init_db()) - eskiden burada ayrica tum skor gecmisi
-    # dosyasi bellege okunurdu (buyuk dosyada birkac saniye surebiliyordu),
-    # SQLite'a gecince bu adima gerek kalmadi: her /api/score-history
-    # istegi indeksli bir sorguyla dogrudan DB'den okur.
-    threading.Thread(target=_scan_loop, daemon=True).start()
-    threading.Thread(target=_market_scan_loop, daemon=True).start()
-    # 127.0.0.1: bu Flask gelistirme sunucusu dogrudan disariya acik degil -
-    # VPS'te nginx bir reverse proxy olarak 80/443'ten 5000'e yonlendiriyor
-    # (bkz. /etc/nginx/sites-available/momentum-scanner), SSL sonlandirma da
-    # orada yapiliyor. Port 5000'in disaridan hic erisilememesi (sadece
-    # nginx uzerinden gecmesi) guvenlik icin onemli.
-    # threaded=True: bu olmadan Flask'in gelistirme sunucusu istekleri TEK TEK
-    # isler - bir hisseye tiklandiginda ayni anda atilan 3 istek (history/
-    # score-history/indicators) birbirini bloklardi, grafik "hic yuklenmiyor"
-    # gibi hissettirebilirdi (ozellikle Yahoo yavas/rate-limit yaptiginda).
+    # Sadece LOKAL gelistirme icin (python3 web_bistTop100.py) - production'da
+    # (VPS) artik gunicorn kullaniliyor, bu satir hic calismaz (bkz. yukarida).
+    # 127.0.0.1: bu gelistirme sunucusu dogrudan disariya acik degil.
+    # threaded=True: bir hisseye tiklandiginda ayni anda atilan 3 istek
+    # (history/score-history/indicators) birbirini bloklamasin diye.
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
