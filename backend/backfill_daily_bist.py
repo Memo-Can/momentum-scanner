@@ -11,14 +11,22 @@ daha once signal_5m'i TUM gecmis gunler icin NOTR sabitlemesi (Yahoo'nun 5
 dakikalik veriyi sadece ~60 gun geriye saklamasi yuzunden) gerekiyordu;
 simdi canli hesaplamayla ZATEN birebir aynisi, ayrica bir sinirlama/fark YOK.
 
+NOT (2026-11-01): Script artik DESTRUCTIVE (once sil, sonra yeniden yaz)
+DEGIL, EKLEMELI (additive) - her hisse icin BACKFILL_DAYS (varsayilan 365,
+"son 1 yil") kadar gecmis cekilip, SADECE score_history'de (herhangi bir
+source - 'live' ya da 'backfill') HENUZ OLMAYAN tarihler icin satir yazilir
+("eksik gunleri doldur" mantigi). Tekrar tekrar calistirmak ne veri kaybeder
+ne de satir biriktirir - zaten dolu olan gunlere DOKUNULMUYOR, sadece
+pencere icindeki eksik gunler (varsa) ekleniyor. Boylece orn. once 265 gunluk
+bir calistirma yapilmissa, sonra 365 gunle calistirinca SADECE aradaki eksik
+~100 gun (+ varsa yeni islem gunleri) eklenir, 265 gunluk kisim YENIDEN
+hesaplanip YAZILMAZ.
+
 Yazilan hedef (backend/data/momentum_scanner.db, scanner_bistTop100.py'nin
 SQLite veritabani - eskiden iki ayri backfill CSV'si idi):
-  score_history tablosu, source='backfill'  - her (tarih, ticker) icin bir skor satiri
-  signal_log tablosu, source='backfill'     - sadece GUCLU_AL/SAT'A GECIS gunleri
-                                               (log_signal_changes'in gecmise donuk hali)
-Her calistirmada ONCE mevcut source='backfill' satirlari SILINIR, sonra
-yeniden hesaplanan tam set eklenir (eski CSV'nin "w" modunda bastan yazimina
-denk) - boylece tekrar tekrar calistirmak satir biriktirmez.
+  score_history tablosu, source='backfill'  - eksik olan her (tarih, ticker) icin bir skor satiri
+  signal_log tablosu, source='backfill'     - yeni eklenen gunler icindeki GUCLU_AL/SAT/MUTLAK
+                                               gecisleri (log_signal_changes'in gecmise donuk hali)
 
 Calistirmak icin:
     python3 backfill_daily_bist.py [GERIYE_GIDILECEK_GUN_SAYISI]
@@ -36,15 +44,32 @@ import scanner_bistTop100 as scanner
 BACKFILL_DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 365
 BACKFILL_START = (datetime.now() - timedelta(days=BACKFILL_DAYS)).strftime("%Y-%m-%d")
 # Indikatorlerin (EMA21/MACD26+9/RSI14/BB20/ADX14) yakinsamasi icin
-# BACKFILL_START'tan ~6 ay once baslanir - ilk gunlerin degerleri de
-# saglikli olsun diye.
+# pencerenin ~6 ay oncesinden baslanir - ilk gunlerin degerleri de saglikli
+# olsun diye (bu gunler YAZILMAZ, sadece hesaplama icin kullanilir).
 WARMUP_START = (datetime.now() - timedelta(days=BACKFILL_DAYS + 180)).strftime("%Y-%m-%d")
 MAX_WORKERS = 12
 
 
-def compute_daily_rows(ticker: str, benchmark_pct):
-    """Bir hisse icin BACKFILL_START'tan bugune kadar HER islem gunu icin
-    bir skor satiri (score_raw, score, price) uretir."""
+def load_existing_dates() -> dict:
+    """score_history'deki (source farki YOK, 'live' + 'backfill' birlikte)
+    her ticker icin HALIHAZIRDA var olan tarihlerin kumesini TEK bir sorguyla
+    belleğe yukler - 628 hisse icin 628 ayri sorgu yerine."""
+    conn = scanner.get_db_connection()
+    try:
+        cur = conn.execute("SELECT ticker, substr(timestamp, 1, 10) AS d FROM score_history")
+        existing: dict = {}
+        for ticker, d in cur.fetchall():
+            existing.setdefault(ticker, set()).add(d)
+        return existing
+    finally:
+        conn.close()
+
+
+def compute_daily_rows(ticker: str, benchmark_pct, existing_dates: set):
+    """Bir hisse icin WARMUP_START'tan bugune kadar skor hesaplar, ama SADECE
+    (a) BACKFILL_DAYS penceresi icindeki VE (b) existing_dates'te (score_history'de
+    zaten var olan tarihler) OLMAYAN gunleri dondurur - "son 1 yilin eksik
+    gunlerini doldur" mantigi."""
     try:
         hist = yf.Ticker(ticker).history(start=WARMUP_START, interval="1d", auto_adjust=False)
     except Exception:
@@ -62,8 +87,11 @@ def compute_daily_rows(ticker: str, benchmark_pct):
 
     rows = []
     for ts in closes.index:
-        if ts.strftime("%Y-%m-%d") < BACKFILL_START:
-            continue
+        date_str = ts.strftime("%Y-%m-%d")
+        if date_str < BACKFILL_START:
+            continue  # sadece warmup/indikator hesaplamasi icin cekildi, pencere disinda - yazilmaz
+        if date_str in existing_dates:
+            continue  # bu gun zaten DB'de var (live ya da onceki backfill) - dokunma
 
         price = float(closes.loc[ts])
         e9, e21 = ema9.loc[ts], ema21.loc[ts]
@@ -88,7 +116,7 @@ def compute_daily_rows(ticker: str, benchmark_pct):
         score = scanner.confluence_label(signal_1d, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
 
         rows.append({
-            "date": ts.strftime("%Y-%m-%d"),
+            "date": date_str,
             "ticker": ticker.removesuffix(".IS"),
             "score_raw": score_raw,
             "score": score,
@@ -98,9 +126,14 @@ def compute_daily_rows(ticker: str, benchmark_pct):
 
 
 def signal_transitions(rows):
-    """Bir hissenin gunluk skor dizisinden SADECE MUTLAK_AL/GUCLU_AL/
-    GUCLU_SAT/MUTLAK_SAT'a GECIS gunlerini cikarir - log_signal_changes()'in
-    gecmise donuk karsiligi (bkz. scanner._STRONG_SIGNAL_LABELS)."""
+    """Bir hissenin (sadece YENI eklenen, kronolojik) gunluk skor dizisinden
+    SADECE MUTLAK_AL/GUCLU_AL/GUCLU_SAT/MUTLAK_SAT'a GECIS gunlerini cikarir -
+    log_signal_changes()'in gecmise donuk karsiligi (bkz.
+    scanner._STRONG_SIGNAL_LABELS). rows zaten sadece YENI eklenen (onceden
+    DB'de olmayan) gunleri icerdigi icin, bu gecisler SADECE o yeni blok
+    icinde tespit edilir - DB'de zaten var olan bitisik gunlerle olan sinirda
+    (eski gun -> yeni blokun ilk gunu) bir gecis atlanabilir, kabul edilen
+    kucuk bir sinir durumu."""
     transitions = []
     prev_score = None
     for row in rows:
@@ -113,8 +146,10 @@ def signal_transitions(rows):
 def main():
     print(f"BIST evreni cekiliyor (region=tr, filtresiz)...")
     tickers = scanner.fetch_all_bist_tickers()
-    print(f"{len(tickers)} hisse bulundu. Gecmis veri cekiliyor ({WARMUP_START} -> bugun, {BACKFILL_START}'tan itibaren yazilacak)...")
+    print(f"{len(tickers)} hisse bulundu. Mevcut score_history tarihleri yukleniyor...")
+    existing_by_ticker = load_existing_dates()
 
+    print(f"Gecmis veri cekiliyor ({WARMUP_START} -> bugun, {BACKFILL_START}'tan itibaren yazilacak, sadece eksik gunler)...")
     bench_hist = yf.Ticker(scanner.BENCHMARK_TICKER).history(start=WARMUP_START, interval="1d", auto_adjust=False)
     benchmark_pct = bench_hist["Close"].pct_change() * 100
 
@@ -122,7 +157,13 @@ def main():
     all_signal_rows = []
     done = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(compute_daily_rows, t, benchmark_pct): t for t in tickers}
+        futures = {
+            pool.submit(
+                compute_daily_rows, t, benchmark_pct,
+                existing_by_ticker.get(t.removesuffix(".IS"), set()),
+            ): t
+            for t in tickers
+        }
         for future in as_completed(futures):
             ticker = futures[future]
             done += 1
@@ -143,8 +184,8 @@ def main():
     with scanner._DB_LOCK:
         conn = scanner.get_db_connection()
         try:
-            conn.execute("DELETE FROM score_history WHERE source = 'backfill'")
-            conn.execute("DELETE FROM signal_log WHERE source = 'backfill'")
+            # ARTIK DESTRUCTIVE DEGIL - mevcut 'backfill'/'live' satirlarina
+            # DOKUNULMUYOR, sadece eksik (yeni) gunler EKLENIYOR.
             conn.executemany(
                 """INSERT INTO score_history (timestamp, ticker, score_raw, score, price, source)
                    VALUES (:timestamp, :ticker, :score_raw, :score, :price, 'backfill')""",
@@ -160,8 +201,8 @@ def main():
         finally:
             conn.close()
 
-    print(f"Tamamlandi: {len(all_score_rows)} skor satiri -> score_history (source='backfill')")
-    print(f"           {len(all_signal_rows)} GUCLU_AL/SAT gecisi -> signal_log (source='backfill')")
+    print(f"Tamamlandi: {len(all_score_rows)} YENI (eksik) skor satiri -> score_history (source='backfill')")
+    print(f"           {len(all_signal_rows)} YENI MUTLAK/GUCLU_AL/SAT gecisi -> signal_log (source='backfill')")
 
 
 if __name__ == "__main__":

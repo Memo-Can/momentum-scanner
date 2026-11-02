@@ -547,14 +547,18 @@ def api_paper_watchlist():
     watchlist = scanner.get_paper_watchlist()
     with _state_lock:
         price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
-    open_manual_tickers = {
-        p["ticker"] for p in scanner.get_paper_positions() if p["source"] == "manual"
-    }
+    # Kaynak farki YOK (auto ya da manual) - bir hisse ZATEN acik bir
+    # pozisyondaysa (hangi yoldan acilmis olursa olsun) takip listesinde
+    # "Al" butonu yerine "Pozisyon acik" gosterilmeli (2026-11-02'de
+    # duzeltildi - eskiden SADECE manual pozisyonlara bakiliyordu, auto
+    # tarafindan zaten alinmis bir hisse icin hala "Al" butonu gorunup
+    # tekrar manuel alim yapilabiliyordu, bkz. CLAUDE.md).
+    open_tickers = {p["ticker"] for p in scanner.get_paper_positions()}
     enriched = [
         {
             **w,
             "current_price": price_by_ticker.get(w["ticker"]),
-            "has_open_position": w["ticker"] in open_manual_tickers,
+            "has_open_position": w["ticker"] in open_tickers,
         }
         for w in watchlist
     ]

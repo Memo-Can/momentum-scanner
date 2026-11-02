@@ -330,6 +330,7 @@ ATR_TARGET_R = 3.0  # hedef mesafesi = stop mesafesi * bu katsayi (risk:odul ~1:
 # seviyeleri (ATR_TARGET_R) - backtest").
 WEEKLY_LOOKBACK_DAYS = 5  # "5D" - kayan pencere, takvim haftasi degil
 MONTHLY_LOOKBACK_DAYS = 21  # "1M" - ~1 aylik islem gunu sayisi, kayan pencere
+YEARLY_LOOKBACK_DAYS = 250  # "1Y" - ~1 yillik islem gunu sayisi (252'nin biraz altinda, tatil/kapanis farklarina karsi pay), kayan pencere
 
 # Yahoo'nun standart (Ingilizce) sektor isimlerini kisa Turkce kodlara cevirir.
 # Bu dosyada hisse listesi dinamik oldugu icin (sabit BIST30/100 degil), sabit
@@ -801,8 +802,13 @@ def fetch_row(ticker: str):
     try:
         tk = yf.Ticker(ticker)
         # MACD(26,9) ve RSI/BB'nin saglikli yakinsamasi icin en az ~35 gunluk
-        # mum gerekir - 2 ay yetersiz kalabildigi icin 6 aya cikarildi.
-        hist = tk.history(period="6mo", interval="1d", auto_adjust=False)
+        # mum gerekir - 2 ay yetersiz kalabildigi icin 6 aya, sonra 1Y
+        # sutunu (YEARLY_LOOKBACK_DAYS) icin 1 yila cikarildi (2026-11-02) -
+        # Yahoo istegi sayisi DEGISMEDI (hala hisse basina 1 istek), sadece
+        # donen veri daha genis bir tarih araligini kapsiyor; bu ayrica
+        # EMA/MACD/RSI/ADX gibi indikatorlerin yakinsamasini da iyilestiriyor
+        # (daha uzun isinma payi).
+        hist = tk.history(period="1y", interval="1d", auto_adjust=False)
         if hist.empty:
             return None
 
@@ -839,6 +845,7 @@ def fetch_row(ticker: str):
         # tablosunda gosterilmiyor, sadece web arayuzu icin.
         d5_pct = rolling_pct_change(closes, current_price, WEEKLY_LOOKBACK_DAYS)
         m1_pct = rolling_pct_change(closes, current_price, MONTHLY_LOOKBACK_DAYS)
+        y1_pct = rolling_pct_change(closes, current_price, YEARLY_LOOKBACK_DAYS)
 
         # Gunluk EMA kesisimi: zaten cekilmis olan gunluk kapanis serisi (closes)
         # uzerinden hesaplanir, ekstra Yahoo istegi gerekmez. (2026-10-31'de
@@ -910,6 +917,7 @@ def fetch_row(ticker: str):
             "daily": daily_pct,
             "d5": d5_pct,
             "m1": m1_pct,
+            "y1": y1_pct,
             "signal_1d": signal_1d,
             "signal_macd": signal_macd,
             "score": score,
@@ -996,6 +1004,32 @@ def _seed_last_logged_scores() -> None:
 
 
 _seed_last_logged_scores()
+
+
+def _seed_paper_last_score() -> None:
+    """Process (re)basladiginda _paper_last_score'u last_known_score
+    tablosundan doldurur - _seed_last_logged_scores() ile AYNI amac/desen
+    (restart'ta zaten GUCLU_AL/MUTLAK_AL durumunda olan hisseler YANLISLIKLA
+    'yeni gecis' sayilip otomatik satin ALINMASIN). Eskiden _paper_last_score
+    her restart'ta BOMBOS basliyordu, sadece "ilk dongude prev=None, hicbir
+    sey tetiklenmez" korumasina guveniliyordu - ama bu korumanin YAN ETKISI,
+    dinamik BIST 300 havuzuna HER GUN yeni giren bir hissenin (ilk kez
+    gorulduyor, prev=None) ZATEN GUCLU_AL/MUTLAK_AL olarak havuza girmesi
+    durumunda SONSUZA KADAR atlanmasiydi (sadece restart'ta degil, HER yeni
+    havuz girisinde) - 2026-11-02'de gercekten yasandi/bulundu (bkz.
+    CLAUDE.md). last_known_score'dan seed etmek restart korumasini ayni
+    sekilde saglarken, gercekten YENI (hic gorulmemis) bir hisseyi artik
+    kisitlamiyor - bkz. asagidaki run_paper_trading_cycle'daki degisiklik."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute("SELECT ticker, score FROM last_known_score").fetchall()
+        for row in rows:
+            _paper_last_score[row["ticker"]] = row["score"]
+    finally:
+        conn.close()
+
+
+_seed_paper_last_score()
 
 
 def _telegram_send(text: str) -> None:
@@ -1214,15 +1248,19 @@ def run_paper_trading_cycle(rows) -> None:
     icinde sarmali - burada beklenmeyen bir hata ana tarama/skor
     loglama akisini bozmamali.
 
-    1) Acik pozisyonlari cikis kurallarina gore kapatir - source='auto'
-       icin stop/hedef/SAT-veya-GUCLU_SAT-veya-MUTLAK_SAT sinyali/sure asimi
-       (ilk uyan kural kazanir, 2026-10-31'de sinyal kosulu GUCLU_SAT'tan
-       SAT'i de kapsayacak sekilde, 2026-11-01'de MUTLAK_SAT eklenince ona da
-       genisletildi); source='manual' icin SADECE SAT/GUCLU_SAT/MUTLAK_SAT
-       sinyali (stop/hedef/sure kurali YOK, bkz. asagida).
+    1) Acik pozisyonlari (source farki YOK, auto VE manual) cikis kuralina
+       gore kapatir - SADECE SAT/GUCLU_SAT/MUTLAK_SAT sinyaline donus
+       (2026-11-02'de kullanici istegiyle stop/hedef/21-gun sure asimi
+       kurallari TAMAMEN KALDIRILDI, bkz. asagida ve CLAUDE.md - artik
+       auto/manual arasinda cikis kurali FARKI yok, ikisi de SADECE sinyale
+       gore kapanir).
     2) rows'taki YENI GUCLU_AL/MUTLAK_AL gecislerini (_paper_last_score ile
        karsilastirarak, ikisi TEK bir "guclu alim bolgesi" sayilir) tespit
-       eder, acik slot kadarini sirayla satin alir.
+       eder, zaten ACIK bir pozisyonu (source farki YOK) olan ticker'lari
+       atlayarak acik slot kadarini sirayla satin alir. Pozisyon buyuklugu
+       SABIT bir deger DEGIL - her alimda o anki GUNCEL toplam deger
+       (nakit + acik pozisyonlarin o anki degeri) 5'e bolunerek hesaplanir
+       (2026-11-02'de kullanici istegiyle degistirildi, bkz. CLAUDE.md).
     3) Her dongude bir equity (nakit + acik pozisyon degeri) satiri
        loglar."""
     now = datetime.now()
@@ -1239,12 +1277,11 @@ def run_paper_trading_cycle(rows) -> None:
         try:
             cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
             # Hem source='auto' HEM source='manual' acik pozisyonlar burada
-            # kontrol edilir, ama cikis kurallari FARKLI (asagidaki dallanmaya
-            # bak) - manuel pozisyonlara stop/hedef/sure kurali HALA
-            # UYGULANMAZ, kullanicinin "Sat" butonuyla elle kapatmasi hala
-            # gecerli (manual_sell()) - sadece SAT/GUCLU_SAT/MUTLAK_SAT
-            # sinyali artik EK bir otomatik cikis yolu (2026-10-31'de
-            # kullanici istegiyle eklendi, bkz. CLAUDE.md).
+            # kontrol edilir ve ARTIK AYNI tek kuralla kapatiliyor - SADECE
+            # SAT/GUCLU_SAT/MUTLAK_SAT sinyaline donus (2026-11-02'de
+            # kullanici istegiyle stop/hedef/sure kurallari kaldirildi).
+            # Kullanici "Sat" butonuyla manuel pozisyonu HER ZAMAN elle de
+            # kapatabilir (manual_sell()), bu degismedi.
             open_positions = [
                 dict(r)
                 for r in conn.execute(
@@ -1260,17 +1297,8 @@ def run_paper_trading_cycle(rows) -> None:
 
                 price = row["price"]
                 exit_reason = None
-                if pos["source"] == "auto":
-                    if pos["stop_price"] is not None and price <= pos["stop_price"]:
-                        exit_reason = "stop"
-                    elif pos["target_price"] is not None and price >= pos["target_price"]:
-                        exit_reason = "target"
-                    elif row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
-                        exit_reason = "signal_reversal"
-                    elif now_str >= pos["max_hold_until"]:
-                        exit_reason = "time_stop"
-                elif row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
-                    exit_reason = "manual_sat_signal"
+                if row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
+                    exit_reason = "signal_reversal" if pos["source"] == "auto" else "manual_sat_signal"
 
                 if exit_reason is not None:
                     pnl = (price - pos["entry_price"]) * pos["shares"]
@@ -1292,24 +1320,56 @@ def run_paper_trading_cycle(rows) -> None:
                         "timestamp": now_str,
                     })
 
-            # SADECE source='auto' - 5-slot limiti manuel pozisyonlari
-            # SAYMAZ (open_positions artik ikisini de iceriyor, bkz. yukarida).
-            open_tickers = {p["ticker"] for p in open_positions if p["source"] == "auto"} - closed_this_cycle
-            open_count = len(open_tickers)
+            # 5-slot limiti SADECE source='auto' pozisyonlari SAYAR (manuel
+            # pozisyonlar hala limite dahil degil, DEGISMEDI) - ama "bu
+            # ticker ZATEN acik mi" (yinelenen alim engeli) kontrolu artik
+            # source farki YOK, TUM acik pozisyonlara bakiyor (2026-11-02'de
+            # kullanici istegiyle eklendi - eskiden sadece 'auto' pozisyonlar
+            # sayildigi icin manuel elde tutulan bir hisse otomatik sistem
+            # tarafindan TEKRAR satin alinabiliyordu, bkz. CLAUDE.md).
+            auto_open_tickers = {p["ticker"] for p in open_positions if p["source"] == "auto"} - closed_this_cycle
+            held_tickers = {p["ticker"] for p in open_positions} - closed_this_cycle
+            open_count = len(auto_open_tickers)
+
+            # Pozisyon buyuklugu icin GUNCEL toplam deger (nakit + henuz
+            # KAPANMAMIS acik pozisyonlarin o anki fiyatla degeri) hesaplanir -
+            # sabit PAPER_STARTING_BALANCE DEGIL (2026-11-02'de kullanici
+            # istegiyle degistirildi: "toplam bakiye ne kadarsa 5'e bolunsun,
+            # ana para hic asilmasin" - bkz. CLAUDE.md). Nakit zaten yukarida
+            # kapanan pozisyonlardan gelen satis geliriyle guncellendi;
+            # positions_value SADECE hala acik olan (bu dongude kapanmamis)
+            # pozisyonlari sayar, kapananlari TEKRAR saymamak icin.
+            still_open_value = 0.0
+            for p in open_positions:
+                if p["ticker"] in closed_this_cycle:
+                    continue
+                r = rows_by_ticker.get(p["ticker"])
+                if r is not None and r["price"] == r["price"]:  # NaN degilse
+                    still_open_value += r["price"] * p["shares"]
+            current_equity = cash + still_open_value
+            per_slot_amount = current_equity / PAPER_MAX_POSITIONS
 
             # YENI GUCLU_AL/MUTLAK_AL gecislerini tespit et - ikisi TEK bir
             # "guclu alim bolgesi" sayilir (frontend'deki markerZone() ile
             # AYNI mantik): GUCLU_AL<->MUTLAK_AL arasinda (bolgenin
             # KENDISI degismeden) gidip gelmek YENI alim tetiklemez, sadece
-            # bolgenin DISINDAN (AL/NOTR/SAT/...) icine girmek tetikler.
-            # rows zaten skor gucu + gunluk % sirali (bkz. web_bistTop100.py:
-            # _scan_once()'taki _sort_key), bu yuzden candidate_tickers de
-            # dogal olarak o oncelik sirasinda.
+            # bolgenin DISINDAN (AL/NOTR/SAT/.../hic gorulmemis) icine girmek
+            # tetikler. "hic gorulmemis" (prev=None) BILINCLI olarak "bolge
+            # disi" sayilir (prev is not None kontrolu KALDIRILDI, 2026-11-02) -
+            # restart korumasi artik _seed_paper_last_score()'un last_known_score'dan
+            # yaptigi seed ile saglaniyor, bu yuzden prev=None SADECE gercekten
+            # YENI (ilk kez dinamik BIST 300 havuzuna giren) bir hisse icin
+            # olur ve bu da GECERLI bir alim adayi sayilmali - eskiden boyle
+            # bir hisse ZATEN GUCLU_AL/MUTLAK_AL olarak havuza girdiginde
+            # SONSUZA KADAR atlaniyordu (bkz. CLAUDE.md). rows zaten skor
+            # gucu + gunluk % sirali (bkz. web_bistTop100.py: _scan_once()'taki
+            # _sort_key), bu yuzden candidate_tickers de dogal olarak o
+            # oncelik sirasinda.
             candidates = []
             for row in rows:
                 ticker = row["ticker"]
                 prev = _paper_last_score.get(ticker)
-                if prev is not None and prev not in _STRONG_BUY_ZONE and row["score"] in _STRONG_BUY_ZONE:
+                if prev not in _STRONG_BUY_ZONE and row["score"] in _STRONG_BUY_ZONE:
                     candidates.append(row)
                 _paper_last_score[ticker] = row["score"]
 
@@ -1318,8 +1378,8 @@ def run_paper_trading_cycle(rows) -> None:
                 if free_slots <= 0:
                     break
                 ticker = row["ticker"]
-                if ticker in open_tickers or ticker in closed_this_cycle:
-                    continue
+                if ticker in held_tickers or ticker in closed_this_cycle:
+                    continue  # bu hisse ZATEN acik (kaynagi auto ya da manual farketmez) - tekrar alinmaz
                 if row.get("swing_stop") is None or row.get("swing_target") is None:
                     continue  # ATR verisi yetersiz - guvenli bir stop/hedef yok
                 vol20 = row.get("vol20")
@@ -1329,7 +1389,7 @@ def run_paper_trading_cycle(rows) -> None:
                 if price != price or price <= 0:
                     continue  # NaN/gecersiz fiyat (data glitch) - bu dongu atlanir
 
-                allocation = min(PAPER_STARTING_BALANCE / PAPER_MAX_POSITIONS, cash)
+                allocation = min(per_slot_amount, cash)
                 if allocation <= 0:
                     break
                 shares = allocation / price
@@ -1342,7 +1402,7 @@ def run_paper_trading_cycle(rows) -> None:
                     (ticker, now_str, price, shares, allocation, row["swing_stop"], row["swing_target"], max_hold_until),
                 )
                 cash -= allocation
-                open_tickers.add(ticker)
+                held_tickers.add(ticker)
                 free_slots -= 1
                 trade_events.append({
                     "kind": "buy",
@@ -1452,7 +1512,9 @@ def remove_from_paper_watchlist(ticker: str) -> None:
 def manual_buy(ticker: str, allocation: float, price: float):
     """Kullanicinin elle, istedigi an, istedigi tutarla satin almasi -
     otomatik sistemin 5-slot limitine DAHIL DEGIL, tek siniri mevcut nakit.
-    Basarisizsa (tutar<=0, fiyat gecersiz, nakit yetersiz) None doner."""
+    Basarisizsa (tutar<=0, fiyat gecersiz, nakit yetersiz, bu ticker'da
+    ZATEN acik bir pozisyon varsa - kaynagi auto ya da manual farketmez,
+    2026-11-02'de eklendi) None doner."""
     if allocation <= 0 or price != price or price <= 0:
         return None
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1462,10 +1524,18 @@ def manual_buy(ticker: str, allocation: float, price: float):
             cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
             if allocation > cash:
                 return None
+            already_open = conn.execute(
+                "SELECT 1 FROM paper_trades WHERE ticker = ? AND status = 'open' LIMIT 1", (ticker,)
+            ).fetchone()
+            if already_open is not None:
+                return None
             shares = allocation / price
-            # swing_stop/target sadece BILGI amacli gosterilir - manuel
-            # pozisyonlar run_paper_trading_cycle() tarafindan otomatik
-            # kapatilmaz (bkz. yukarida source='auto' filtresi).
+            # Manuel pozisyonlarda stop_price/target_price hic YOK (NULL) -
+            # zaten run_paper_trading_cycle() artik (auto'da da) bunlari
+            # cikis kararinda KULLANMIYOR, sadece bilgi/gosterim icin auto
+            # pozisyonlarda saklaniyor. max_hold_until de artik bir cikis
+            # kurali tetiklemiyor (2026-11-02'de kaldirildi), sadece
+            # referans icin hesaplanip saklaniyor.
             max_hold_until = (datetime.now() + timedelta(days=PAPER_MAX_HOLD_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
             cur = conn.execute(
                 """INSERT INTO paper_trades

@@ -139,13 +139,6 @@
     opacity: 1;
     visibility: visible;
   }
-  /* GunStop/GunHedef/SwStop/SwHedef sutunlari (stop-loss/hedef fiyatlari) -
-     tooltip'lerle AYNI CSS-tabanli gizleme deseni: veri API'den hala geliyor,
-     sadece giris yapilmamisken th+td ciftleri (ayni class, ayni sutun index'i)
-     gorsel olarak gizleniyor - tablo hizalamasi bozulmuyor. */
-  body:not(.logged-in) .login-only-col {
-    display: none;
-  }
   /* En sagdaki sutunlarda popup ekran disina taşmasin diye saga yasla */
   thead th[data-tip]:nth-last-child(-n+3)::after {
     left: auto;
