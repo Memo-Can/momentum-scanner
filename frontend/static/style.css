@@ -151,7 +151,13 @@
   tbody td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #1d2029; }
   tbody td.left { text-align: left; font-weight: 600; }
   tbody tr { cursor: pointer; }
-  tbody tr:hover { background: #1b1f29; }
+  /* (hover: hover) olmayan (dokunmatik) cihazlarda tiklama/secim sonrasi
+     :hover sinifi gercek imlec olmadigi icin "yapismis" gorunuyordu - bu
+     yuzden hover arka plani SADECE gercek imleci olan cihazlarda uygulanir
+     (2026-11-02, kullanici bildirimiyle duzeltildi). */
+  @media (hover: hover) and (pointer: fine) {
+    tbody tr:hover { background: #1b1f29; }
+  }
   tbody tr.selected { background: #2a2f45; box-shadow: inset 3px 0 0 var(--yellow); }
   .pos { color: var(--green); }
   .neg { color: var(--red); }
