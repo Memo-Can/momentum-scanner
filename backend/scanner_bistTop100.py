@@ -1065,6 +1065,20 @@ def _send_push_notifications(entries) -> None:
     """entries (log_signal_changes'in az once tespit ettigi MUTLAK_AL/
     GUCLU_AL/GUCLU_SAT/MUTLAK_SAT gecisleri) icin Telegram'a bir mesaj
     gonderir."""
+    # Sanal Al-Sat'ta (kaynak auto/manual farki yok) ZATEN ACIK pozisyonu
+    # olan hisseler icin GUCLU_AL/MUTLAK_AL bildirimi tekrar gonderilmez
+    # (2026-11-02, kullanici istegi) - "elimde zaten var" bilgisini tekrar
+    # tekrar Telegram'a bildirmenin anlami yok, ilk alim aninda ZATEN ayrica
+    # bir "🛒 SANAL ALIM" bildirimi gonderiliyor (bkz. _send_paper_trade_notification).
+    # Bu kontrol log_signal_changes()'in signal_log'a YAZMASINI etkilemez -
+    # sadece push gonderimi atlanir, tarihsel kayit kesintisiz devam eder.
+    # Not: run_paper_trading_cycle() bu fonksiyondan SONRA cagrildigi icin
+    # (bkz. web_bistTop100.py: _scan_once()) burada okunan pozisyon listesi
+    # bu dongude YENI acilan bir alimi henuz icermez - yani bir hisse GUCLU_AL/
+    # MUTLAK_AL'a ILK girdigi dongude (tam alim tetiklendigi an) bildirim HALA
+    # gonderilir, SADECE zaten ONCEKI bir dongude acilmis pozisyonlar icin
+    # bastirilir.
+    held_tickers = {p["ticker"] for p in get_paper_positions()}
     for entry in entries:
         # GUCLU_SAT/MUTLAK_SAT bildirimleri KULLANICI ISTEGIYLE gecici olarak
         # KAPATILDI (2026-10-30, MUTLAK_SAT eklenince 2026-11-01'de buraya da
@@ -1076,6 +1090,8 @@ def _send_push_notifications(entries) -> None:
         # log_signal_changes()) - sadece push gonderimi atlaniyor. Tekrar
         # acmak icin asagidaki continue satirini kaldir.
         if entry["score"] in ("GUCLU_SAT", "MUTLAK_SAT"):
+            continue
+        if entry["ticker"] in held_tickers:
             continue
         # Telegram mesajlarinda gercek metin rengi desteklenmiyor - yesil/kirmizi
         # algisi icin renkli daire emoji kullanilir (AL taraf=yesil, SAT taraf=kirmizi) -
