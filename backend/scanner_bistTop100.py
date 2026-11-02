@@ -125,6 +125,30 @@ BIST100_TICKERS = [
 ]
 BIST100_TICKERS = [f"{t}.IS" for t in BIST100_TICKERS]
 
+# Yukaridaki iki listenin SON insan dogrulamasinin yapildigi tarih - endeks
+# ceyreklik yeniden dengelendigi icin bu tarih eskiyince listelerin Borsa
+# Istanbul'un resmi XU030/XU100 uyelik listesiyle tekrar karsilastirilmasi
+# gerekir. Otomatik bir kaynaktan cekilmiyor (resmi API/scrape YOK, bilerek
+# elle girilmis - bkz. yukaridaki yorumlar), bu yuzden otomatik
+# GUNCELLENEMEZ; asagidaki kontrol SADECE servis her baslatildiginda bir
+# konsol/journalctl hatirlatmasi basar.
+BIST_INDEX_LISTS_VERIFIED_ON = "2026-09-01"
+
+
+def _check_index_lists_freshness() -> None:
+    verified = datetime.strptime(BIST_INDEX_LISTS_VERIFIED_ON, "%Y-%m-%d")
+    days_since = (datetime.now() - verified).days
+    if days_since > 95:  # ~1 ceyrek (endeks rebalans periyodu)
+        print(
+            f"[UYARI] BIST30/100_TICKERS listeleri {days_since} gundur dogrulanmadi "
+            f"(son dogrulama: {BIST_INDEX_LISTS_VERIFIED_ON}) - Borsa Istanbul'un "
+            f"resmi XU030/XU100 uye listesiyle karsilastir, gerekirse listeleri "
+            f"guncelle ve BIST_INDEX_LISTS_VERIFIED_ON'u bugune cek."
+        )
+
+
+_check_index_lists_freshness()
+
 # GUCLU_AL/GUCLU_SAT sinyallerinin gecmisini ve her dongudeki skor gecmisini
 # kaydeder - zamanla bu kayitlara bakip Skor'un gercekte ise yarayip
 # yaramadigini (sinyalden sonra fiyat ne oldu) kendi verinizle
@@ -1051,6 +1075,18 @@ def _telegram_send(text: str) -> None:
         urllib.request.urlopen(req, timeout=10).close()
     except Exception as e:
         print("Telegram bildirimi gonderilemedi:", e)
+
+
+def send_health_alert(text: str) -> None:
+    """Tarama dongusunun kendi kendini izleyen basit saglik uyarisi -
+    web_bistTop100.py: _scan_loop() ardisik birkac basarisiz _scan_once()
+    denemesinden sonra bunu cagirir (bkz. oradaki _SCAN_FAILURE_ALERT_THRESHOLD).
+    _telegram_send ile AYNI alt yapiyi kullanir (token/chat_id tanimli
+    degilse sessizce atlar) - amac sadece "servis sessizce veri cekmeyi
+    durdurdu, kimse haberdar degil" durumunu yakalamak, 5 dakikalik Yahoo
+    rate-limit dalgalanmalarini degil (tek seferlik hatalar bunu TETIKLEMEZ,
+    sadece UST USTE ayni dongude basarisizlik tetikler)."""
+    _telegram_send(f"⚠️ {text}")
 
 
 _SIGNAL_NOTIFY_LABELS = {

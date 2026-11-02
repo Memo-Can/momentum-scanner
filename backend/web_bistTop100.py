@@ -209,6 +209,16 @@ def _scan_once():
         _state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# Ardisik kac basarisiz _scan_once() denemesinden sonra Telegram'a bir
+# saglik uyarisi gonderilsin - 3 x BIST_REFRESH_SECONDS (varsayilan 5dk) =
+# ~15 dakika. Tek seferlik/gecici bir hata (ornegin anlik bir Yahoo
+# zaman asimi) BUNU TETIKLEMEZ, sadece UST USTE basarisizlik tetikler -
+# amac "servis sessizce veri cekmeyi durdurdu" durumunu yakalamak.
+_SCAN_FAILURE_ALERT_THRESHOLD = 3
+_scan_failure_count = 0
+_scan_health_alert_sent = False  # esik asildiktan sonra TEK bir uyari gonderilsin, her dongude tekrar DEGIL
+
+
 def _scan_loop():
     # BIST kapaliyken (hafta sonu / app_settings.json'daki BIST_MARKET_OPEN_*-
     # BIST_MARKET_CLOSE_* penceresi disinda) Yahoo'ya bos yere istek atmamak
@@ -217,12 +227,22 @@ def _scan_loop():
     # bir BIST_REFRESH_SECONDS gecikmeyle) tarama kendiliginden devam eder.
     # Market seridi (_market_scan_loop) buna TABI DEGIL - doviz/emtia/
     # kripto BIST disi saatlerde de islem goruyor.
+    global _scan_failure_count, _scan_health_alert_sent
     while True:
         try:
             if scanner.is_market_open():
                 _scan_once()
+            _scan_failure_count = 0
+            _scan_health_alert_sent = False
         except Exception as e:
             print("Tarama hatasi:", e)
+            _scan_failure_count += 1
+            if _scan_failure_count >= _SCAN_FAILURE_ALERT_THRESHOLD and not _scan_health_alert_sent:
+                scanner.send_health_alert(
+                    f"BIST tarama dongusu {_scan_failure_count} kez ust uste basarisiz oldu.\n"
+                    f"Son hata: {e}"
+                )
+                _scan_health_alert_sent = True
         time.sleep(scanner.BIST_REFRESH_SECONDS)
 
 

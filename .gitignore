@@ -9,3 +9,4 @@ momentum_scanner.db-wal
 momentum_scanner.db-shm
 device_tokens_*.json
 firebase-service-account.json
+_db_backups/
