@@ -4,67 +4,67 @@
       <h2>Sanal Al-Sat</h2>
     </div>
     <div id="paper-body">
-      <div class="sub">GUCLU AL veya MUTLAK AL'a yeni gecen hisseler otomatik "satin alinir" - SAT, GUCLU SAT ya da MUTLAK SAT sinyaline donunce "satilir" (stop/hedef/sure asimi artik kullanilmiyor). Gercek para degildir, sadece Skor'un performansini olcmek icindir.</div>
+      <div class="sub">GÜÇLÜ AL veya MUTLAK AL'a yeni geçen hisseler otomatik "satın alınır" - SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönünce "satılır" (stop/hedef/süre aşımı artık kullanılmıyor). Gerçek para değildir, sadece Skor'un performansını ölçmek içindir.</div>
       <div id="paper-summary"></div>
       <div id="paper-cash-edit">
         <input type="text" inputmode="decimal" id="paper-cash-input" placeholder="Yeni nakit (TL)">
-        <button id="paper-cash-save" type="button">Nakti Guncelle</button>
+        <button id="paper-cash-save" type="button">Nakti Güncelle</button>
         <span id="paper-cash-msg"></span>
-        <button id="paper-reset" type="button" class="paper-action-btn-muted">Her Seyi Sifirla</button>
+        <button id="paper-reset" type="button" class="paper-action-btn-muted">Her Şeyi Sıfırla</button>
       </div>
       <h3>Manuel Takip Listesi</h3>
-      <div class="sub">Yan panelden "Sanal Al-Sat Takibine Ekle" ile eklenen hisseler - istedigin an, istedigin tutarla elle al/sat. Otomatik sistemin 5 pozisyon limitine DAHIL DEGIL. Aldigin bir hisse SAT, GUCLU SAT ya da MUTLAK SAT sinyaline donerse otomatik olarak satilir (ayrica elinle de istedigin an satabilirsin).</div>
+      <div class="sub">Yan panelden "Sanal Al-Sat Takibine Ekle" ile eklenen hisseler - istediğin an, istediğin tutarla elle al/sat. Otomatik sistemin 5 pozisyon limitine DAHİL DEĞİL. Aldığın bir hisse SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönerse otomatik olarak satılır (ayrıca elinle de istediğin an satabilirsin).</div>
       <div id="paper-watchlist-wrap">
         <table>
           <thead>
             <tr>
               <th class="left">Hisse</th>
-              <th>Guncel Fiyat</th>
+              <th>Güncel Fiyat</th>
               <th>Tutar (TL)</th>
-              <th class="left">Islem</th>
+              <th class="left">İşlem</th>
             </tr>
           </thead>
           <tbody id="paper-watchlist"></tbody>
         </table>
-        <div id="paper-watchlist-empty" hidden>Takip listesi bos - bir hisseyi secip yan panelden ekleyebilirsin.</div>
+        <div id="paper-watchlist-empty" hidden>Takip listesi boş - bir hisseyi seçip yan panelden ekleyebilirsin.</div>
       </div>
-      <h3>Acik Pozisyonlar</h3>
+      <h3>Açık Pozisyonlar</h3>
       <div id="paper-positions-wrap">
         <table>
           <thead>
             <tr>
               <th class="left">Hisse</th>
               <th class="left">Kaynak</th>
-              <th>Giris Fiyati</th>
-              <th>Guncel Fiyat</th>
+              <th>Giriş Fiyatı</th>
+              <th>Güncel Fiyat</th>
               <th>K/Z</th>
               <th>Stop</th>
               <th>Hedef</th>
-              <th class="left">Giris Tarihi</th>
-              <th class="left">Islem</th>
+              <th class="left">Giriş Tarihi</th>
+              <th class="left">İşlem</th>
             </tr>
           </thead>
           <tbody id="paper-positions"></tbody>
         </table>
-        <div id="paper-empty" hidden>Su an acik pozisyon yok.</div>
+        <div id="paper-empty" hidden>Şu an açık pozisyon yok.</div>
       </div>
-      <h3>Kapanan Islemler</h3>
+      <h3>Kapanan İşlemler</h3>
       <div id="paper-trades-wrap">
         <table>
           <thead>
             <tr>
               <th class="left">Hisse</th>
               <th class="left">Kaynak</th>
-              <th>Giris Fiyati</th>
-              <th>Cikis Fiyati</th>
+              <th>Giriş Fiyatı</th>
+              <th>Çıkış Fiyatı</th>
               <th>K/Z</th>
-              <th class="left">Cikis Nedeni</th>
-              <th class="left">Cikis Tarihi</th>
+              <th class="left">Çıkış Nedeni</th>
+              <th class="left">Çıkış Tarihi</th>
             </tr>
           </thead>
           <tbody id="paper-trades"></tbody>
         </table>
-        <div id="paper-trades-empty" hidden>Henuz kapanan islem yok.</div>
+        <div id="paper-trades-empty" hidden>Henüz kapanan işlem yok.</div>
       </div>
     </div>
   </section>
@@ -118,7 +118,7 @@ function parseTLAmount(str) {
   const val = parseFloat(normalized);
   return isNaN(val) ? NaN : val;
 }
-const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Sure Asimi', manual_sat_signal: 'Sinyal (SAT)', manual: 'Elle Satis' };
+const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Süre Aşımı', manual_sat_signal: 'Sinyal (SAT)', manual: 'Elle Satış' };
 const PAPER_SOURCE_LABELS = { auto: 'Otomatik', manual: 'Manuel' };
 
 function renderPaperSummary(s) {
@@ -127,12 +127,12 @@ function renderPaperSummary(s) {
   const totalPct = s.starting_balance ? (s.total_pnl / s.starting_balance * 100) : null;
   wrap.innerHTML = `
     <div class="stat">Nakit<b>${fmtPaperMoney(s.cash)}</b></div>
-    <div class="stat">Acik Pozisyon Degeri<b>${fmtPaperMoney(s.positions_value)}</b></div>
-    <div class="stat">Toplam Deger<b>${fmtPaperMoney(s.equity)}</b></div>
+    <div class="stat">Açık Pozisyon Değeri<b>${fmtPaperMoney(s.positions_value)}</b></div>
+    <div class="stat">Toplam Değer<b>${fmtPaperMoney(s.equity)}</b></div>
     <div class="stat">Toplam K/Z<b class="${pctClass(s.total_pnl)}">${fmtPaperMoney(s.total_pnl)} (${fmtPct(totalPct)})</b></div>
-    <div class="stat">Acik Pozisyon<b>${s.open_positions} / 5</b></div>
-    <div class="stat">Kapanan Islem<b>${s.closed_trades}</b></div>
-    <div class="stat">Kazanma Orani<b>${s.win_rate === null || s.win_rate === undefined ? '-' : s.win_rate.toFixed(0) + '%'}</b></div>
+    <div class="stat">Açık Pozisyon<b>${s.open_positions} / 5</b></div>
+    <div class="stat">Kapanan İşlem<b>${s.closed_trades}</b></div>
+    <div class="stat">Kazanma Oranı<b>${s.win_rate === null || s.win_rate === undefined ? '-' : s.win_rate.toFixed(0) + '%'}</b></div>
   `;
 }
 
@@ -224,7 +224,7 @@ function renderPaperWatchlist(items) {
     if (w.has_open_position) {
       amountTd.textContent = '-';
       const info = document.createElement('span');
-      info.textContent = "Pozisyon acik (Acik Pozisyonlar'dan satabilirsin)";
+      info.textContent = "Pozisyon açık (Açık Pozisyonlar'dan satabilirsin)";
       actionTd.appendChild(info);
     } else {
       const amountInput = document.createElement('input');
@@ -246,7 +246,7 @@ function renderPaperWatchlist(items) {
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'paper-action-btn paper-action-btn-muted';
-    removeBtn.textContent = 'Cikar';
+    removeBtn.textContent = 'Çıkar';
     removeBtn.onclick = () => removeFromWatchlist(w.ticker);
     actionTd.appendChild(removeBtn);
 
@@ -257,7 +257,7 @@ function renderPaperWatchlist(items) {
 async function manualBuyFromWatchlist(ticker, amountStr) {
   const allocation = parseTLAmount(amountStr);
   if (!allocation || allocation <= 0) {
-    alert('Gecerli bir tutar gir.');
+    alert('Geçerli bir tutar gir.');
     return;
   }
   try {
@@ -267,10 +267,10 @@ async function manualBuyFromWatchlist(ticker, amountStr) {
       body: JSON.stringify({ ticker, allocation }),
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Alim basarisiz.'); return; }
+    if (!res.ok) { alert(data.error || 'Alım başarısız.'); return; }
     refreshPaperTrading();
   } catch (e) {
-    alert('Alim basarisiz.');
+    alert('Alım başarısız.');
   }
 }
 
@@ -278,7 +278,7 @@ async function manualSellTrade(tradeId, ticker) {
   // Hem otomatik hem manuel pozisyonlar artik buradan kapatilabildigi icin
   // (2026-11-02'de eklendi) yanlislikla tiklamaya karsi bir onay sorulur -
   // GERI ALINAMAZ bir islem (satis).
-  const ok = confirm(`${ticker || 'Bu pozisyonu'} satmak istediginize emin misiniz? Bu islem geri alinamaz.`);
+  const ok = confirm(`${ticker || 'Bu pozisyonu'} satmak istediğinize emin misiniz? Bu işlem geri alınamaz.`);
   if (!ok) return;
   try {
     const res = await fetch('/api/paper/manual-sell', {
@@ -287,10 +287,10 @@ async function manualSellTrade(tradeId, ticker) {
       body: JSON.stringify({ trade_id: tradeId }),
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Satis basarisiz.'); return; }
+    if (!res.ok) { alert(data.error || 'Satış başarısız.'); return; }
     refreshPaperTrading();
   } catch (e) {
-    alert('Satis basarisiz.');
+    alert('Satış başarısız.');
   }
 }
 
@@ -324,7 +324,7 @@ if (LOGGED_IN) {
     const msg = document.getElementById('paper-cash-msg');
     const amount = parseTLAmount(input.value);
     if (!(amount >= 0)) {
-      msg.textContent = 'Gecerli bir tutar gir.';
+      msg.textContent = 'Geçerli bir tutar gir.';
       return;
     }
     try {
@@ -333,12 +333,12 @@ if (LOGGED_IN) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount }),
       });
-      if (!res.ok) { msg.textContent = 'Guncellenemedi.'; return; }
+      if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
       input.value = '';
-      msg.textContent = 'Guncellendi.';
+      msg.textContent = 'Güncellendi.';
       refreshPaperTrading();
     } catch (e) {
-      msg.textContent = 'Guncellenemedi.';
+      msg.textContent = 'Güncellenemedi.';
     }
   });
 
@@ -348,18 +348,18 @@ if (LOGGED_IN) {
     const cashInput = document.getElementById('paper-cash-input');
     let amountStr = cashInput.value;
     if (!amountStr) {
-      amountStr = prompt('Sifirlama sonrasi baslangic nakti (TL) ne olsun?', '1000000');
+      amountStr = prompt('Sıfırlama sonrası başlangıç nakti (TL) ne olsun?', '1000000');
       if (amountStr === null) return;
     }
     const amount = parseTLAmount(amountStr);
     if (!(amount > 0)) {
-      alert('Gecerli bir tutar gir.');
+      alert('Geçerli bir tutar gir.');
       return;
     }
     const ok = confirm(
-      `Bu islem TUM Sanal Al-Sat verilerini sifirlar: acik/kapali tum islemler, ` +
-      `equity gecmisi ve manuel takip listesi SILINIR, nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanir. ` +
-      `Bu islem GERI ALINAMAZ. Emin misin?`
+      `Bu işlem TÜM Sanal Al-Sat verilerini sıfırlar: açık/kapalı tüm işlemler, ` +
+      `equity geçmişi ve manuel takip listesi SİLİNİR, nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanır. ` +
+      `Bu işlem GERİ ALINAMAZ. Emin misin?`
     );
     if (!ok) return;
     try {
@@ -368,11 +368,11 @@ if (LOGGED_IN) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount }),
       });
-      if (!res.ok) { alert('Sifirlama basarisiz.'); return; }
+      if (!res.ok) { alert('Sıfırlama başarısız.'); return; }
       cashInput.value = '';
       refreshPaperTrading();
     } catch (e) {
-      alert('Sifirlama basarisiz.');
+      alert('Sıfırlama başarısız.');
     }
   });
 

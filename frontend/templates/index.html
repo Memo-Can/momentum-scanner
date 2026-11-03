@@ -26,15 +26,15 @@ const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
     <img src="{{ url_for('static', filename='favicon.png') }}" alt="" class="app-logo">
     <div>
       <h1>{{ title }}</h1>
-      <div class="meta" id="meta">Yukleniyor...</div>
+      <div class="meta" id="meta">Yükleniyor...</div>
       <div class="warning" id="warning"></div>
     </div>
   </div>
   <div id="header-controls">
     {% if logged_in %}
-      <a id="auth-link" href="{{ url_for('logout') }}" onclick="return confirm('Cikis yapmak istediginize emin misiniz?');">Cikis Yap</a>
+      <a id="auth-link" href="{{ url_for('logout') }}" onclick="return confirm('Çıkış yapmak istediğinize emin misiniz?');">Çıkış Yap</a>
     {% else %}
-      <a id="auth-link" href="{{ url_for('login') }}">Giris Yap</a>
+      <a id="auth-link" href="{{ url_for('login') }}">Giriş Yap</a>
     {% endif %}
   </div>
 </header>
@@ -44,7 +44,7 @@ const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
   <button id="paper-view-toggle" class="market-tab-btn" type="button">Sanal Al-Sat</button>
   {% endif %}
   <div id="search-wrap">
-    <input type="text" id="search-input" placeholder="Hisse veya sektor ara..." autocomplete="off">
+    <input type="text" id="search-input" placeholder="Hisse veya sektör ara..." autocomplete="off">
     <span id="search-clear">&times;</span>
   </div>
   <div id="market-ticker"></div>
@@ -69,9 +69,9 @@ const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
 </div>
 
 <footer>
-  <span>Veri kaynagi: Yahoo Finance</span>
+  <span>Veri kaynağı: Yahoo Finance</span>
   <span class="dot">&bull;</span>
-  <span>Yatirim tavsiyesi degildir, yalnizca bilgilendirme amaclidir</span>
+  <span>Yatırım tavsiyesi değildir, yalnızca bilgilendirme amaçlıdır</span>
   <span class="dot">&bull;</span>
   <span>&copy; 2026 Momentum Scanner</span>
 </footer>

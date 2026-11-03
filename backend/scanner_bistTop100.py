@@ -1143,7 +1143,7 @@ def build_paper_hourly_report(rows) -> str:
 
     lines = [f"📊 Saatlik Sanal Al-Sat Raporu ({datetime.now().strftime('%Y-%m-%d %H:%M')})"]
     if not positions:
-        lines.append("Acik pozisyon yok.")
+        lines.append("Açık pozisyon yok.")
     else:
         for p in positions:
             source_label = "Otomatik" if p["source"] == "auto" else "Manuel"
@@ -1157,11 +1157,11 @@ def build_paper_hourly_report(rows) -> str:
                     f"[{p['entry_price']:.2f} -> {price:.2f} TL]"
                 )
             else:
-                lines.append(f"⚪ {p['ticker']} ({source_label}): guncel fiyat yok")
+                lines.append(f"⚪ {p['ticker']} ({source_label}): güncel fiyat yok")
 
     lines.append("")
     lines.append(
-        f"Toplam {summary['open_positions']} acik pozisyon | Nakit {summary['cash']:.0f} TL | "
+        f"Toplam {summary['open_positions']} açık pozisyon | Nakit {summary['cash']:.0f} TL | "
         f"Equity {summary['equity']:.0f} TL | Toplam K/Z {summary['total_pnl']:+.0f} TL"
     )
     return "\n".join(lines)
@@ -1189,9 +1189,9 @@ def send_health_alert(text: str) -> None:
 
 
 _SIGNAL_NOTIFY_LABELS = {
-    "GUCLU_AL": "GUCLU AL",
+    "GUCLU_AL": "GÜÇLÜ AL",
     "MUTLAK_AL": "MUTLAK AL",
-    "GUCLU_SAT": "GUCLU SAT",
+    "GUCLU_SAT": "GÜÇLÜ SAT",
     "MUTLAK_SAT": "MUTLAK SAT",
 }
 
@@ -1245,7 +1245,7 @@ _PAPER_EXIT_REASON_LABELS = {
     "stop": "Stop",
     "target": "Hedef",
     "signal_reversal": "Sinyal Tersi",
-    "time_stop": "Sure Asimi",
+    "time_stop": "Süre Aşımı",
     "manual_sat_signal": "Sinyal (SAT)",
 }
 
@@ -1272,8 +1272,8 @@ def _send_paper_trade_notification(event: dict) -> None:
         sonuc = "KAR" if pnl >= 0 else "ZARAR"
         reason = _PAPER_EXIT_REASON_LABELS.get(event["exit_reason"], event["exit_reason"])
         text = (
-            f"{symbol} SANAL SATIS ({sonuc}): {event['ticker']}\n"
-            f"Giris {event['entry_price']:.2f} -> Cikis {event['exit_price']:.2f} TL\n"
+            f"{symbol} SANAL SATIŞ ({sonuc}): {event['ticker']}\n"
+            f"Giriş {event['entry_price']:.2f} -> Çıkış {event['exit_price']:.2f} TL\n"
             f"K/Z: {pnl:+.0f} TL - Neden: {reason}\n"
             f"{event['timestamp']}"
         )

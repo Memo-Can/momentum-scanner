@@ -155,25 +155,25 @@ def render(rows, missing_count: int = 0):
     rows_sorted = sorted(rows, key=_sort_key)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"BIST 100 - Getiri Tablosu ({len(rows)} hisse)   (guncelleme: {now})")
+    print(f"BIST 100 - Getiri Tablosu ({len(rows)} hisse)   (güncelleme: {now})")
     print(
-        f"Kaynak: Resmi BIST 100 Endeksi'nin (XU100) {len(scanner.BIST100_TICKERS)} sabit uyesi "
-        f"(web arayuzunde ayrica BIST 30/BIST 300 sekmeleri de var)   |  "
-        f"Siralama: Once Skor gucu (GUCLU AL->AL->NOTR->SAT->GUCLU SAT), ayni grup icinde gunluk % (yuksekten dusuge)"
+        f"Kaynak: Resmi BIST 100 Endeksi'nin (XU100) {len(scanner.BIST100_TICKERS)} sabit üyesi "
+        f"(web arayüzünde ayrıca BIST 30/BIST 300 sekmeleri de var)   |  "
+        f"Sıralama: Önce Skor gücü (GÜÇLÜ AL->AL->NOTR->SAT->GÜÇLÜ SAT), aynı grup içinde günlük % (yüksekten düşüğe)"
     )
     print(
-        f"Sinyal: EMA{scanner.EMA_FAST}/EMA{scanner.EMA_SLOW} (gunluk) + "
+        f"Sinyal: EMA{scanner.EMA_FAST}/EMA{scanner.EMA_SLOW} (günlük) + "
         f"MACD({scanner.MACD_FAST},{scanner.MACD_SLOW},{scanner.MACD_SIGNAL}) + RSI({scanner.RSI_PERIOD}) + "
         f"BB({scanner.BB_PERIOD},{scanner.BB_STD}sigma)   |  her {scanner.BIST_REFRESH_SECONDS} sn'de bir yenilenir"
     )
     if missing_count:
         total_attempted = len(rows) + missing_count
-        print(f"Uyari: Taranan {total_attempted} hisseden {missing_count} tanesi icin veri alinamadi.")
+        print(f"Uyarı: Taranan {total_attempted} hisseden {missing_count} tanesi için veri alınamadı.")
     print()
 
     header = (
-        f"{'#':>2} {'Skor':^4} {'1d':^2} {'MACD':^4} {'Hisse':<5} {'Sektor':<6} {'Fiyat':>6} "
-        f"{'Hacim':>5} {'GunPoz':>6} {'RSI':>3} {'BB%':>4} {'RS':>8} {'Gunluk':>8} "
+        f"{'#':>2} {'Skor':^4} {'1d':^2} {'MACD':^4} {'Hisse':<5} {'Sektör':<6} {'Fiyat':>6} "
+        f"{'Hacim':>5} {'GünPoz':>6} {'RSI':>3} {'BB%':>4} {'RS':>8} {'Günlük':>8} "
         f"{'GunStop/Hedef':>13} {'SwStop/Hedef':>13}"
     )
     print(header)
@@ -201,7 +201,7 @@ def render(rows, missing_count: int = 0):
             prefix = f"{row_color}{prefix}{RESET}"
         print(f"{idx} {symbol_score} {symbol_1d} {symbol_macd} {prefix}")
 
-    print(f"\nCikmak icin CTRL+C")
+    print(f"\nÇıkmak için CTRL+C")
     sys.stdout.flush()
 
 
@@ -232,7 +232,7 @@ def main():
             render(display_rows, missing_count=missing_count)
             play_refresh_beep()
         else:
-            print("Veri cekilemedi, tekrar denenecek...")
+            print("Veri çekilemedi, tekrar denenecek...")
         try:
             time.sleep(scanner.BIST_REFRESH_SECONDS)
         except KeyboardInterrupt:

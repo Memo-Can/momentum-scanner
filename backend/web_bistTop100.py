@@ -356,7 +356,7 @@ def _scan_loop():
             _scan_failure_count += 1
             if _scan_failure_count >= _SCAN_FAILURE_ALERT_THRESHOLD and not _scan_health_alert_sent:
                 scanner.send_health_alert(
-                    f"BIST tarama dongusu {_scan_failure_count} kez ust uste basarisiz oldu.\n"
+                    f"BIST tarama döngüsü {_scan_failure_count} kez üst üste başarısız oldu.\n"
                     f"Son hata: {e}"
                 )
                 _scan_health_alert_sent = True
@@ -472,7 +472,7 @@ def login():
     if request.method == "POST":
         ip = request.remote_addr or "unknown"
         if _login_rate_limited(ip):
-            error = "Cok fazla basarisiz deneme yapildi - birkac dakika sonra tekrar deneyin."
+            error = "Çok fazla başarısız deneme yapıldı - birkaç dakika sonra tekrar deneyin."
             return render_template("login.html", error=error), 429
         username = request.form.get("username", "")
         password = request.form.get("password", "")
@@ -486,7 +486,7 @@ def login():
             session["logged_in"] = True
             return redirect(url_for("index"))
         _record_login_failure(ip)
-        error = "Kullanici adi veya sifre hatali."
+        error = "Kullanıcı adı veya şifre hatalı."
     return render_template("login.html", error=error)
 
 
@@ -557,7 +557,7 @@ def api_history(ticker: str):
         # sizdirilmiyor - sadece sunucu logunda tutulur (2026-11-02, guvenlik
         # taramasi bulgusu).
         print(f"api_history({ticker}) hatasi:", e)
-        return jsonify({"error": "veri alinamadi"}), 502
+        return jsonify({"error": "veri alınamadı"}), 502
     if hist.empty:
         return jsonify(_cache_set(cache_key, []))
     recent = hist.tail(65)  # ~3 aylik islem gunu (6 aylik ham veriden son kismi)
@@ -639,7 +639,7 @@ def api_indicators(ticker: str):
         hist = _get_raw_history(ticker)
     except Exception as e:
         print(f"api_indicators({ticker}) hatasi:", e)
-        return jsonify({"error": "veri alinamadi"}), 502
+        return jsonify({"error": "veri alınamadı"}), 502
     if hist.empty:
         return jsonify(_cache_set(cache_key, {}))
 
@@ -724,7 +724,7 @@ def api_paper_set_cash():
     try:
         amount = float(data.get("amount"))
     except (TypeError, ValueError):
-        return jsonify({"error": "gecerli bir tutar (amount) gerekli"}), 400
+        return jsonify({"error": "geçerli bir tutar (amount) gerekli"}), 400
     if amount < 0:
         return jsonify({"error": "tutar negatif olamaz"}), 400
     scanner.set_paper_cash(amount)
@@ -741,9 +741,9 @@ def api_paper_reset():
     try:
         amount = float(data.get("amount"))
     except (TypeError, ValueError):
-        return jsonify({"error": "gecerli bir baslangic tutari (amount) gerekli"}), 400
+        return jsonify({"error": "geçerli bir başlangıç tutarı (amount) gerekli"}), 400
     if amount <= 0:
-        return jsonify({"error": "tutar sifirdan buyuk olmali"}), 400
+        return jsonify({"error": "tutar sıfırdan büyük olmalı"}), 400
     scanner.reset_paper_trading(amount)
     return jsonify({"status": "ok", "cash": amount})
 
@@ -800,7 +800,7 @@ def api_paper_manual_buy():
     try:
         allocation = float(data.get("allocation"))
     except (TypeError, ValueError):
-        return jsonify({"error": "gecerli bir tutar (allocation) gerekli"}), 400
+        return jsonify({"error": "geçerli bir tutar (allocation) gerekli"}), 400
     if not ticker:
         return jsonify({"error": "ticker gerekli"}), 400
 
@@ -808,11 +808,11 @@ def api_paper_manual_buy():
         price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
     price = price_by_ticker.get(ticker)
     if price is None or price != price:
-        return jsonify({"error": f"{ticker} icin guncel fiyat yok"}), 400
+        return jsonify({"error": f"{ticker} için güncel fiyat yok"}), 400
 
     result = scanner.manual_buy(ticker, allocation, price)
     if result is None:
-        return jsonify({"error": "alim basarisiz - tutar gecersiz, nakit yetersiz, bu hissede zaten acik pozisyon var ya da 5 pozisyon limiti dolu"}), 400
+        return jsonify({"error": "alım başarısız - tutar geçersiz, nakit yetersiz, bu hissede zaten açık pozisyon var ya da 5 pozisyon limiti dolu"}), 400
     return jsonify(result)
 
 
@@ -826,22 +826,22 @@ def api_paper_manual_sell():
     try:
         trade_id = int(data.get("trade_id"))
     except (TypeError, ValueError):
-        return jsonify({"error": "gecerli bir trade_id gerekli"}), 400
+        return jsonify({"error": "geçerli bir trade_id gerekli"}), 400
 
     positions = {p["id"]: p for p in scanner.get_paper_positions()}
     pos = positions.get(trade_id)
     if pos is None:
-        return jsonify({"error": "pozisyon bulunamadi"}), 404
+        return jsonify({"error": "pozisyon bulunamadı"}), 404
 
     with _state_lock:
         price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
     price = price_by_ticker.get(pos["ticker"])
     if price is None or price != price:
-        return jsonify({"error": f"{pos['ticker']} icin guncel fiyat yok"}), 400
+        return jsonify({"error": f"{pos['ticker']} için güncel fiyat yok"}), 400
 
     result = scanner.manual_sell(trade_id, price)
     if result is None:
-        return jsonify({"error": "satis basarisiz"}), 400
+        return jsonify({"error": "satış başarısız"}), 400
     return jsonify(result)
 
 
