@@ -1077,6 +1077,53 @@ def _telegram_send(text: str) -> None:
         print("Telegram bildirimi gonderilemedi:", e)
 
 
+def build_paper_hourly_report(rows) -> str:
+    """Su an acik olan TUM sanal pozisyonlari (kaynak farki YOK, auto+manual)
+    rows icindeki (zaten taranmis, EKSTRA Yahoo istegi YOK) canli fiyatla
+    birlestirip saat basi bir K/Z rapor metni olusturur. Hem
+    web_bistTop100.py: _maybe_send_hourly_paper_report() (gercek saatlik
+    tetikleyici, bkz. orada) HEM DE /api/paper/report-test (anlik test
+    tetikleyicisi) tarafindan cagirilir - ikisi de AYNI formati gorsun diye
+    rapor metni ve gonderimi (send_paper_hourly_report) ayri tutuldu."""
+    price_by_ticker = {r["ticker"]: r["price"] for r in rows}
+    positions = sorted(get_paper_positions(), key=lambda p: p["entry_time"])
+    summary = get_paper_summary()
+
+    lines = [f"📊 Saatlik Sanal Al-Sat Raporu ({datetime.now().strftime('%Y-%m-%d %H:%M')})"]
+    if not positions:
+        lines.append("Acik pozisyon yok.")
+    else:
+        for p in positions:
+            source_label = "Otomatik" if p["source"] == "auto" else "Manuel"
+            price = price_by_ticker.get(p["ticker"])
+            if price is not None and price == price:  # NaN degilse
+                pnl = (price - p["entry_price"]) * p["shares"]
+                pnl_pct = (price / p["entry_price"] - 1.0) * 100.0
+                symbol = "📈" if pnl >= 0 else "📉"
+                lines.append(
+                    f"{symbol} {p['ticker']} ({source_label}): {pnl:+.0f} TL ({pnl_pct:+.2f}%) "
+                    f"[{p['entry_price']:.2f} -> {price:.2f} TL]"
+                )
+            else:
+                lines.append(f"⚪ {p['ticker']} ({source_label}): guncel fiyat yok")
+
+    lines.append("")
+    lines.append(
+        f"Toplam {summary['open_positions']} acik pozisyon | Nakit {summary['cash']:.0f} TL | "
+        f"Equity {summary['equity']:.0f} TL | Toplam K/Z {summary['total_pnl']:+.0f} TL"
+    )
+    return "\n".join(lines)
+
+
+def send_paper_hourly_report(rows) -> str:
+    """build_paper_hourly_report()'u olusturup Telegram'a gonderir, metni
+    de geri dondurur - cagiran taraf (test endpoint'i) Telegram kurulu
+    olmasa da ne gonderilecegini gorebilsin diye."""
+    text = build_paper_hourly_report(rows)
+    _telegram_send(text)
+    return text
+
+
 def send_health_alert(text: str) -> None:
     """Tarama dongusunun kendi kendini izleyen basit saglik uyarisi -
     web_bistTop100.py: _scan_loop() ardisik birkac basarisiz _scan_once()
@@ -1309,8 +1356,11 @@ def run_paper_trading_cycle(rows) -> None:
     2) rows'taki YENI GUCLU_AL/MUTLAK_AL gecislerini (_paper_last_score ile
        karsilastirarak, ikisi TEK bir "guclu alim bolgesi" sayilir) tespit
        eder, zaten ACIK bir pozisyonu (source farki YOK) olan ticker'lari
-       atlayarak acik slot kadarini sirayla satin alir. Pozisyon buyuklugu
-       SABIT bir deger DEGIL - her alimda o anki GUNCEL toplam deger
+       atlayarak acik slot kadarini sirayla satin alir. Acik slot sayisi
+       ARTIK TOPLAM acik pozisyon sayisina (auto+manual, 2026-11-03'te
+       degistirildi - bkz. asagidaki yorum) gore hesaplanir - toplam 5
+       aciksa HICBIR yeni alim yapilmaz. Pozisyon buyuklugu SABIT bir
+       deger DEGIL - her alimda o anki GUNCEL toplam deger
        (nakit + acik pozisyonlarin o anki degeri) 5'e bolunerek hesaplanir
        (2026-11-02'de kullanici istegiyle degistirildi, bkz. CLAUDE.md).
     3) Her dongude bir equity (nakit + acik pozisyon degeri) satiri
@@ -1372,16 +1422,24 @@ def run_paper_trading_cycle(rows) -> None:
                         "timestamp": now_str,
                     })
 
-            # 5-slot limiti SADECE source='auto' pozisyonlari SAYAR (manuel
-            # pozisyonlar hala limite dahil degil, DEGISMEDI) - ama "bu
-            # ticker ZATEN acik mi" (yinelenen alim engeli) kontrolu artik
-            # source farki YOK, TUM acik pozisyonlara bakiyor (2026-11-02'de
-            # kullanici istegiyle eklendi - eskiden sadece 'auto' pozisyonlar
-            # sayildigi icin manuel elde tutulan bir hisse otomatik sistem
-            # tarafindan TEKRAR satin alinabiliyordu, bkz. CLAUDE.md).
-            auto_open_tickers = {p["ticker"] for p in open_positions if p["source"] == "auto"} - closed_this_cycle
+            # 5-slot limiti artik TUM acik pozisyonlari sayar - kaynak
+            # (auto/manual) farki YOK (2026-11-03'te degistirildi, bkz.
+            # manual_buy()'daki AYNI degisiklik ve CLAUDE.md). Eskiden
+            # SADECE source='auto' sayiliyordu ("bu ticker ZATEN acik mi"
+            # kontrolu 2026-11-02'de source-notr yapilmisti ama SAYIM hala
+            # auto'ya ozeldi) - bu, nakit manuel alimlarla tukenmisken
+            # otomatik dongunun "ne kadar nakit varsa onunla gir" yedek
+            # davranisiyla (allocation = min(per_slot_amount, cash)) 5.
+            # auto slotu anlamsiz derecede kucuk bir tutarla (gercekten
+            # yasandi: HUBVC, 2026-11-03, 2.404 TL - normalde ~200.000 TL
+            # olmasi gerekirken) acmasina yol aciyordu, cunku sayim 4 auto +
+            # 1 manuel = 5 TOPLAM acik pozisyonu "sadece 4 dolu slot" olarak
+            # goruyordu. Artik kural: toplam 5 pozisyon aciksa (auto+manual
+            # farketmez) YENI ALIM (auto da, manuel de) YAPILMAZ - "ne kadar
+            # nakit varsa onunla gir" davranisi byle BIR DAHA tetiklenmez
+            # (cunku tetiklenmeden once slot sayisi zaten dolmus olur).
             held_tickers = {p["ticker"] for p in open_positions} - closed_this_cycle
-            open_count = len(auto_open_tickers)
+            open_count = len(held_tickers)
 
             # Pozisyon buyuklugu icin GUNCEL toplam deger (nakit + henuz
             # KAPANMAMIS acik pozisyonlarin o anki fiyatla degeri) hesaplanir -
@@ -1562,11 +1620,12 @@ def remove_from_paper_watchlist(ticker: str) -> None:
 
 
 def manual_buy(ticker: str, allocation: float, price: float):
-    """Kullanicinin elle, istedigi an, istedigi tutarla satin almasi -
-    otomatik sistemin 5-slot limitine DAHIL DEGIL, tek siniri mevcut nakit.
+    """Kullanicinin elle, istedigi an, istedigi tutarla satin almasi.
     Basarisizsa (tutar<=0, fiyat gecersiz, nakit yetersiz, bu ticker'da
     ZATEN acik bir pozisyon varsa - kaynagi auto ya da manual farketmez,
-    2026-11-02'de eklendi) None doner."""
+    2026-11-02'de eklendi - VEYA toplam acik pozisyon sayisi (kaynak
+    farksiz) PAPER_MAX_POSITIONS'a ULASMISSA - 2026-11-03'te eklendi, bkz.
+    asagidaki yorum) None doner."""
     if allocation <= 0 or price != price or price <= 0:
         return None
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1580,6 +1639,24 @@ def manual_buy(ticker: str, allocation: float, price: float):
                 "SELECT 1 FROM paper_trades WHERE ticker = ? AND status = 'open' LIMIT 1", (ticker,)
             ).fetchone()
             if already_open is not None:
+                return None
+            # 5-slot limiti artik kaynak farki OLMADAN TUM acik pozisyonlari
+            # sayar (2026-11-03'te degistirildi - eskiden SADECE source='auto'
+            # sayiliyordu, manuel alimlar limite HIC dahil degildi, bkz.
+            # run_paper_trading_cycle()'daki AYNI degisiklik). Kok sebep:
+            # eski kurguda nakit, auto dongunun "kalan nakit kadar al"
+            # yedek davranisiyla (allocation = min(per_slot_amount, cash))
+            # tukeniyor, 5. auto slot anlamsiz derecede kucuk bir tutarla
+            # (ornegin ~2.400 TL, normalde ~200.000 TL olmasi gerekirken)
+            # aciliyordu - cunku o anda zaten 4 auto + birden fazla manuel
+            # pozisyon nakti bitirmisti ama sayim SADECE auto'ya bakiyordu.
+            # Simdi hem bu fonksiyon hem run_paper_trading_cycle() "toplam
+            # 5 pozisyon aciksa (auto+manual farketmez) HICBIR yeni alim
+            # yapilmaz" kuralini PAYLASIYOR.
+            open_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM paper_trades WHERE status = 'open'"
+            ).fetchone()["n"]
+            if open_count >= PAPER_MAX_POSITIONS:
                 return None
             shares = allocation / price
             # Manuel pozisyonlarda stop_price/target_price hic YOK (NULL) -

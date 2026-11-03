@@ -202,11 +202,40 @@ def _scan_once():
             # Sanal al-sat mantigindaki bir hata ana tarama/skor loglama
             # akisini ASLA bozmamali - kendi try/except'i icinde izole.
             print("Sanal al-sat (paper trading) hatasi:", e)
+        _maybe_send_hourly_paper_report(top_rows)
 
     with _state_lock:
         _state["rows"] = [_row_to_json(r) for r in top_rows]
         _state["missing_count"] = missing_count
         _state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# Sanal Al-Sat'in acik pozisyon K/Z durumunu saat basina BIR KEZ Telegram'a
+# raporlamak icin - hangi saate ait rapor son gonderildi (ayni saat icinde
+# BIST_REFRESH_SECONDS'ta bir tekrar tekrar gonderilmesin diye). Restart'ta
+# None'a doner - bu yuzden her restart sonrasi ILK tarama dongusu (BIST
+# aciksa) hemen bir rapor gonderir, bu BEKLENEN/zararsiz bir davranis (saat
+# sayacini "kacirmamak" icin tekrar tekrar gondermekten cok daha az riskli).
+_last_paper_report_hour_key = None
+
+
+def _maybe_send_hourly_paper_report(rows) -> None:
+    """BIST acik saatlerinde (scanner.is_market_open() - _ensure_scanned_once()'in
+    piyasa kapaliyken yaptigi bir-kerelik kurtarma taramasinda rapor
+    GONDERILMEZ, bu KASITLI) saat basina BIR KEZ scanner.send_paper_hourly_report()
+    cagirir. _scan_once()'tan cagrilir, kendi try/except'i icinde - bir hata
+    ana tarama/sanal al-sat akisini bozmamali."""
+    global _last_paper_report_hour_key
+    if not scanner.is_market_open():
+        return
+    hour_key = datetime.now().strftime("%Y-%m-%d %H")
+    if hour_key == _last_paper_report_hour_key:
+        return
+    _last_paper_report_hour_key = hour_key
+    try:
+        scanner.send_paper_hourly_report(rows)
+    except Exception as e:
+        print("Saatlik Sanal Al-Sat raporu hatasi:", e)
 
 
 # Ardisik kac basarisiz _scan_once() denemesinden sonra Telegram'a bir
@@ -677,7 +706,8 @@ def api_paper_watchlist_remove(ticker: str):
 @_login_required
 def api_paper_manual_buy():
     """Kullanicinin elle, istedigi an, istedigi tutarla alim yapmasi -
-    otomatik sistemin 5-slot limitine DAHIL DEGIL (bkz. scanner.manual_buy)."""
+    5-slot limitine artik auto/manual farki olmadan DAHIL (2026-11-03'te
+    degistirildi, bkz. scanner.manual_buy)."""
     data = request.get_json(silent=True) or {}
     ticker = (data.get("ticker") or "").strip().upper()
     try:
@@ -695,7 +725,7 @@ def api_paper_manual_buy():
 
     result = scanner.manual_buy(ticker, allocation, price)
     if result is None:
-        return jsonify({"error": "alim basarisiz - tutar gecersiz ya da nakit yetersiz"}), 400
+        return jsonify({"error": "alim basarisiz - tutar gecersiz, nakit yetersiz, bu hissede zaten acik pozisyon var ya da 5 pozisyon limiti dolu"}), 400
     return jsonify(result)
 
 
@@ -726,6 +756,30 @@ def api_paper_manual_sell():
     if result is None:
         return jsonify({"error": "satis basarisiz"}), 400
     return jsonify(result)
+
+
+@app.route("/api/paper/report-test", methods=["GET", "POST"])
+@_login_required
+def api_paper_report_test():
+    """Saatlik Sanal Al-Sat Telegram raporunu (_maybe_send_hourly_paper_report()'un
+    saat basina bir kez gonderdigi AYNI rapor) saat sayacini BEKLEMEDEN
+    aninda gonderir - format/metin degisikliklerini test etmek icin. GET'e
+    de acik (tarayicidan login olduktan sonra dogrudan URL olarak
+    ziyaret edilebilsin diye) - yan etkisi sadece bir Telegram mesaji
+    gondermek, kalici bir state degisikligi YOK, bu yuzden GET olmasi
+    sakincali degil. KALICI bir ozellik (2026-10-28'de eklenip sonra
+    "unutulmus debug endpoint'i" olarak kaldirilan /api/debug/test-telegram
+    GIBI DEGIL - login korumali, gecici DEGIL, raporun KENDISI). Telegram
+    token/chat_id tanimli olmasa da calisir - `text` alaninda rapor metni
+    donar, boylece Telegram kurulu olmadan da formati gorebilirsin;
+    `telegram_configured` gercekten gonderilip gonderilmedigini soyler."""
+    with _state_lock:
+        rows = list(_state["rows"])
+    text = scanner.send_paper_hourly_report(rows)
+    return jsonify({
+        "telegram_configured": bool(scanner.TELEGRAM_BOT_TOKEN and scanner.TELEGRAM_CHAT_ID),
+        "text": text,
+    })
 
 
 # scanner_bistTop100 import edilirken DB/tablolar zaten hazirlandi (bkz.
