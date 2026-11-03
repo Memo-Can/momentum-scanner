@@ -309,12 +309,8 @@ async function refreshPaperTrading() {
     renderPaperTrades(await tradesRes.json());
     renderPaperWatchlist(watchlist);
 
-    // acik pozisyon seti degistiyse (yeni alim/satis) BIST 300 sekmesinin
-    // "ilk 300" kesmesi de buna gore guncellensin diye ana tablo yeniden cizilir.
-    openPaperTickers = new Set(positions.map(p => p.ticker));
     watchlistTickers = new Set(watchlist.map(w => w.ticker));
     updateWatchlistToggleButton();
-    if (activeMarket === 'bist300') renderTable();
   } catch (e) {
     // sessizce basarisiz ol - ana tablo deneyimini bozmasin
   }

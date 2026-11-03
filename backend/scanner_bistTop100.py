@@ -1790,22 +1790,6 @@ def get_paper_trades(limit: int = 200):
         conn.close()
 
 
-def get_paper_equity_history(since_timestamp: str):
-    """since_timestamp'ten itibaren equity (nakit + acik pozisyon degeri)
-    gecmisini dondurur - Skor Gecmisi'ndeki gunluk/saatlik/5dk sekmeleriyle
-    ayni sekilde (ham veri, agregasyon okuma anında) grafik/tablo icin."""
-    conn = get_db_connection()
-    try:
-        cur = conn.execute(
-            "SELECT timestamp, cash, positions_value, equity FROM paper_equity_history "
-            "WHERE timestamp >= ? ORDER BY timestamp ASC",
-            (since_timestamp,),
-        )
-        return [dict(r) for r in cur.fetchall()]
-    finally:
-        conn.close()
-
-
 def get_paper_summary():
     """Sanal hesabin o anki ozetini dondurur: nakit, acik pozisyon degeri,
     toplam equity, gerceklesmis/gerceklesmemis K-Z, kazanma orani. Acik

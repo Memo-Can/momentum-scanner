@@ -44,9 +44,6 @@ const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
 </header>
 
 <div id="market-tabs">
-  <button class="market-tab-btn" data-market="bist30" type="button">BIST 30</button>
-  <button class="market-tab-btn active" data-market="bist100" type="button">BIST 100</button>
-  <button class="market-tab-btn" data-market="bist300" type="button">BIST</button>
   {% if logged_in %}
   <button id="paper-view-toggle" class="market-tab-btn" type="button">Sanal Al-Sat</button>
   {% endif %}
@@ -87,8 +84,8 @@ const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
 // ORTAK/PAYLASILAN JS - hisse tablosu (_view_stocks.html), Sanal Al-Sat
 // (_view_paper_trading.html) VE yan panel (_view_graphic.html) tarafindan
 // birlikte kullanilir: genel bicimlendiriciler, sinyal bildirimleri, market
-// seridi, showView() ve paylasilan Sanal Al-Sat state'i (openPaperTickers/
-// watchlistTickers). Grafik/crosshair/legend/Skor Gecmisi/modal/
+// seridi, showView() ve paylasilan Sanal Al-Sat state'i (watchlistTickers).
+// Grafik/crosshair/legend/Skor Gecmisi/modal/
 // selectTicker() gibi yan panele OZEL mantik artik burada DEGIL,
 // _view_graphic.html'in KENDI script'inde (bkz. CLAUDE.md "Yan panel
 // ayrilmasi"). Bu script FIZIKSEL olarak index.html'in EN ALTINDA duruyor -
@@ -207,19 +204,10 @@ document.getElementById('notify-toggle').addEventListener('click', () => {
 });
 updateNotifyButton();
 
-// Su an acik sanal al-sat pozisyonu olan ticker'lar - refreshPaperTrading()
-// (_view_paper_trading.html) her dongude gunceller. BIST 300 sekmesinin "ilk
-// 300" kesmesi bu ticker'lari ATLAMAMALI (cok dusen bir hisse sekmeden
-// kaybolmasin, satisi yapilana kadar gorunur kalsin) - bkz. _view_stocks.html:
-// applyMarketFilter(). BURADA (bu ortak script'te) tanimli olma sebebi:
-// _view_stocks.html'in kendi script'i bunu YUKLENIR YUKLENMEZ (ilk
-// refreshRows() cagrisinda) okuyor, _view_graphic.html'in updateWatchlistToggleButton()'u
-// da bunu OKUYOR (yazmiyor) - iki farkli dosyanin PAYLASTIGI tek state
-// burada durmali, hangisinde tanimli olsaydi diger(leri) "tanimsiz degisken"
-// hatasi alirdi.
-let openPaperTickers = new Set();
-// Manuel takip listesindeki ticker'lar - ayni sebeple (hem _view_stocks.html
-// hem _view_graphic.html okuyor, _view_paper_trading.html yaziyor) burada.
+// Manuel takip listesindeki ticker'lar - hem _view_graphic.html'in
+// updateWatchlistToggleButton()'u okuyor hem _view_paper_trading.html
+// yaziyor, bu yuzden PAYLASILAN bu ortak script'te duruyor (hangisinde
+// tanimli olsaydi diger "tanimsiz degisken" hatasi alirdi).
 let watchlistTickers = new Set();
 
 // Sanal Al-Sat (paper trading) - ana tablo ile AYNI sayfada, header/footer/

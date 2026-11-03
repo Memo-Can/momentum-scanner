@@ -322,6 +322,25 @@
   }
   .market-tab-btn:hover { color: var(--text); }
   .market-tab-btn.active { color: var(--text); border-color: var(--yellow); background: #1f2330; }
+  .market-tab-btn:disabled { opacity: 0.4; cursor: default; }
+
+  /* Hisse tablosunun sayfalama cubugu (2026-11-03'te eklendi) - #table-wrap
+     (overflow:auto) icinde "sticky" ile her zaman alt kenarda kalir, tabloyu
+     sona kadar kaydirmaya gerek kalmadan erisilebilir olsun diye. */
+  #pager {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 14px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+  }
+  #pager-page-indicator { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  #pager-controls { display: flex; gap: 6px; flex-wrap: wrap; }
   #market-ticker {
     display: flex; gap: 18px; align-items: center;
     margin-left: 14px; padding-left: 14px;

@@ -4,6 +4,7 @@
     <tr id="head-row">
       <th class="left" data-key="_default" data-type="default" data-tip="Siralamadaki yeri: once Skor gucu (GUCLU AL en ustte, GUCLU SAT en altta), ayni skor grubu icinde gunluk % degisime gore buyukten kucuge.">#<span class="arrow"></span></th>
       <th class="left" data-key="ticker" data-type="text" data-tip="Hisse sembolu (ticker).">Hisse<span class="arrow"></span></th>
+      <th class="left" data-key="_index" data-type="index" data-tip="Resmi BIST30/BIST100 endeks uyeligi - BIST30, BIST100'un bir alt kumesidir (BIST30'da olan bir hisse otomatik olarak BIST100'de de vardir).">Endeks<span class="arrow"></span></th>
       <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kisa sektor kodu - Yahoo Finance'in canli 'sector' alanindan turetilir.">Sektor<span class="arrow"></span></th>
       <th data-key="score" data-type="score" data-tip="1d, MACD, RSI, BB% ve RS sinyallerinin tek bir konfluens puaninda (-5..+5) birlestirilmis hali: GUCLU AL(▲▲)/AL(▲)/NOTR(–)/SAT(▼)/GUCLU SAT(▼▼). ADX(14), GUCLU AL/SAT etiketini teyit eden bir guven filtresidir - ADX<20 ise 'guclu' etiket normal AL/SAT'a duser.">Skor<span class="arrow"></span></th>
       <th data-key="signal_1d" data-type="signal" data-tip="Gunluk mumda EMA9/EMA21'e gore surekli trend yonu (AL/SAT/NOTR).">1d<span class="arrow"></span></th>
@@ -22,16 +23,34 @@
   </thead>
   <tbody id="rows"></tbody>
 </table>
+<div id="pager">
+  <div id="pager-page-indicator"></div>
+  <div id="pager-controls">
+    <button class="market-tab-btn" data-size="25" type="button">25</button>
+    <button class="market-tab-btn" data-size="50" type="button">50</button>
+    <button class="market-tab-btn active" data-size="100" type="button">100</button>
+    <button class="market-tab-btn" data-size="max" type="button">Tumu</button>
+    <button class="market-tab-btn" id="pager-prev" type="button">&lsaquo; Onceki</button>
+    <button class="market-tab-btn" id="pager-next" type="button">Sonraki &rsaquo;</button>
+  </div>
+</div>
 </div>
 
 <script>
-// HISSE TABLOSU GORUNUMUNE OZEL JS - sadece bu goruntunun tablosunu,
-// siralama/arama/filtreleme mantigini ve BIST 30/100/300 sekmelerini
-// kapsar. index.html'deki core script'ten (escapeHtml/fmtPct/selectTicker/
-// showView/SCORE_SYMBOLS/openPaperTickers vb.) SONRA calisir - core script
-// index.html'in EN ALTINDA (bu include'dan SONRA) oldugu icin, en alttaki
-// bootstrap cagrisi (asagida) DOMContentLoaded'a kadar beklenir (core'un
-// fonksiyonlari o ana kadar kesin tanimlanmis olur).
+// HISSE TABLOSU GORUNUMUNE OZEL JS - sadece bu goruntunun tablosunu ve
+// siralama/arama mantigini kapsar. index.html'deki core script'ten
+// (escapeHtml/fmtPct/selectTicker/showView/SCORE_SYMBOLS vb.) SONRA calisir -
+// core script index.html'in EN ALTINDA (bu include'dan SONRA) oldugu icin,
+// en alttaki bootstrap cagrisi (asagida) DOMContentLoaded'a kadar beklenir
+// (core'un fonksiyonlari o ana kadar kesin tanimlanmis olur).
+//
+// 2026-11-03'te BIST 30/100/300 sekme butonlari (ve onlari filtreleyen
+// applyMarketFilter()/activeMarket) TAMAMEN KALDIRILDI - kullanici isteği:
+// tek bir tabloda HER ZAMAN tum hisseler gosterilsin, hangi endekse ait
+// olduklari ayri bir "Endeks" sutununda (bkz. asagidaki renderRows()) belli
+// olsun. Backend zaten her satiri bist30/bist100 bayraklariyla etiketliyor
+// (bkz. scanner_bistTop100.py), bu bayraklar artik FILTRELEME icin degil
+// SADECE goruntuleme icin kullaniliyor.
 
 // Sembolik sutunlarin sayisal karsiligi - sirala derken "en guclu" once/sonra
 // gelsin diye. Skor icin cift ok, sinyal icin tek ok daha "guclu" sayilir.
@@ -45,40 +64,39 @@ let sortState = { key: null, dir: 'desc' };
 let searchQuery = '';
 let lastUpdatedAt = null;
 let lastMissingCount = 0;
-// Backend'den gelen TEK BIRLESIK havuz (BIST100 + gunluk % ilk 300, bkz.
-// web_bistTop100.py _scan_once()) - hangi sekmenin secili oldugu sadece bu
-// havuzu ISTEMCI TARAFINDA filtreler, yeniden istek gerekmez.
-let activeMarket = 'bist100';
+// Sayfalama (2026-11-03'te eklendi) - 'max' tum satirlari (hic kesmeden)
+// gosterir, sayisal degerler (25/50/100) sayfa basina gosterilecek satir
+// sayisidir. Arama/siralama DEGISTIGINDE 1. sayfaya donulur (asagidaki
+// ilgili event listener'larda currentPage = 1 satirlarina bak).
+let pageSize = 100;
+let currentPage = 1;
 
-function applyMarketFilter(rows) {
-  if (activeMarket === 'bist30') return rows.filter(r => r.bist30);
-  if (activeMarket === 'bist100') return rows.filter(r => r.bist100);
-  // bist300 ("BIST" sekmesi, 2026-11-03'te adi degisti): backend artik
-  // Yahoo'dan kac hisse geliyorsa (tum BIST evreni, ~628) hepsini
-  // gonderiyor - skoru olanlar tam veriyle, olmayanlar "BEKLIYOR" iskelet
-  // satir olarak (bkz. web_bistTop100.py: _skeleton_row()). Bu sekme HICBIR
-  // KESME/FILTRE yapmadan hepsini gosterir - eskiden gunluk %'ye gore ilk
-  // 300'u aliyordu, bu kisitlama KALDIRILDI.
-  return rows;
+// Endeks sutununda GORUNEN kisa etiket - '30' (BIST30) / '100' (BIST100,
+// BIST30 HARIC) / '-' (hicbiri). BIST30, BIST100'un alt kumesi oldugu icin
+// bir BIST30 hissesi SADECE '30' gosterir ('100' tekrar yazilmaz).
+function indexDisplayLabel(r) {
+  return r.bist30 ? '30' : (r.bist100 ? '100' : '-');
 }
 
-document.querySelectorAll('.market-tab-btn[data-market]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    activeMarket = btn.dataset.market;
-    document.querySelectorAll('.market-tab-btn[data-market]').forEach(b => b.classList.toggle('active', b === btn));
-    showView('stocks'); // bir BIST sekmesine tiklamak, Sanal Al-Sat ekraninda olsa bile hisse tablosuna geri doner
-    renderTable();
-  });
-});
+// Arama metni GORUNEN etiketten FARKLI: BIST30 bir hisse AYNI ZAMANDA
+// BIST100'un de uyesi oldugu icin (dogrulanmis alt kume iliskisi, bkz.
+// CLAUDE.md), "100" aratildiginda BIST30 hisseleri de sonuca girsin diye
+// '30 100' dondurur - GORUNEN hucrede bu ikisi tekrar yazilmiyor ama arama
+// ikisini de kapsamali.
+function indexSearchText(r) {
+  return r.bist30 ? '30 100' : (r.bist100 ? '100' : '');
+}
 
-// Arama kutusu: hisse sembolu VEYA sektor koduna gore anlik filtreler
-// (buyuk/kucuk harf duyarsiz, "icerir" eslesmesi).
+// Arama kutusu: hisse sembolu, sektor kodu VEYA BIST30/100 endeks
+// uyeligine gore anlik filtreler (2026-11-03'te endeks de eklendi -
+// buyuk/kucuk harf duyarsiz, "icerir" eslesmesi).
 function applySearch(rows) {
   if (!searchQuery) return rows;
   const q = searchQuery.toLowerCase();
   return rows.filter(r =>
     (r.ticker || '').toLowerCase().includes(q) ||
-    (r.sector || '').toLowerCase().includes(q)
+    (r.sector || '').toLowerCase().includes(q) ||
+    indexSearchText(r).includes(q)
   );
 }
 
@@ -92,6 +110,7 @@ function renderRows(rows) {
     tr.innerHTML = `
       <td class="left">${i + 1}</td>
       <td class="left">${escapeHtml(r.ticker)}</td>
+      <td class="left">${indexDisplayLabel(r)}</td>
       <td class="left">${escapeHtml(r.sector || '-')}</td>
       <td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>
       <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
@@ -112,6 +131,7 @@ function renderRows(rows) {
 }
 
 function sortValue(row, key, type) {
+  if (type === 'index') return row.bist30 ? 2 : (row.bist100 ? 1 : 0);
   if (type === 'score') return SCORE_RANK[row[key]] ?? 0;
   if (type === 'signal') return SIGNAL_RANK[row[key]] ?? 0;
   if (type === 'text') return (row[key] || '').toString();
@@ -164,24 +184,65 @@ function updateHeaderIndicators() {
   });
 }
 
+// Sayfalanacak diziyi (zaten arama+siralama uygulanmis) pageSize/currentPage'e
+// gore kesip pager kontrollerinin (sayfa gostergesi, onceki/sonraki
+// butonlarinin disabled durumu) gorunumunu gunceller. currentPage, toplam
+// sayfa sayisini ASAN bir degerdeyse (orn. arama sonucu kuculduyse) en son
+// sayfaya SIKISTIRILIR.
+function paginate(rows) {
+  if (pageSize === 'max') {
+    document.getElementById('pager-page-indicator').textContent = `${rows.length} hisse (tumu)`;
+    document.getElementById('pager-prev').disabled = true;
+    document.getElementById('pager-next').disabled = true;
+    return rows;
+  }
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+  const start = (currentPage - 1) * pageSize;
+  document.getElementById('pager-page-indicator').textContent = `Sayfa ${currentPage}/${totalPages}`;
+  document.getElementById('pager-prev').disabled = currentPage <= 1;
+  document.getElementById('pager-next').disabled = currentPage >= totalPages;
+  return rows.slice(start, start + pageSize);
+}
+
 function renderTable() {
-  const marketRows = applyMarketFilter(latestRows);
-  const filtered = applySearch(marketRows);
-  renderRows(applySort(filtered));
+  const filtered = applySearch(latestRows);
+  const sorted = applySort(filtered);
+  renderRows(paginate(sorted));
   updateHeaderIndicators();
 
   const countText = searchQuery
-    ? `${filtered.length}/${marketRows.length} hisse (filtrelendi)`
-    : `${marketRows.length} hisse`;
+    ? `${filtered.length}/${latestRows.length} hisse (filtrelendi)`
+    : `${latestRows.length} hisse`;
   document.getElementById('meta').textContent =
     `${countText} | guncelleme: ${lastUpdatedAt || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
   document.getElementById('warning').textContent =
     lastMissingCount ? `Uyari: ${lastMissingCount} hisse icin veri alinamadi, hedeflenen sayiya ulasilamadi.` : '';
 }
 
+document.querySelectorAll('#pager-controls [data-size]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const size = btn.dataset.size;
+    pageSize = size === 'max' ? 'max' : parseInt(size, 10);
+    currentPage = 1;
+    document.querySelectorAll('#pager-controls [data-size]').forEach(b => b.classList.toggle('active', b === btn));
+    renderTable();
+  });
+});
+document.getElementById('pager-prev').addEventListener('click', () => {
+  currentPage -= 1;
+  renderTable();
+});
+document.getElementById('pager-next').addEventListener('click', () => {
+  currentPage += 1;
+  renderTable();
+});
+
 document.getElementById('search-input').addEventListener('input', (e) => {
   searchQuery = e.target.value.trim();
   document.getElementById('search-clear').style.display = searchQuery ? 'block' : 'none';
+  currentPage = 1;
   renderTable();
 });
 document.getElementById('search-clear').addEventListener('click', () => {
@@ -189,6 +250,7 @@ document.getElementById('search-clear').addEventListener('click', () => {
   input.value = '';
   searchQuery = '';
   document.getElementById('search-clear').style.display = 'none';
+  currentPage = 1;
   renderTable();
   input.focus();
 });
@@ -196,6 +258,7 @@ document.getElementById('search-clear').addEventListener('click', () => {
 document.querySelectorAll('#head-row th').forEach(th => {
   th.addEventListener('click', () => {
     const key = th.dataset.key;
+    currentPage = 1;
     if (key === '_default') {
       sortState = { key: null, dir: 'desc' };
     } else if (sortState.key === key) {

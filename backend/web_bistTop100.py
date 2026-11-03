@@ -715,14 +715,6 @@ def api_paper_trades():
     return jsonify(scanner.get_paper_trades())
 
 
-@app.route("/api/paper/equity")
-@_login_required
-def api_paper_equity():
-    """Sanal hesabin equity (nakit + acik pozisyon degeri) gecmisi -
-    gunluk/saatlik/5dk gruplama frontend'de yapilir (Skor Gecmisi'yle ayni desen)."""
-    return jsonify(scanner.get_paper_equity_history("2000-01-01 00:00:00"))
-
-
 @app.route("/api/paper/cash", methods=["POST"])
 @_login_required
 def api_paper_set_cash():
