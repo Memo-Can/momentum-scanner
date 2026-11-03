@@ -177,7 +177,7 @@
   /* Panel darlastiginda (yukaridaki margin-right yuzunden) sutunlar
      sikismasin - tablo kendi min genisligini korur, tasarsa wrap yatay
      kaydirma sunar (ana tablonun #table-wrap'iyla AYNI desen). */
-  #paper-positions-wrap, #paper-trades-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #paper-positions-wrap, #paper-trades-wrap, #paper-watchlist-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   #paper-trading table { border-collapse: collapse; width: 100%; min-width: 560px; }
   #paper-trading th { text-align: right; padding: 6px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
   #paper-trading th.left { text-align: left; }
