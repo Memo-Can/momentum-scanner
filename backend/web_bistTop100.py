@@ -111,6 +111,17 @@ _state = {
     "updated_at": None,
 }
 
+# Gercek taramayi (Yahoo'ya giden tum istekler) hem _scan_loop() hem
+# _ensure_scanned_once() cagirabilir - bu ikisinin AYNI ANDA, PARALEL
+# calismasini onlemek icin TEK bir kilit (2026-11-03'te eklendi, bkz.
+# _run_scan()/_scan_once()/_ensure_scanned_once()). Eskiden bu ikisi
+# birbirinden habersizdi: piyasa acikken bir restart olduğunda
+# _scan_loop()'un ilk dongusu ile (sayfayi hemen acan birinin tetikledigi)
+# _ensure_scanned_once() AYNI ANDA calisip Yahoo'ya iki KAT (her biri
+# ~700-800 istek) yuk bindirebiliyordu - gercek bir risk, cunku VPS'e her
+# deploy/restart tam olarak bu senaryoyu olusturuyor.
+_scan_lock = threading.Lock()
+
 # BIST sekmelerinin sagindaki doviz/emtia/BIST100/BTC seridi - hisse
 # taramasindan bagimsiz, kendi thread'inde ayni BIST_REFRESH_SECONDS ritmiyle
 # calisir (ikisi de ayni yavaslikta ama farkli veri kumeleri cekiyor,
@@ -185,8 +196,14 @@ def _skeleton_row(ticker: str, price, daily_pct) -> dict:
     }
 
 
-def _scan_once():
-    """BIST 30/100/300 sekmelerinin ortak veri havuzunu hazirlar - bkz.
+def _run_scan():
+    """_scan_once()/_ensure_scanned_once()'in PAYLASTIGI gercek tarama
+    govdesi - _scan_lock ZATEN alinmis olarak cagrilmali (bkz. cagiran
+    taraflardaki yorumlar), burada TEKRAR kilit ALINMAZ (threading.Lock
+    yeniden-girilebilir/reentrant DEGIL, ayni thread'de ikinci kez
+    acquire() etmek kilitlenir/deadlock olur).
+
+    BIST 30/100/300 sekmelerinin ortak veri havuzunu hazirlar - bkz.
     scanner_bistTop100.py modul aciklamasi: BIST100 (BIST30'u da kapsar) +
     gunluk % degisime gore ilk TOP300_SIZE hisse, cakisanlar tekrar
     cekilmez. Her satir bist30/bist100 uyelik bayraklariyla etiketlenir -
@@ -272,6 +289,15 @@ def _scan_once():
         _state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _scan_once():
+    """_run_scan()'i _scan_lock ile sarar - _scan_loop()'un normal 5
+    dakikalik dongusu bunu cagirir. _ensure_scanned_once() ise AYNI kilidi
+    kendi tarafinda alip _run_scan()'i DOGRUDAN cagirir (bkz. orada) - bu
+    fonksiyonu DEGIL, re-entrant olmayan kilidi iki kez almamak icin."""
+    with _scan_lock:
+        _run_scan()
+
+
 # Sanal Al-Sat'in acik pozisyon K/Z durumunu saat basina BIR KEZ Telegram'a
 # raporlamak icin - hangi saate ait rapor son gonderildi (ayni saat icinde
 # BIST_REFRESH_SECONDS'ta bir tekrar tekrar gonderilmesin diye). Restart'ta
@@ -347,18 +373,25 @@ def _scan_loop():
 # (BIST_REFRESH_SECONDS'ta bir tazeleme) devam eder - bu fonksiyon SADECE
 # "hic taranmamis" durumunu bir kez kurtarir, surekli calisan bir mekanizma
 # DEGIL.
-_ensure_scan_lock = threading.Lock()
-
-
+#
+# 2026-11-03'te _scan_loop() ile PAYLASILAN _scan_lock kullanacak sekilde
+# degistirildi (eskiden kendine ozel _ensure_scan_lock vardi - bu, SADECE
+# birden fazla _ensure_scanned_once() cagrisini birbirine karsi korurdu,
+# _scan_loop()'un KENDI ilk taramasina karsi HICBIR koruma saglamiyordu).
+# Artik: _scan_lock halihazirda _scan_loop tarafindan tutuluyorsa, buradaki
+# "with _scan_lock" BLOKE olup bekler - lock serbest kalinca (_scan_loop'un
+# taramasi BITMIS olur) tekrar updated_at kontrolu yapilip YENIDEN tarama
+# YAPILMAZ. Ayni anda PARALEL iki tarama (iki KAT Yahoo yuku) artik
+# MUMKUN DEGIL.
 def _ensure_scanned_once():
     with _state_lock:
         if _state["updated_at"] is not None:
             return
-    with _ensure_scan_lock:
+    with _scan_lock:
         with _state_lock:
             if _state["updated_at"] is not None:
-                return  # bu arada baska bir istek zaten taramayi tamamladi
-        _scan_once()
+                return  # lock'u beklerken (_scan_loop ya da baska bir istek) zaten tarandi
+        _run_scan()
 
 
 def _market_scan_once():

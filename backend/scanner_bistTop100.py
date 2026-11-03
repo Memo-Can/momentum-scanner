@@ -1016,6 +1016,9 @@ def fetch_all(tickers, max_workers: int = 12):
     return results
 
 
+RETRY_BACKOFF_SECONDS = 3.0  # her retry denemesi ONCESI bekleme suresi (bkz. asagida)
+
+
 def fetch_with_retry(tickers, max_workers: int = 12, max_retries: int = MAX_RETRIES):
     """Basarisiz (None donen) hisseleri birkac kez tekrar dener,
     boylece gecici agi/istek hatalari yuzunden hisse eksik kalmaz.
@@ -1024,13 +1027,24 @@ def fetch_with_retry(tickers, max_workers: int = 12, max_retries: int = MAX_RETR
     anahtarlanir, row['ticker'] (goruntu icin soneksiz hali, 'AKBNK') ile
     DEGIL - onceden bu ikisi karistirilip pending listesi hicbir zaman
     kuculmuyordu, bu da basarili hisselerin bile her dongude MAX_RETRIES+1
-    kez (gereksiz yere) tekrar cekilmesine yol aciyordu."""
+    kez (gereksiz yere) tekrar cekilmesine yol aciyordu.
+
+    **Backoff (2026-11-03'te eklendi):** ilk denemeden SONRAKI her retry
+    'den ONCE RETRY_BACKOFF_SECONDS (3sn) beklenir - ilk deneme HEMEN
+    calisir (gecikme YOK), sadece basarisizlik durumunda devreye girer.
+    Eskiden retry'lar HICBIR bekleme olmadan, AYNI 12-thread'lik
+    esazamanlilikla hemen tekrar deniyordu - Yahoo zaten rate-limit'teyken
+    (429/Invalid Crumb) bu, durumu kotulestirebiliyordu (backoff yerine
+    ayni yogunlukla tekrar tekrar vurmak). Kullanici isteginin ("Yahoo
+    servisini zorlayan durumlari duzelt") bir parcasi."""
     rows_by_ticker = {}
     pending = list(dict.fromkeys(tickers))  # sirali + tekrarsiz
 
-    for _ in range(max_retries + 1):
+    for attempt in range(max_retries + 1):
         if not pending:
             break
+        if attempt > 0:
+            time.sleep(RETRY_BACKOFF_SECONDS)
         rows_by_ticker.update(fetch_all(pending, max_workers=max_workers))
         pending = [t for t in pending if t not in rows_by_ticker]
 
