@@ -796,6 +796,44 @@ def fetch_all_bist_tickers():
     return symbols
 
 
+def fetch_all_bist_quotes():
+    """fetch_all_bist_tickers() ile AYNI yf.screen() sayfalamasini kullanir
+    ama SADECE sembolu DEGIL, temel fiyat/gunluk % bilgisini de tasir -
+    628 hisse icin TOPLAM ~3 istek (hisse basina 1 DEGIL). fetch_row()'un
+    pahali per-hisse indikator hesaplamasi (EMA/RSI/MACD/ADX/Confluence
+    Score icin 1y gunluk OHLC gerektiriyor) burada YOK - bu yuzden skor/
+    indikator sutunlari bu veriyle DOLDURULAMAZ, sadece ticker/fiyat/gunluk%
+    icin kullanilir. web_bistTop100.py: _scan_once() bunu, birlesik havuzun
+    (BIST100+ilk 300 kazandiran) DISINDA kalan hisseleri de tabloda (skor
+    sutunu bos/"BEKLIYOR" olarak) GORUNUR kilmak icin cagirir - 2026-11-03'te
+    kullanici istegiyle eklendi: "tum hisseler gorunsun, skoru eksik
+    olanlarda islem yapilmasin" dedi."""
+    query = build_bist_query()
+    quotes_out = []
+    offset = 0
+    try:
+        while True:
+            result = yf.screen(query, sortField="percentchange", sortAsc=False, size=SCREEN_PAGE_SIZE, offset=offset)
+            quotes = result.get("quotes", [])
+            if not quotes:
+                break
+            for q in quotes:
+                symbol = q.get("symbol")
+                if not symbol:
+                    continue
+                quotes_out.append({
+                    "ticker": symbol.removesuffix(".IS"),
+                    "price": q.get("regularMarketPrice"),
+                    "daily": q.get("regularMarketChangePercent"),
+                })
+            offset += len(quotes)
+            if offset >= result.get("total", 0):
+                break
+    except Exception:
+        pass
+    return quotes_out
+
+
 def fetch_top_gainers(n: int):
     """Yahoo'nun region=tr taramasindan gunluk % degisime gore (yuksekten
     dusuge) ilk n hisseyi sayfalayarak dondurur - BIST 300 sekmesi icin.

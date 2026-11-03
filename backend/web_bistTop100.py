@@ -154,12 +154,53 @@ def _cache_set(cache_key, value):
     return value
 
 
+def _skeleton_row(ticker: str, price, daily_pct) -> dict:
+    """Birlesik havuzun (BIST100+ilk 300 kazandiran) DISINDA kalan, sadece
+    fetch_all_bist_quotes()'un ucuz toplu taramasindan gorulen hisseler icin
+    "iskelet" bir satir - fetch_row()'un pahali indikator hesaplamasi
+    calismadigi icin skor/indikator alanlari YOK, SADECE fiyat/gunluk%
+    doldurulur. `score="BEKLIYOR"` (confluence_label()'in asla uretmedigi,
+    frontend'de SCORE_SYMBOLS'ta eslesmesi olmayan bir deger) secildi -
+    None/null KULLANILMADI cunku frontend'deki `SCORE_SYMBOLS[r.score] ||
+    r.score` deseni null icin literal "null" metni basardi; sayisal NaN
+    alanlar ise zaten _row_to_json()'daki _sanitize() ile null'a cevrilip
+    mevcut fmtPct/fmtRsi/vb. yardimcilarinca '-' olarak gosteriliyor (ayrica
+    bir frontend degisikligi GEREKMEDI). SCORE_ORDER.get(..., 3) ile NOTR
+    gibi sira ortasinda bir yere duser. 2026-11-03'te kullanici istegiyle
+    eklendi - bkz. CLAUDE.md: "tum hisseler gorunsun, skoru eksik olanlarda
+    islem yapilmasin."""
+    nan = float("nan")
+    return {
+        "ticker": ticker,
+        "sector": "-",
+        "price": price if price is not None else nan,
+        "daily": daily_pct if daily_pct is not None else nan,
+        "d5": nan, "m1": nan, "y1": nan,
+        "signal_1d": "NOTR", "signal_macd": "NOTR",
+        "score": "BEKLIYOR", "score_raw": None,
+        "rsi": nan, "bb_percent": nan, "adx": nan, "rel_strength": nan,
+        "day_stop": None, "day_target": None,
+        "swing_stop": None, "swing_target": None,
+        "volume_ratio": nan, "day_range_pos": nan, "vol20": nan,
+    }
+
+
 def _scan_once():
     """BIST 30/100/300 sekmelerinin ortak veri havuzunu hazirlar - bkz.
     scanner_bistTop100.py modul aciklamasi: BIST100 (BIST30'u da kapsar) +
     gunluk % degisime gore ilk TOP300_SIZE hisse, cakisanlar tekrar
     cekilmez. Her satir bist30/bist100 uyelik bayraklariyla etiketlenir -
-    BIST 300 sekmesi ayrica bir bayrak gerektirmez, tum havuz zaten odur."""
+    BIST 300 sekmesi ayrica bir bayrak gerektirmez, tum havuz zaten odur.
+
+    Birlesik havuzun DISINDA kalan BIST hisseleri de (2026-11-03'ten
+    itibaren) tabloda GORUNUR - scanner.fetch_all_bist_quotes() ile ucuza
+    (~3 istek, 628 hisse icin TEK TEK istek ATILMADAN) cekilen sadece
+    fiyat/gunluk% bilgisiyle bir "iskelet" satir olarak (bkz. _skeleton_row).
+    Bu iskelet satirlar SADECE _state["rows"] / /api/rows'ta GORUNUR -
+    log_signal_changes/log_score_history/run_paper_trading_cycle'a
+    GONDERILMEZ (skoru olmayan bir satir uzerinde islem/log mantigi
+    calistirmanin anlami yok, ayrica score_history'yi gereksiz buyutmemek
+    icin bilincli bir ayrim)."""
     bist30_symbols = {t.removesuffix(".IS") for t in scanner.BIST30_TICKERS}
     bist100_symbols = {t.removesuffix(".IS") for t in scanner.BIST100_TICKERS}
 
@@ -204,8 +245,29 @@ def _scan_once():
             print("Sanal al-sat (paper trading) hatasi:", e)
         _maybe_send_hourly_paper_report(top_rows)
 
+    # Birlesik havuzun DISINDAKI hisseler - sadece GORUNUR olmalari icin
+    # ucuz bir toplu fiyat taramasiyla (~3 istek) iskelet satirlar
+    # eklenir. Hata/zaman asimi durumunda (bos liste donerse) tablo yine
+    # eskisi gibi SADECE top_rows'u gosterir - bu katman BASARISIZ olsa
+    # da ana tarama akisi bozulmaz.
+    try:
+        known_tickers = {r["ticker"] for r in top_rows}
+        skeleton_rows = [
+            _skeleton_row(q["ticker"], q["price"], q["daily"])
+            for q in scanner.fetch_all_bist_quotes()
+            if q["ticker"] not in known_tickers
+        ]
+        for row in skeleton_rows:
+            row["bist30"] = row["ticker"] in bist30_symbols
+            row["bist100"] = row["ticker"] in bist100_symbols
+    except Exception as e:
+        print("Tam piyasa listesi (iskelet satirlar) hatasi:", e)
+        skeleton_rows = []
+
+    display_rows = sorted(top_rows + skeleton_rows, key=_sort_key)
+
     with _state_lock:
-        _state["rows"] = [_row_to_json(r) for r in top_rows]
+        _state["rows"] = [_row_to_json(r) for r in display_rows]
         _state["missing_count"] = missing_count
         _state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
