@@ -425,11 +425,22 @@
     }
     #chart { height: 220px; }
     .sig-row { font-size: 11px; }
+
+    /* Pager (2026-11-03'te eklendi): ustteki genel ".market-tab-btn {flex:1}"
+       kurali BURADA 6 kucuk butonu (25/50/100/Tumu/Onceki/Sonraki) esit
+       genislikte uzatip satir basina kac tane sigdigina gore duzensiz
+       gorunmesine yol acardi - pager butonlari kendi dogal genisliginde
+       kalip gerektiginde satir atlasin diye ozellestirildi. */
+    #pager { padding: 8px 10px; }
+    #pager-controls .market-tab-btn { flex: 0 0 auto; padding: 5px 9px; font-size: 11px; }
+    #pager-page-indicator { font-size: 11px; width: 100%; }
   }
 
   @media (max-width: 420px) {
     thead th, tbody td { padding: 5px 6px; }
     #chart { height: 190px; }
+    #pager-controls { gap: 4px; }
+    #pager-controls .market-tab-btn { padding: 5px 7px; font-size: 10px; }
   }
 
   /* --- Giris/Cikis linki (header) --- */

@@ -26,9 +26,9 @@
 <div id="pager">
   <div id="pager-page-indicator"></div>
   <div id="pager-controls">
-    <button class="market-tab-btn" data-size="25" type="button">25</button>
+    <button class="market-tab-btn active" data-size="25" type="button">25</button>
     <button class="market-tab-btn" data-size="50" type="button">50</button>
-    <button class="market-tab-btn active" data-size="100" type="button">100</button>
+    <button class="market-tab-btn" data-size="100" type="button">100</button>
     <button class="market-tab-btn" data-size="max" type="button">Tumu</button>
     <button class="market-tab-btn" id="pager-prev" type="button">&lsaquo; Onceki</button>
     <button class="market-tab-btn" id="pager-next" type="button">Sonraki &rsaquo;</button>
@@ -68,7 +68,7 @@ let lastMissingCount = 0;
 // gosterir, sayisal degerler (25/50/100) sayfa basina gosterilecek satir
 // sayisidir. Arama/siralama DEGISTIGINDE 1. sayfaya donulur (asagidaki
 // ilgili event listener'larda currentPage = 1 satirlarina bak).
-let pageSize = 100;
+let pageSize = 25;
 let currentPage = 1;
 
 // Endeks sutununda GORUNEN kisa etiket - '30' (BIST30) / '100' (BIST100,
