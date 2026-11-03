@@ -37,17 +37,6 @@
   header .meta { color: var(--muted); font-size: 12px; }
   .warning { color: var(--yellow); font-size: 12px; margin-top: 4px; }
   #header-controls { display: flex; align-items: center; gap: 10px; }
-  #notify-toggle {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    color: var(--muted);
-    border-radius: 6px;
-    padding: 7px 10px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  #notify-toggle:hover { color: var(--text); }
-  #notify-toggle.active { border-color: var(--green); color: var(--green); }
   #search-wrap { position: relative; flex-shrink: 0; margin-left: 8px; }
   #search-input {
     width: 176px;

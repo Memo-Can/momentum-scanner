@@ -278,7 +278,6 @@ async function refreshRows() {
     latestRows = data.rows || [];
     lastUpdatedAt = data.updated_at || null;
     lastMissingCount = data.missing_count || 0;
-    checkSignalTransitions(latestRows);
     renderTable();
   } catch (e) {
     document.getElementById('meta').textContent = 'Veri alinamadi, tekrar denenecek...';
@@ -289,8 +288,8 @@ async function refreshRows() {
 // kendisinin ekledigi) tablo ilk kez dolduktan sonra o hisse otomatik
 // secilir - boylece bir hissenin linki paylasilinca dogrudan o grafikle acilir.
 // DOMContentLoaded'a kadar beklenir - index.html'in en altindaki core
-// script'i (selectTicker/checkSignalTransitions tanimlari) bu noktada
-// KESIN calismis olur (script tag sirasina BAGIMLI olmadan).
+// script'i (selectTicker tanimi) bu noktada KESIN calismis olur (script tag
+// sirasina BAGIMLI olmadan).
 document.addEventListener('DOMContentLoaded', () => {
   refreshRows().then(() => {
     const hashTicker = location.hash.slice(1);

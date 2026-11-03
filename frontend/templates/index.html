@@ -19,9 +19,6 @@
 // calistigi ANDA degerlendiriliyor, daha sonraya birakilamaz.
 const REFRESH_SECONDS = {{ refresh_seconds }};
 const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
-const AL_SOUND = "{{ url_for('static', filename='al_beep.wav') }}";
-const SAT_SOUND = "{{ url_for('static', filename='sat_beep.wav') }}";
-const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
 </script>
 
 <header>
@@ -34,7 +31,6 @@ const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
     </div>
   </div>
   <div id="header-controls">
-    <button id="notify-toggle" type="button" title="Guclu Al/Sat sinyallerinde bildirim ve ses">Bildirimler: Kapali</button>
     {% if logged_in %}
       <a id="auth-link" href="{{ url_for('logout') }}" onclick="return confirm('Cikis yapmak istediginize emin misiniz?');">Cikis Yap</a>
     {% else %}
@@ -83,8 +79,11 @@ const FAVICON_URL = "{{ url_for('static', filename='favicon.png') }}";
 <script>
 // ORTAK/PAYLASILAN JS - hisse tablosu (_view_stocks.html), Sanal Al-Sat
 // (_view_paper_trading.html) VE yan panel (_view_graphic.html) tarafindan
-// birlikte kullanilir: genel bicimlendiriciler, sinyal bildirimleri, market
-// seridi, showView() ve paylasilan Sanal Al-Sat state'i (watchlistTickers).
+// birlikte kullanilir: genel bicimlendiriciler, market seridi, showView()
+// ve paylasilan Sanal Al-Sat state'i (watchlistTickers). Web tarayici
+// bildirimi (eski "Bildirimler: Acik/Kapali" butonu, Notification API,
+// al/sat_beep.wav sesleri) 2026-11-03'te TAMAMEN KALDIRILDI - bkz. CLAUDE.md
+// "Web bildirimleri kaldirildi" - artik TEK bildirim kanali Telegram.
 // Grafik/crosshair/legend/Skor Gecmisi/modal/
 // selectTicker() gibi yan panele OZEL mantik artik burada DEGIL,
 // _view_graphic.html'in KENDI script'inde (bkz. CLAUDE.md "Yan panel
@@ -128,81 +127,6 @@ function escapeHtml(s) {
   div.textContent = s ?? '';
   return div.innerHTML;
 }
-
-// Guclu Al/Sat sinyal bildirimleri: hisse skoru GUCLU_AL/GUCLU_SAT'a
-// GECTIGINDE (onceki taramaya gore farkliysa) bir kez bildirim+ses tetiklenir -
-// backend'deki log_signal_changes()'in "sadece durum degistiginde kaydet"
-// mantiginin istemci tarafindaki karsiligi. lastKnownScores sayfa acikken
-// bellekte tutulur (sayfa yenilenince sifirlanir); bu yuzden ilk yuklemede
-// zaten GUCLU_AL/SAT olan hisseler icin spam bildirim atilmaz (asagida
-// notifyBootstrapped ile).
-let notifyEnabled = false;
-try { notifyEnabled = localStorage.getItem('notifyEnabled') === '1' && Notification.permission === 'granted'; } catch (e) {}
-let notifyBootstrapped = false;
-const lastKnownScores = new Map(); // ticker -> son bilinen skor
-
-function updateNotifyButton() {
-  const btn = document.getElementById('notify-toggle');
-  btn.textContent = notifyEnabled ? 'Bildirimler: Acik' : 'Bildirimler: Kapali';
-  btn.classList.toggle('active', notifyEnabled);
-}
-
-const STRONG_SAT_LABELS = ['GUCLU_SAT', 'MUTLAK_SAT'];
-const STRONG_SIGNAL_TEXT = {
-  MUTLAK_AL: 'MUTLAK AL', GUCLU_AL: 'GUCLU AL', GUCLU_SAT: 'GUCLU SAT', MUTLAK_SAT: 'MUTLAK SAT',
-};
-
-function playSignalSound(score) {
-  try {
-    new Audio(STRONG_SAT_LABELS.includes(score) ? SAT_SOUND : AL_SOUND).play().catch(() => {});
-  } catch (e) {}
-}
-
-function fireSignalNotification(row) {
-  playSignalSound(row.score);
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-  const label = STRONG_SIGNAL_TEXT[row.score] || row.score;
-  try {
-    new Notification(`${row.ticker} -> ${label}`, {
-      body: `${row.price != null ? row.price.toFixed(2) : '-'} TL (${row.daily != null ? (row.daily >= 0 ? '+' : '') + row.daily.toFixed(2) : '-'}%)`,
-      icon: FAVICON_URL,
-      tag: `signal-${row.ticker}`,
-    });
-  } catch (e) {}
-}
-
-function checkSignalTransitions(rows) {
-  if (!notifyBootstrapped) {
-    // Ilk yukleme: mevcut durumu sessizce kaydet, bildirim atma - aksi halde
-    // sayfa her acildiginda o an GUCLU_AL/SAT olan tum hisseler icin spam olur.
-    rows.forEach(r => lastKnownScores.set(r.ticker, r.score));
-    notifyBootstrapped = true;
-    return;
-  }
-  rows.forEach(row => {
-    const prev = lastKnownScores.get(row.ticker);
-    const isNewStrongSignal =
-      (row.score in STRONG_SIGNAL_TEXT) && prev !== row.score;
-    lastKnownScores.set(row.ticker, row.score);
-    if (isNewStrongSignal && notifyEnabled) fireSignalNotification(row);
-  });
-}
-
-document.getElementById('notify-toggle').addEventListener('click', () => {
-  if (notifyEnabled) {
-    notifyEnabled = false;
-    try { localStorage.setItem('notifyEnabled', '0'); } catch (e) {}
-    updateNotifyButton();
-    return;
-  }
-  if (typeof Notification === 'undefined') return;
-  Notification.requestPermission().then(perm => {
-    notifyEnabled = perm === 'granted';
-    try { localStorage.setItem('notifyEnabled', notifyEnabled ? '1' : '0'); } catch (e) {}
-    updateNotifyButton();
-  });
-});
-updateNotifyButton();
 
 // Manuel takip listesindeki ticker'lar - hem _view_graphic.html'in
 // updateWatchlistToggleButton()'u okuyor hem _view_paper_trading.html

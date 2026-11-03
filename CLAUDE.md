@@ -68,7 +68,9 @@ frontend/
                             inline `<script>`'i (`selectTicker()` dahil). `{% include %}` ile
                             index.html'e (`.layout`'un ikinci çocuğu olarak, table-wrap'ten
                             SONRA) dahil edilir. 2026-11-02'de ayrıldı.
-  static/                 → favicon + web bildirim sesleri + style.css (Flask'ın /static/ rotası).
+  static/                 → favicon + style.css (Flask'ın /static/ rotası). Web bildirim sesleri
+                            (al_beep.wav/sat_beep.wav) 2026-11-03'te SİLİNDİ, bkz. aşağıda
+                            "Bildirimler" bölümündeki "Web tarayıcı bildirimleri kaldırıldı".
 ```
 
 `scanner_bistTop100.py`'deki `DATA_DIR = backend/data` sabiti tüm CSV/JSON yollarının kökü — yeni bir log/CSV dosyası eklenecekse buraya, `os.path.join(DATA_DIR, ...)` ile eklenir. `backend/data/.gitkeep` dizin git'te boş kalmasın diye var (asıl CSV'ler gitignored, fresh clone'da dizin yine de var olsun diye).
@@ -326,6 +328,14 @@ Expo/React Native, WebView tabanlı (ayrı native ekranlar değil — doğrudan 
 ## Bildirimler (Telegram — 2026-10'da Firebase'den geçildi)
 
 GUCLU_AL/GUCLU_SAT sinyal geçişlerinde (`log_signal_changes()`, sadece durum DEĞİŞTİĞİNDE, spam yok) artık Telegram'a mesaj gönderiliyor — mobil push (Firebase Cloud Messaging) tamamen kaldırıldı, tek kanal bu.
+
+**Web tarayıcı bildirimleri de KALDIRILDI (2026-11-03'te kullanıcı isteğiyle).** Eskiden `index.html`'de ayrı, İKİNCİ bir bildirim kanalı daha vardı: header'daki "Bildirimler: Açık/Kapalı" butonu (`#notify-toggle`), tarayıcının `Notification` API'si + `localStorage`'da tutulan bir `notifyEnabled` tercihi + GUCLU_AL/SAT'a geçişte çalan `al_beep.wav`/`sat_beep.wav` sesleri. Kullanıcı "Telegram iletişimi kurduğumuz için bu alana gerek yok, web bildirimleriyle ilgili ne varsa hepsini sil" dedi — şu kaldırıldı:
+- `index.html`: `#notify-toggle` butonu, `AL_SOUND`/`SAT_SOUND`/`FAVICON_URL` Jinja sabitleri, `notifyEnabled`/`notifyBootstrapped`/`lastKnownScores`/`STRONG_SAT_LABELS`/`STRONG_SIGNAL_TEXT` state'leri, `updateNotifyButton()`/`playSignalSound()`/`fireSignalNotification()`/`checkSignalTransitions()` fonksiyonları, buton click listener'ı.
+- `_view_stocks.html`: `refreshRows()`'taki `checkSignalTransitions(latestRows);` çağrısı.
+- `style.css`: `#notify-toggle`/`#notify-toggle:hover`/`#notify-toggle.active` kuralları.
+- `frontend/static/al_beep.wav` ve `sat_beep.wav` dosyalarının KENDİSİ silindi.
+- **Dokunulmayan (KARIŞTIRILMAMALI):** `backend/terminal_bistTop100.py`'nin KENDİ `BEEP_SOUND` (`backend/sounds/al_beep.wav`) sesi — bu, terminal arayüzünün ayrı/kendi özelliği, web'in bu kaldırılan özelliğiyle HİÇ ilgisi yok (CLAUDE.md'de zaten "ikisi ayrı" diye not edilmişti), dokunulmadı.
+- Sonuç: artık sinyal geçişleri için **TEK** bildirim kanalı Telegram — tarayıcı sekmesi kapalıyken/arka plandayken de çalışan, kullanıcının zaten kurduğu kanal.
 
 - `scanner_bistTop100.py: _telegram_send(text)` — `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` ortam değişkenleriyle (sır, koda/repoya YAZILMAZ) `https://api.telegram.org/bot<TOKEN>/sendMessage`'a Python stdlib `urllib.request` ile POST yapan TEK ortak fonksiyon — yeni bir pip bağımlılığı YOK. İkisi de tanımlı değilse sessizce atlar (Telegram kurulmadan da tarama normal çalışır). `_send_push_notifications()` (sinyal geçişleri) VE `_send_paper_trade_notification()` (aşağıda) bunu kullanır.
 - Hata (ağ/API) `print()` ile loglanır, exception fırlatılmaz — bildirim başarısız olsa da CSV/DB loglama (tarihsel kayıt) her zaman yazılmış olur.
