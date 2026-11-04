@@ -539,8 +539,9 @@ def api_market_indicators():
 
 
 # /api/history ve /api/indicators AYNI ticker icin ayri ayri Yahoo istegi
-# atmasin diye paylasilan HAM (DataFrame) onbellek - ikisi de 6 aylik veriyi
-# (indicators'in isinma penceresi, history'nin ihtiyacindan daha genis) TEK
+# atmasin diye paylasilan HAM (DataFrame) onbellek - ikisi de 1 yillik veriyi
+# (asagidaki CHART_RANGE_TRADING_DAYS'in en genis araligi olan "1y" DAHIL,
+# indikatorlerin isinma penceresi de bu sayede her aralik icin yeterli) TEK
 # bir Yahoo cagrisindan paylasir. Frontend ikisini neredeyse AYNI ANDA
 # (Promise.all) istedigi icin per-ticker kilit de var: ilk istek Yahoo'ya
 # gider, es zamanli ikinci istek kilidi bekleyip onbellekten okur - ikisi de
@@ -564,17 +565,48 @@ def _get_raw_history(ticker: str):
         if cached and time.time() - cached[0] < RAW_HISTORY_CACHE_TTL:
             return cached[1]
         yahoo_ticker = f"{ticker}.IS"
-        hist = yf.Ticker(yahoo_ticker).history(period="6mo", interval="1d", auto_adjust=False)
+        hist = yf.Ticker(yahoo_ticker).history(period="1y", interval="1d", auto_adjust=False)
         _raw_history_cache[ticker] = (time.time(), hist)
         return hist
 
 
+# Grafik zaman araligi secici (1A/3A/6A/1Y, 2026-11-04'te eklendi) - mum
+# COZUNURLUGU hep gunluk kalir, SADECE gorunen pencere genisler/daralir
+# (TradingView/Yahoo'nun standart "1A 3A 6A 1Y" butonlari gibi - gercek
+# aylik/ceyreklik RESAMPLE edilmis mum DEGIL, kullaniciyla konusulup
+# netlestirildi). Islem gunu sayilari scanner_bistTop100.py'deki
+# MONTHLY_LOOKBACK_DAYS/YEARLY_LOOKBACK_DAYS'ten ("~1 ay = 21 islem gunu"
+# kurali) turetildi - ayri bir sabit uydurulmadi, tutarlilik icin oradaki
+# tanimlar carpilarak kullanildi. _get_raw_history() artik HER ZAMAN 1
+# yillik veri cektigi icin (yukarida) bu dort aralik da EK bir Yahoo istegi
+# GEREKTIRMEZ - sadece ayni DataFrame'den farkli uzunlukta bir dilim alinir.
+CHART_RANGE_TRADING_DAYS = {
+    "1m": scanner.MONTHLY_LOOKBACK_DAYS,
+    "3m": scanner.MONTHLY_LOOKBACK_DAYS * 3,
+    "6m": scanner.MONTHLY_LOOKBACK_DAYS * 6,
+    "1y": scanner.YEARLY_LOOKBACK_DAYS,
+}
+CHART_RANGE_DEFAULT = "3m"
+
+
+def _resolve_chart_range() -> str:
+    """?range= query parametresini okur - gecersiz/eksik bir deger (veya hic
+    gonderilmemesi, eski/once yuklenmis bir sayfa) sessizce varsayilana (3A)
+    duser, hataya yol acmaz. Sadece bir dict key kontrolu - enjeksiyon riski
+    yok."""
+    range_key = request.args.get("range", CHART_RANGE_DEFAULT)
+    return range_key if range_key in CHART_RANGE_TRADING_DAYS else CHART_RANGE_DEFAULT
+
+
 @app.route("/api/history/<ticker>")
 def api_history(ticker: str):
-    """Verilen (soneksiz) ticker icin 3 aylik gunluk mum verisini dondurur.
-    orn. /api/history/AKBNK -> AKBNK.IS icin OHLC. Ham veri /api/indicators
-    ile paylasilir (bkz. _get_raw_history) - ayri bir Yahoo istegi yapmaz."""
-    cache_key = ("history", ticker)
+    """Verilen (soneksiz) ticker icin gunluk mum verisini dondurur - ?range=
+    ile 1A/3A/6A/1Y araliklari secilebilir (varsayilan 3A, bkz.
+    CHART_RANGE_TRADING_DAYS). orn. /api/history/AKBNK?range=1y -> AKBNK.IS
+    icin 1 yillik OHLC. Ham veri /api/indicators ile paylasilir (bkz.
+    _get_raw_history) - ayri bir Yahoo istegi yapmaz."""
+    range_key = _resolve_chart_range()
+    cache_key = ("history", ticker, range_key)
     cached = _cache_get(cache_key)
     if cached is not None:
         return jsonify(cached)
@@ -589,7 +621,7 @@ def api_history(ticker: str):
         return jsonify({"error": "veri alınamadı"}), 502
     if hist.empty:
         return jsonify(_cache_set(cache_key, []))
-    recent = hist.tail(65)  # ~3 aylik islem gunu (6 aylik ham veriden son kismi)
+    recent = hist.tail(CHART_RANGE_TRADING_DAYS[range_key])
     candles = [
         {
             "time": idx.strftime("%Y-%m-%d"),
@@ -664,14 +696,15 @@ def api_score_history(ticker: str):
 @app.route("/api/indicators/<ticker>")
 def api_indicators(ticker: str):
     """Verilen (soneksiz) ticker icin EMA9/21, MACD, RSI ve Bollinger
-    Bantlarinin TAM zaman serisini dondurur - grafikte istege bagli
-    acilir/kapanir indikator katmanlari icin. 6 aylik veri cekilir (gorunen
-    son ~3 aylik araligin TAMAMINDA indikatorlerin saglikli yakinsamis olmasi
-    icin ~3 aylik ekstra isinma payi birakilir), yanit son ~3 aya kirpilir -
-    bkz. api_history() (mum grafigi de ayni 3 aylik araligi gosterir). Ham
-    veri /api/history ile paylasilir (bkz. _get_raw_history) - ayri bir
-    Yahoo istegi yapmaz."""
-    cache_key = ("indicators", ticker)
+    Bantlarinin zaman serisini dondurur - grafikte istege bagli acilir/kapanir
+    indikator katmanlari icin. ?range= ile api_history() ile AYNI 1A/3A/6A/1Y
+    araligi secilebilir (varsayilan 3A) - indikatorler HER ZAMAN 1 yillik ham
+    veriden (bkz. _get_raw_history) hesaplanir, SADECE yanit secilen aralaga
+    kirpilir; boylece en genis aralikta (1Y) bile indikatorlerin basinda
+    isinma payi eksikligi olmaz. Ham veri /api/history ile paylasilir - ayri
+    bir Yahoo istegi yapmaz."""
+    range_key = _resolve_chart_range()
+    cache_key = ("indicators", ticker, range_key)
     cached = _cache_get(cache_key)
     if cached is not None:
         return jsonify(_strip_signal_fields_from_indicators(cached))
@@ -690,9 +723,10 @@ def api_indicators(ticker: str):
     macd_line, macd_sig, macd_hist = scanner.macd_series(closes)
     bb_upper, bb_mid, bb_lower = scanner.bollinger_bands_series(closes)
     dates = [idx.strftime("%Y-%m-%d") for idx in hist.index]
+    range_days = CHART_RANGE_TRADING_DAYS[range_key]
 
     def _series(values):
-        trimmed = values.tail(65)
+        trimmed = values.tail(range_days)
         trimmed_dates = dates[-len(trimmed):]
         return [
             {"time": t, "value": None if v != v else float(v)}

@@ -7,6 +7,12 @@
     {% endif %}
     <div class="sub" id="side-sub" title="Büyütmek için tıklayın">3 aylık günlük mum</div>
     <div id="chart-group">
+      <div class="tabs" id="chart-range-tabs">
+        <button class="tab-btn" data-range="1m">1A</button>
+        <button class="tab-btn active" data-range="3m">3A</button>
+        <button class="tab-btn" data-range="6m">6A</button>
+        <button class="tab-btn" data-range="1y">1Y</button>
+      </div>
       <div id="indicator-toggles">
         <label><input type="checkbox" id="ind-ema" checked> EMA 9/21</label>
         <label><input type="checkbox" id="ind-bb" checked> Bollinger</label>
@@ -96,6 +102,18 @@ let scoreHistoryRaw = [];
 // cagrisina artan bir kimlik verilir - sonuc uygulanmadan once hala "guncel
 // secim" olup olmadigi kontrol edilir.
 let chartRequestId = 0;
+// Grafik zaman araligi (1A/3A/6A/1Y, 2026-11-04'te eklendi) - secim
+// localStorage'da (sadece bu tarayici icin) tutulur, sayfa yeniden
+// acildiginda/hisse degistiginde kullanicinin son sectigi aralik korunur.
+// Mum COZUNURLUGU hep gunluk - bu SADECE gorunen pencere genisligi.
+const CHART_RANGE_LABELS = { '1m': '1 aylık', '3m': '3 aylık', '6m': '6 aylık', '1y': '1 yıllık' };
+let chartRange = '3m';
+try {
+  const savedRange = localStorage.getItem('chartRange');
+  if (savedRange && CHART_RANGE_LABELS[savedRange]) chartRange = savedRange;
+} catch (e) {
+  // localStorage erisilemez (gizli pencere vb.) - varsayilan 3A ile devam
+}
 
 async function removeFromWatchlist(ticker) {
   try {
@@ -466,6 +484,14 @@ document.querySelectorAll('#score-tabs .tab-btn').forEach(btn => {
   });
 });
 
+// Grafik zaman araligi secici (1A/3A/6A/1Y, 2026-11-04'te eklendi) - #score-tabs
+// ile AYNI tiklama deseni, ama secim burada backend'e ?range= olarak gidiyor
+// (bkz. changeChartRange()) - mum COZUNURLUGU degismiyor, sadece gorunen
+// pencere genisliyor/daraliyor.
+document.querySelectorAll('#chart-range-tabs .tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => changeChartRange(btn.dataset.range));
+});
+
 // Crosshair bir mumun/noktanin ustune gelince (ya da ayni "time" degerine
 // sahip MACD/RSI noktasina) o anin TUM gostergelerini (OHLC + EMA9/21 +
 // MACD/Sinyal + RSI) tek bir satirda gosterir - hangi grafigin crosshair'i
@@ -560,6 +586,65 @@ function fetchWithTimeout(url, ms = 15000) {
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+// Zaman araligi butonlarinin "active" durumunu + "#side-sub" baslik metnini
+// GUNCEL chartRange'e gore gunceller - hem ilk sayfa yuklemesinde (localStorage'dan
+// okunan deger HTML'deki sabit "3A active" ile uyusmayabilir) hem de kullanici
+// bir aralik butonuna tikladiginda cagrilir.
+function updateChartRangeButtons() {
+  document.querySelectorAll('#chart-range-tabs .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === chartRange);
+  });
+  const sub = document.getElementById('side-sub');
+  if (sub) sub.textContent = `${CHART_RANGE_LABELS[chartRange] || CHART_RANGE_LABELS['3m']} günlük mum`;
+}
+updateChartRangeButtons(); // sayfa yuklenirken localStorage'daki secimi HTML'e yansit
+
+// Grafik/indikator verisini (SADECE bu ikisi - skor gecmisi HARIC, o range'den
+// bagimsiz) backend'den ceker - selectTicker() (yeni hisse) VE changeChartRange()
+// (ayni hisse, yeni aralik) tarafindan paylasilan tek fetch noktasi.
+async function fetchChartSeries(ticker, range) {
+  const [histRes, indRes] = await Promise.all([
+    fetchWithTimeout(`/api/history/${ticker}?range=${range}`),
+    fetchWithTimeout(`/api/indicators/${ticker}?range=${range}`),
+  ]);
+  return { candles: await histRes.json(), indData: await indRes.json() };
+}
+
+// fetchChartSeries()'in sonucunu grafige uygular - candle/indikator
+// serilerini set eder, AL/SAT isaretlerini yeniden hesaplar (candleTimeMap
+// degistigi icin aralik degisince de tekrar cagrilmasi GEREKIR).
+function applyChartSeries(candles, indData) {
+  indicatorData = indData;
+  if (!Array.isArray(candles) || candles.length === 0) {
+    setChartStatus('error', 'Bu hisse için grafik verisi bulunamadı.');
+    candleTimeMap = new Map();
+  } else {
+    candleSeries.setData(candles);
+    candleTimeMap = new Map(candles.map(c => [c.time, c]));
+    // Onceki secimde yapilmis olabilecek zoom/pan yeni veriye tasinmasin -
+    // her yeni hisse/aralik secildiginde grafik varsayilan (tum veriyi
+    // gosteren) goruntuye doner. Checkbox secimleri bundan etkilenmez.
+    chart.timeScale().fitContent();
+    setChartStatus('hidden');
+  }
+  applyIndicatorData();
+  updateChartMarkers();
+}
+
+// Onceki secimin grafigi/indikatorleri hemen temizler - yeni veri gelene
+// kadar eski mumlar arkada asili kalmaz (hem hisse hem aralik degisiminde).
+function clearChartSeries() {
+  candleSeries.setData([]);
+  candleSeries.setMarkers([]);
+  ema9Series.setData([]); ema21Series.setData([]);
+  bbUpperSeries.setData([]); bbMidSeries.setData([]); bbLowerSeries.setData([]);
+  if (macdHistSeries) { macdHistSeries.setData([]); macdLineSeries.setData([]); macdSignalSeries.setData([]); }
+  if (rsiSeries) rsiSeries.setData([]);
+  // Onceki secimden kalmis olabilecek hata mesaji varsa temizlenir - yukleme
+  // sirasinda herhangi bir gostergemiz yok, sadece hata olursa gorunur.
+  setChartStatus('hidden');
+}
+
 async function selectTicker(ticker) {
   selectedTicker = ticker;
   document.getElementById('side-empty').style.display = 'none';
@@ -584,50 +669,46 @@ async function selectTicker(ticker) {
     ensureMacdChart();
     ensureRsiChart();
   }
+  updateChartRangeButtons();
 
   const myRequestId = ++chartRequestId;
-  // Onceki hissenin grafigi/indikatorleri hemen temizlenir, yeni veri gelene
-  // kadar eski hissenin mumlari arkada asili kalmaz.
-  candleSeries.setData([]);
-  candleSeries.setMarkers([]);
-  ema9Series.setData([]); ema21Series.setData([]);
-  bbUpperSeries.setData([]); bbMidSeries.setData([]); bbLowerSeries.setData([]);
-  if (macdHistSeries) { macdHistSeries.setData([]); macdLineSeries.setData([]); macdSignalSeries.setData([]); }
-  if (rsiSeries) rsiSeries.setData([]);
-  // Onceki secimden kalmis olabilecek hata mesaji varsa temizlenir - yukleme
-  // sirasinda herhangi bir gostergemiz yok, sadece hata olursa gorunur.
-  setChartStatus('hidden');
+  clearChartSeries();
 
   try {
-    const [histRes, scoreHistRes, indRes] = await Promise.all([
-      fetchWithTimeout(`/api/history/${ticker}`),
+    const [series, scoreHistRes] = await Promise.all([
+      fetchChartSeries(ticker, chartRange),
       fetchWithTimeout(`/api/score-history/${ticker}`),
-      fetchWithTimeout(`/api/indicators/${ticker}`),
     ]);
-    const candles = await histRes.json();
     const scoreHist = await scoreHistRes.json();
-    const indData = await indRes.json();
 
-    if (myRequestId !== chartRequestId) return; // bu arada baska bir hisse secildi, bu sonuc artik eski
+    if (myRequestId !== chartRequestId) return; // bu arada baska bir hisse/aralik secildi, bu sonuc artik eski
 
     scoreHistoryRaw = scoreHist;
-    indicatorData = indData;
-
-    if (!Array.isArray(candles) || candles.length === 0) {
-      setChartStatus('error', 'Bu hisse için grafik verisi bulunamadı.');
-      candleTimeMap = new Map();
-    } else {
-      candleSeries.setData(candles);
-      candleTimeMap = new Map(candles.map(c => [c.time, c]));
-      // Onceki hissede yapilmis olabilecek zoom/pan yeni hisseye tasinmasin -
-      // her hisse secildiginde grafik varsayilan (tum veriyi gosteren) goruntuye
-      // doner. Checkbox secimleri (EMA/BB/MACD/RSI acik/kapali) bundan etkilenmez.
-      chart.timeScale().fitContent();
-      setChartStatus('hidden');
-    }
-    applyIndicatorData();
+    applyChartSeries(series.candles, series.indData);
     renderScoreHistory();
-    updateChartMarkers();
+  } catch (e) {
+    if (myRequestId !== chartRequestId) return;
+    setChartStatus('error', 'Grafik yüklenemedi. Tekrar deneyin.');
+  }
+}
+
+// Zaman araligi butonlarina (1A/3A/6A/1Y) tiklayinca cagrilir - SADECE
+// grafik/indikator verisini (fetchChartSeries) yeni aralikla tekrar ceker,
+// Skor Gecmisi'ni (range'den bagimsiz) TEKRAR CEKMEZ.
+async function changeChartRange(range) {
+  if (range === chartRange || !selectedTicker) return;
+  chartRange = range;
+  try { localStorage.setItem('chartRange', range); } catch (e) {
+    // localStorage erisilemez (gizli pencere vb.) - sadece bu oturum icin gecerli kalir
+  }
+  updateChartRangeButtons();
+
+  const myRequestId = ++chartRequestId;
+  clearChartSeries();
+  try {
+    const series = await fetchChartSeries(selectedTicker, chartRange);
+    if (myRequestId !== chartRequestId) return; // bu arada baska bir hisse/aralik secildi
+    applyChartSeries(series.candles, series.indData);
   } catch (e) {
     if (myRequestId !== chartRequestId) return;
     setChartStatus('error', 'Grafik yüklenemedi. Tekrar deneyin.');
