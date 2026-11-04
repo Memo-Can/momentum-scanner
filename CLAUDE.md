@@ -411,6 +411,16 @@ Kullanıcı "projedeki harfler türkçe uyumlu değil" diye bildirdi. **Bu bir e
 - **Bilinçli olarak DOKUNULMAYAN (yorum/log sayılan, "kullanıcının gördüğü" kapsamına girmeyen):** `print()` ile sadece konsol/`journalctl`'e yazılan iç teşhis mesajları (örn. `"Tarama hatasi:"`, `"[UYARI] BIST30/100_TICKERS listeleri ... dogrulanmadi"`) — bunlar geliştirici/ops'a yönelik, Telegram'a gitmiyor, son kullanıcıya hiç görünmüyor; yorumlarla aynı muameleyi gördü.
 - **Doğrulama:** `python3 -m py_compile` (3 backend dosyası), `cd backend && python3 -m unittest discover -s tests -v` (mevcut 25 test, hepsi geçti — davranış DEĞİŞMEDİ, sadece metin), 4 template'in `<script>` içerikleri (Jinja ifadeleri placeholder'la değiştirilerek) `node --check` ile sözdizimi doğrulandı. **Kullanıcı tarayıcıda henüz test ETMEDİ** (CLAUDE.md kuralı: kullanıcı onayı olmadan yerel sunucu/Playwright/curl testi yapılmaz) — hazır, kullanıcı kendi test edecek.
 
+## lightweight-charts CDN'den kaldırılıp yerel dosyaya alındı (2026-11-04'te eklendi)
+
+Kullanıcı isteği: projenin tek harici (CDN) JS bağımlılığı olan `lightweight-charts`'ı (unpkg'den çekiliyordu) indirip repo'nun kendi `static/` klasöründen servis etmek — unpkg'in o an erişilemez/yavaş olması gibi bir dış bağımlılık riskini ortadan kaldırmak için.
+
+- `frontend/static/lightweight-charts.standalone.production.js` — `https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js`'ten (AYNI sürüm, 4.1.3) indirilip eklendi (160KB, Apache 2.0 lisanslı, TradingView). Build/minify adımı YOK, unpkg'in kendi production/standalone build'i birebir kopyalandı.
+- `frontend/templates/index.html`'deki `<script src="https://unpkg.com/...">` satırı `<script src="{{ url_for('static', filename='lightweight-charts.standalone.production.js') }}"></script>` oldu — artık Flask'ın kendi `/static/` rotasından serve ediliyor, tarayıcı sayfa yüklenirken harici bir ağ isteği YAPMIYOR.
+- **Sürüm güncellemesi artık MANUEL** — unpkg'teki `@4.1.3` sabitken otomatik gelen güncellemeler (yoktu zaten, sürüm pinliydi) artık hiç gelmiyor; ileride yeni bir sürüme geçilmek istenirse dosyanın elle yeniden indirilip üzerine yazılması gerekiyor.
+- **Doğrulama:** `node --check` ile dosyanın gerçek/bozulmamış JS olduğu doğrulandı, yerelde sunucu yeniden başlatılıp `/`'in artık `/static/lightweight-charts...js`'e referans verdiği VE bu yolun 200 döndüğü curl ile teyit edildi.
+- **VPS'e henüz gönderilmedi** — kullanıcı onayı gerekiyor (`scp` ile hem yeni `.js` dosyası hem güncellenmiş `index.html` gönderilip `systemctl restart web-bist.service` yapılması gerekecek).
+
 ## Ölü kod taraması #2 (2026-11-04'te eklendi)
 
 Kullanıcı "frontend ve backend tarafında kullanılmayan kod satırları var mı" diye tekrar sordu (bkz. yukarıda "Ölü kod taraması" — 2026-11-03'teki ilk tarama). Aynı yöntem tekrarlandı: backend'de `pyflakes` (yine SADECE analiz için GEÇİCİ kuruldu, iş bitince kaldırıldı) + fonksiyon/sabit çapraz referans sayımı, frontend'de 5 template'in (4 partial + `login.html`) `<script>` içeriği için fonksiyon/`let`/`const` çapraz referansı + CSS class/custom-property/`#id` kullanım taraması + `requirements.txt`'teki paketlerin gerçekten import edilip edilmediği kontrolü.
