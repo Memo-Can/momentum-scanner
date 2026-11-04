@@ -6,15 +6,21 @@
       <th class="left" data-key="ticker" data-type="text" data-tip="Hisse sembolü (ticker).">Hisse<span class="arrow"></span></th>
       <th class="left" data-key="_index" data-type="index" data-tip="Resmi BIST30/BIST100 endeks üyeliği - BIST30, BIST100'ün bir alt kümesidir (BIST30'da olan bir hisse otomatik olarak BIST100'de de vardır).">Endeks<span class="arrow"></span></th>
       <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kısa sektör kodu - Yahoo Finance'in canlı 'sector' alanından türetilir.">Sektör<span class="arrow"></span></th>
+      {% if logged_in %}
       <th data-key="score" data-type="score" data-tip="1d, MACD, RSI, BB% ve RS sinyallerinin tek bir konfluens puanında (-5..+5) birleştirilmiş hali: GÜÇLÜ AL(▲▲)/AL(▲)/NÖTR(–)/SAT(▼)/GÜÇLÜ SAT(▼▼). ADX(14), GÜÇLÜ AL/SAT etiketini teyit eden bir güven filtresidir - ADX<20 ise 'güçlü' etiket normal AL/SAT'a düşer.">Skor<span class="arrow"></span></th>
+      {% endif %}
       <th data-key="signal_1d" data-type="signal" data-tip="Günlük mumda EMA9/EMA21'e göre sürekli trend yönü (AL/SAT/NÖTR).">1d<span class="arrow"></span></th>
+      {% if logged_in %}
       <th data-key="signal_macd" data-type="signal" data-tip="MACD histogramına (12,26,9) göre sürekli AL/SAT/NÖTR - histogram farkı > 0 ise AL. EMA sinyaline ek momentum teyidi.">MACD<span class="arrow"></span></th>
+      {% endif %}
       <th data-key="price" data-type="num" data-tip="Canlı fiyat (Yahoo Finance'in regularMarketPrice alanı).">Fiyat<span class="arrow"></span></th>
+      {% if logged_in %}
       <th data-key="volume_ratio" data-type="num" data-tip="Bugünkü işlem hacminin, 10 günlük ortalama hacme oranı (örn. 2.3x). Yüksek oran, fiyat hareketinin gerçek katılımla desteklendiğini gösterir.">Hacim<span class="arrow"></span></th>
       <th data-key="day_range_pos" data-type="num" data-tip="Fiyatın, günün dip-zirve aralığındaki yeri (%). %100 = günün zirvesi (alıcı baskın), %0 = günün dibi (satıcı baskın).">GünPoz<span class="arrow"></span></th>
       <th data-key="rsi" data-type="num" data-tip="Wilder RSI(14) değeri (0-100). >=70 aşırı alım, <=30 aşırı satım sayılır; momentum taramasında 50 üzeri boğa teyidi.">RSI<span class="arrow"></span></th>
       <th data-key="bb_percent" data-type="num" data-tip="Bollinger Bantları (20, 2 sigma) içindeki konum (%). 100% = üst bant, 0% = alt bant. Bandın dışına çıkan değer (>100%/<0%), hacimle birlikteyse güçlü kırılım sayılabilir.">BB%<span class="arrow"></span></th>
       <th data-key="rel_strength" data-type="num" data-tip="Göreceli güç: hissenin günlük % değişimi eksi BIST100 endeksinin (XU100) günlük % değişimi. |RS| < 0.5 NÖTR sayılır.">RS<span class="arrow"></span></th>
+      {% endif %}
       <th data-key="daily" data-type="num" data-tip="Canlı fiyat ile Yahoo'nun canlı 'önceki kapanış' alanı arasındaki yüzde fark. Liste varsayılan olarak (Skor grubu içinde) bu sütuna göre büyükten küçüğe sıralanır.">Günlük<span class="arrow"></span></th>
       <th data-key="d5" data-type="num" data-tip="Son 5 işlem günündeki yüzde değişim - kayan pencere (takvim haftası değil), Yahoo'nun web sitesindeki '5D' ile aynı mantık.">5D<span class="arrow"></span></th>
       <th data-key="m1" data-type="num" data-tip="Son 21 işlem günündeki (~1 aylık) yüzde değişim - kayan pencere (takvim ayı değil), Yahoo'nun web sitesindeki '1M' ile aynı mantık.">1M<span class="arrow"></span></th>
@@ -112,15 +118,17 @@ function renderRows(rows) {
       <td class="left">${escapeHtml(r.ticker)}</td>
       <td class="left">${indexDisplayLabel(r)}</td>
       <td class="left">${escapeHtml(r.sector || '-')}</td>
-      <td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>
+      ${LOGGED_IN ? `<td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>` : ''}
       <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
-      <td class="sym-${r.signal_macd}">${SIGNAL_SYMBOLS[r.signal_macd] || r.signal_macd}</td>
+      ${LOGGED_IN ? `<td class="sym-${r.signal_macd}">${SIGNAL_SYMBOLS[r.signal_macd] || r.signal_macd}</td>` : ''}
       <td>${fmtPrice(r.price)}</td>
+      ${LOGGED_IN ? `
       <td>${fmtRatio(r.volume_ratio)}</td>
       <td>${fmtRangePos(r.day_range_pos)}</td>
       <td>${fmtRsi(r.rsi)}</td>
       <td>${fmtRangePos(r.bb_percent)}</td>
       <td>${fmtPct(r.rel_strength)}</td>
+      ` : ''}
       <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
       <td class="${pctClass(r.d5)}">${fmtPct(r.d5)}</td>
       <td class="${pctClass(r.m1)}">${fmtPct(r.m1)}</td>

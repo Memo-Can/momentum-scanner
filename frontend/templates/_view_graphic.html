@@ -10,15 +10,19 @@
       <div id="indicator-toggles">
         <label><input type="checkbox" id="ind-ema" checked> EMA 9/21</label>
         <label><input type="checkbox" id="ind-bb" checked> Bollinger</label>
+        {% if logged_in %}
         <label><input type="checkbox" id="ind-macd" checked> MACD</label>
         <label><input type="checkbox" id="ind-rsi" checked> RSI</label>
+        {% endif %}
       </div>
       <div id="chart-legend"></div>
       <div id="chart">
         <div id="chart-status" class="chart-status" hidden></div>
       </div>
+      {% if logged_in %}
       <div id="macd-chart"></div>
       <div id="rsi-chart"></div>
+      {% endif %}
     </div>
     <div id="score-history">
       <h3 title="Büyütmek için tıklayın">Skor Geçmişi</h3>
@@ -257,14 +261,20 @@ document.getElementById('ind-bb').addEventListener('change', (e) => {
   bbMidSeries.applyOptions({ visible: e.target.checked });
   bbLowerSeries.applyOptions({ visible: e.target.checked });
 });
-document.getElementById('ind-macd').addEventListener('change', (e) => {
-  document.getElementById('macd-chart').hidden = !e.target.checked;
-  if (e.target.checked) { ensureMacdChart(); applyIndicatorData(); }
-});
-document.getElementById('ind-rsi').addEventListener('change', (e) => {
-  document.getElementById('rsi-chart').hidden = !e.target.checked;
-  if (e.target.checked) { ensureRsiChart(); applyIndicatorData(); }
-});
+// MACD/RSI checkbox'lari ve grafik konteynerleri SADECE login olana
+// gonderiliyor (yukaridaki HTML'de login kontrolu var) - bu yuzden bu
+// listener'lar da LOGGED_IN'e sarili, aksi halde getElementById null
+// doner ve patlar.
+if (LOGGED_IN) {
+  document.getElementById('ind-macd').addEventListener('change', (e) => {
+    document.getElementById('macd-chart').hidden = !e.target.checked;
+    if (e.target.checked) { ensureMacdChart(); applyIndicatorData(); }
+  });
+  document.getElementById('ind-rsi').addEventListener('change', (e) => {
+    document.getElementById('rsi-chart').hidden = !e.target.checked;
+    if (e.target.checked) { ensureRsiChart(); applyIndicatorData(); }
+  });
+}
 
 // Grafik/Skor Gecmisi basliklarina tiklaninca ilgili bolumu buyutulmus bir
 // popup icinde gosterir - DOM dugumu KOPYALANMAZ, oldugu gibi modal'in
@@ -421,10 +431,18 @@ function markerZone(label) {
 
 function updateChartMarkers() {
   if (!candleSeries) return;
-  // Skor Gecmisi 1 yil geriye gidiyor (SCORE_HISTORY_WINDOW_DAYS=365) ama
-  // grafikteki mumlar sadece ~3 ay - prevZone'u DOGRU takip etmek icin
-  // TUM yili kronolojik gezip geciSleri tespit ediyoruz, ama bir isaret
-  // SADECE o gun grafikte GERCEKTEN bir mum varsa (candleTimeMap'te) eklenir.
+  // AL/SAT isaretleri "sinyal" bilgisi sayilir, SADECE login olana gosterilir
+  // (2026-11-04, kullanici istegi) - login olmayan icin grafikte hic isaret
+  // konulmaz (ama Skor Gecmisi paneli bundan ETKILENMEZ, o ayri birakildi,
+  // kullanici SADECE tablo sutunlari + grafik isaretleri + MACD/RSI
+  // grafiklerini istedi).
+  if (!LOGGED_IN) { candleSeries.setMarkers([]); return; }
+  // Skor Gecmisi artik SADECE son 1 hafta geriye gidiyor (2026-11-04'te
+  // 365'ten SCORE_HISTORY_WINDOW_DAYS=7'ye dusuruldu) - grafikteki mumlar
+  // sadece ~3 ay oldugu icin (buyuk fark degil ama) prevZone'u DOGRU takip
+  // etmek icin bu 1 haftayi kronolojik gezip gecisleri tespit ediyoruz, ama
+  // bir isaret SADECE o gun grafikte GERCEKTEN bir mum varsa (candleTimeMap'te)
+  // eklenir.
   // Aksi halde lightweight-charts, grafigin disinda kalan (cok eski) tum
   // isaretleri ilk muma yigip orada bir sembol yiginina donusturuyordu.
   const daily = aggregateBy(scoreHistoryRaw, dayKey).slice().reverse(); // kronolojik (eskiden -> yeniye)
@@ -559,9 +577,13 @@ async function selectTicker(ticker) {
 
   ensureChart();
   // Checkbox'lar defaultta isaretli oldugu icin MACD/RSI panelleri de ilk
-  // hisse secildiginde (checkbox'a dokunulmadan) hazir olmali.
-  ensureMacdChart();
-  ensureRsiChart();
+  // hisse secildiginde (checkbox'a dokunulmadan) hazir olmali - SADECE login
+  // olana (yukaridaki HTML'de login kontrolu var, bu elemanlar non-logged-in
+  // icin DOM'da hic yok).
+  if (LOGGED_IN) {
+    ensureMacdChart();
+    ensureRsiChart();
+  }
 
   const myRequestId = ++chartRequestId;
   // Onceki hissenin grafigi/indikatorleri hemen temizlenir, yeni veri gelene

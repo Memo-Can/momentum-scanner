@@ -143,6 +143,30 @@ def _row_to_json(row: dict) -> dict:
     return {k: _sanitize(v) for k, v in row.items()}
 
 
+# Skor/MACD/Hacim/GunPoz/RSI/BB%/RS - "sinyal" bilgisi sayilan alanlar,
+# 2026-11-04'te kullanici istegiyle SADECE login olana gonderiliyor (login
+# olmayan kullanici sinyaller hakkinda bilgi alamamali). Gercek sunucu-tarafli
+# gizleme - /api/rows'a/api/indicators'a DOGRUDAN istek atan biri de bu
+# alanlari goremez, sadece frontend'de sutunlari gizlemek YETERSIZ olurdu
+# (_login_required'daki ayni gerekce - bkz. yukarida). _state["rows"]/
+# _chart_cache HER ZAMAN TAM veriyi tutar (login olanlar icin) - filtreleme
+# SADECE yanit anında, bu iki fonksiyonla, bir KOPYA uzerinde yapilir.
+_SIGNAL_ONLY_ROW_FIELDS = ("score", "signal_macd", "volume_ratio", "day_range_pos", "rsi", "bb_percent", "rel_strength")
+_SIGNAL_ONLY_INDICATOR_FIELDS = ("rsi", "macd", "macd_signal", "macd_hist")
+
+
+def _strip_signal_fields_from_row(row: dict) -> dict:
+    if _is_logged_in():
+        return row
+    return {k: (None if k in _SIGNAL_ONLY_ROW_FIELDS else v) for k, v in row.items()}
+
+
+def _strip_signal_fields_from_indicators(data: dict) -> dict:
+    if _is_logged_in() or not data:
+        return data
+    return {k: v for k, v in data.items() if k not in _SIGNAL_ONLY_INDICATOR_FIELDS}
+
+
 # Grafik/indikator/skor-gecmisi endpoint'leri icin onbellek - scanner_bistTop100.py'deki
 # _benchmark_cache ile AYNI desen (TTL = BIST_REFRESH_SECONDS-5). Bir hisse zaten
 # secilip verisi cekildiyse, ayni hisseye kisa surede tekrar tiklandiginda
@@ -500,7 +524,12 @@ def logout():
 def api_rows():
     _ensure_scanned_once()
     with _state_lock:
-        return jsonify(dict(_state))
+        state_copy = dict(_state)
+        rows = list(state_copy["rows"])
+    if not _is_logged_in():
+        rows = [_strip_signal_fields_from_row(r) for r in rows]
+    state_copy["rows"] = rows
+    return jsonify(state_copy)
 
 
 @app.route("/api/market-indicators")
@@ -574,7 +603,7 @@ def api_history(ticker: str):
     return jsonify(_cache_set(cache_key, candles))
 
 
-SCORE_HISTORY_WINDOW_DAYS = 365  # Skor Gecmisi her zaman bugunden geriye bu kadar gun gosterir
+SCORE_HISTORY_WINDOW_DAYS = 7  # Skor Gecmisi her zaman bugunden geriye bu kadar gun gosterir (2026-11-04'te kullanici istegiyle 365'ten 7'ye dusuruldu)
 
 
 @app.route("/api/score-history/<ticker>")
@@ -587,9 +616,9 @@ def api_score_history(ticker: str):
     granulariteli) kayitlari kullanir - bkz. templates/index.html
     renderScoreHistory().
 
-    SCORE_HISTORY_WINDOW_DAYS'ten (365) eski satirlar ATLANIR - boylece
+    SCORE_HISTORY_WINDOW_DAYS'ten (7) eski satirlar ATLANIR - boylece
     "Skor Gecmisi" her istekte bugune gore yeniden hesaplanip HER ZAMAN
-    tam olarak son 1 yili gosterir.
+    tam olarak son 1 haftayi gosterir.
 
     Veri scanner.get_score_history() uzerinden (ticker, timestamp)
     indeksli bir SQLite sorgusuyla okunur - eskiden bellek ici bir
@@ -633,7 +662,7 @@ def api_indicators(ticker: str):
     cache_key = ("indicators", ticker)
     cached = _cache_get(cache_key)
     if cached is not None:
-        return jsonify(cached)
+        return jsonify(_strip_signal_fields_from_indicators(cached))
 
     try:
         hist = _get_raw_history(ticker)
@@ -658,22 +687,21 @@ def api_indicators(ticker: str):
             for t, v in zip(trimmed_dates, trimmed)
         ]
 
-    return jsonify(
-        _cache_set(
-            cache_key,
-            {
-                "ema9": _series(ema9),
-                "ema21": _series(ema21),
-                "rsi": _series(rsi_vals),
-                "macd": _series(macd_line),
-                "macd_signal": _series(macd_sig),
-                "macd_hist": _series(macd_hist),
-                "bb_upper": _series(bb_upper),
-                "bb_mid": _series(bb_mid),
-                "bb_lower": _series(bb_lower),
-            },
-        )
+    full_data = _cache_set(
+        cache_key,
+        {
+            "ema9": _series(ema9),
+            "ema21": _series(ema21),
+            "rsi": _series(rsi_vals),
+            "macd": _series(macd_line),
+            "macd_signal": _series(macd_sig),
+            "macd_hist": _series(macd_hist),
+            "bb_upper": _series(bb_upper),
+            "bb_mid": _series(bb_mid),
+            "bb_lower": _series(bb_lower),
+        },
     )
+    return jsonify(_strip_signal_fields_from_indicators(full_data))
 
 
 @app.route("/api/paper/summary")
