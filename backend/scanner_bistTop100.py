@@ -333,6 +333,14 @@ _init_paper_trading()
 # yakalanir.
 _paper_last_score = {}
 
+# Rate-limit/veri-eksikligi (Yahoo'dan bir veya daha fazla acik pozisyonun
+# fiyatinin bu dongude gelmemesi) durumunda TEK bir Telegram uyarisi
+# gonderilsin - _scan_health_alert_sent (web_bistTop100.py) ile AYNI desen,
+# sorun surerken her dongude (5dk'da bir) tekrar tekrar SPAM edilmesin, sorun
+# duzelince (bir sonraki temiz dongude) tekrar False'a donup gelecekte
+# yeniden tetiklenebilsin diye. bkz. run_paper_trading_cycle().
+_paper_price_issue_alert_sent = False
+
 EMA_FAST = 9
 EMA_SLOW = 21
 RSI_PERIOD = 14
@@ -1142,6 +1150,7 @@ def build_paper_hourly_report(rows) -> str:
     summary = get_paper_summary()
 
     lines = [f"📊 Saatlik Sanal Al-Sat Raporu ({datetime.now().strftime('%Y-%m-%d %H:%M')})"]
+    missing_price_tickers = []
     if not positions:
         lines.append("Açık pozisyon yok.")
     else:
@@ -1158,6 +1167,21 @@ def build_paper_hourly_report(rows) -> str:
                 )
             else:
                 lines.append(f"⚪ {p['ticker']} ({source_label}): güncel fiyat yok")
+                missing_price_tickers.append(p["ticker"])
+
+    # Fiyati gelmeyen pozisyon(lar) varsa (rate limit/veri sorunu) rapora
+    # bunu ACIKCA belirten bir uyari eklenir - kullanici "telegram mesajinda
+    # da sorun oldugunu belirtsin" dedi (2026-11-04). run_paper_trading_cycle()
+    # bu durumda zaten etkilenen pozisyonlarin K/Z'sini NOTR (0 degisim)
+    # kabul ettigi icin asagidaki Toplam K/Z de yanlislikla cokmez, ama
+    # kullanici yine de verinin eksik oldugunu bu raporda gormeli.
+    if missing_price_tickers:
+        lines.append("")
+        lines.append(
+            f"⚠️ Not: {', '.join(missing_price_tickers)} için fiyat verisi alınamadı "
+            "(rate limit veya başka bir veri sorunu olabilir) - bu pozisyon(lar)ın "
+            "K/Z'si bu raporda güncellenmedi."
+        )
 
     lines.append("")
     lines.append(
@@ -1416,7 +1440,11 @@ def run_paper_trading_cycle(rows) -> None:
        (nakit + acik pozisyonlarin o anki degeri) 5'e bolunerek hesaplanir
        (2026-11-02'de kullanici istegiyle degistirildi, bkz. CLAUDE.md).
     3) Her dongude bir equity (nakit + acik pozisyon degeri) satiri
-       loglar."""
+       loglar - bir pozisyonun fiyati bu dongude gelmediyse (rate limit/veri
+       sorunu) o pozisyon SIFIR degil kendi allocation'i (K/Z degisimi NOTR)
+       ile sayilir, boylece equity'ye yanlislikla cokmus bir deger YAZILMAZ;
+       bu durumda ayrica (sorun surerken TEK seferlik) bir Telegram uyarisi
+       gonderilir - bkz. asagidaki price_data_issue/_paper_price_issue_alert_sent."""
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     rows_by_ticker = {r["ticker"]: r for r in rows}
@@ -1501,6 +1529,23 @@ def run_paper_trading_cycle(rows) -> None:
             # kapanan pozisyonlardan gelen satis geliriyle guncellendi;
             # positions_value SADECE hala acik olan (bu dongude kapanmamis)
             # pozisyonlari sayar, kapananlari TEKRAR saymamak icin.
+            #
+            # ⚠️ Rate-limit/veri-eksikligi duzeltmesi (2026-11-04'te eklendi):
+            # bir pozisyonun bu dongude GECERLI bir fiyati gelmediyse (Yahoo
+            # rate-limit'teyken veya baska bir hata yuzunden row hic yoksa/NaN
+            # ise) eskiden bu pozisyon degere SIFIR katkida bulunuyordu -
+            # sanki pozisyon birden degersiz olmus gibi, bu da equity'nin
+            # (ve dolayisiyla Toplam K/Z'nin) o pozisyonun TUM yatirimi kadar
+            # yanlislikla eksiye dusmesine yol aciyordu (kullanici bunu
+            # "veri olmadigi icin kar-zarar eksi deger olarak raporlaniyor"
+            # diye bildirdi). Duzeltme: fiyati gelmeyen bir pozisyon icin
+            # KENDI allocation'i (= o pozisyon icin K/Z degisimi SIFIR kabul
+            # edilir) kullanilir - deger ne cokertilir ne de yanlis bir kayip
+            # uretilir, sadece "bu dongude bilgi yok" durumu NOTR karsilanir.
+            # price_data_issue bayragi bu durumun olup olmadigini isaretler -
+            # asagida (DB kilidi/commit'inden SONRA) Telegram'a TEK bir uyari
+            # gonderilmesi icin kullanilir.
+            price_data_issue = False
             still_open_value = 0.0
             for p in open_positions:
                 if p["ticker"] in closed_this_cycle:
@@ -1508,6 +1553,9 @@ def run_paper_trading_cycle(rows) -> None:
                 r = rows_by_ticker.get(p["ticker"])
                 if r is not None and r["price"] == r["price"]:  # NaN degilse
                     still_open_value += r["price"] * p["shares"]
+                else:
+                    price_data_issue = True
+                    still_open_value += p["allocation"]
             current_equity = cash + still_open_value
             per_slot_amount = current_equity / PAPER_MAX_POSITIONS
 
@@ -1577,11 +1625,20 @@ def run_paper_trading_cycle(rows) -> None:
 
             conn.execute("UPDATE paper_account SET cash = ? WHERE id = 1", (cash,))
 
+            # Ayni rate-limit duzeltmesi (yukaridaki still_open_value ile AYNI
+            # mantik/gerekce) - fiyati bu dongude gelmeyen bir pozisyon
+            # SIFIR degil, kendi allocation'i kadar sayilir (K/Z degisimi
+            # NOTR), boylece paper_equity_history'ye (ve dolayisiyla
+            # get_paper_summary()'nin equity/total_pnl/unrealized_pnl'ine)
+            # yanlislikla cokmus bir deger YAZILMAZ.
             positions_value = 0.0
-            for r in conn.execute("SELECT ticker, shares FROM paper_trades WHERE status = 'open'").fetchall():
+            for r in conn.execute("SELECT ticker, shares, allocation FROM paper_trades WHERE status = 'open'").fetchall():
                 row = rows_by_ticker.get(r["ticker"])
                 if row is not None and row["price"] == row["price"]:  # NaN degilse
                     positions_value += row["price"] * r["shares"]
+                else:
+                    price_data_issue = True
+                    positions_value += r["allocation"]
             conn.execute(
                 "INSERT INTO paper_equity_history (timestamp, cash, positions_value, equity) VALUES (?, ?, ?, ?)",
                 (now_str, cash, positions_value, cash + positions_value),
@@ -1593,6 +1650,24 @@ def run_paper_trading_cycle(rows) -> None:
 
     for event in trade_events:
         _send_paper_trade_notification(event)
+
+    # Rate-limit/veri-eksikligi uyarisi - DB kilidi/commit'inden SONRA (ag
+    # istegi kilidi gereksiz uzun tutmasin diye, _send_paper_trade_notification
+    # ile AYNI desen). Sorun SURERKEN (her dongude, 5dk'da bir) tekrar tekrar
+    # SPAM edilmez - TEK seferlik uyari, sorun duzelince (bir sonraki temiz
+    # dongude) bayrak sifirlanir ki ileride tekrar tetiklenebilsin.
+    global _paper_price_issue_alert_sent
+    if price_data_issue:
+        if not _paper_price_issue_alert_sent:
+            send_health_alert(
+                "Sanal Al-Sat: bir veya daha fazla acik pozisyonun fiyati bu "
+                "dongude alinamadi (rate limit veya baska bir veri sorunu "
+                "olabilir). Etkilenen pozisyonlarin K/Z'si bu dongude NOTR "
+                "(degisim yok) kabul edildi, yanlis bir kayip raporlanmadi."
+            )
+            _paper_price_issue_alert_sent = True
+    else:
+        _paper_price_issue_alert_sent = False
 
 
 def set_paper_cash(amount: float) -> None:
