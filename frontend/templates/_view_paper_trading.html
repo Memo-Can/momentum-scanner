@@ -7,6 +7,12 @@
       <div class="sub">GÜÇLÜ AL veya MUTLAK AL'a yeni geçen hisseler otomatik "satın alınır" - SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönünce "satılır" (stop/hedef/süre aşımı artık kullanılmıyor). Gerçek para değildir, sadece Skor'un performansını ölçmek içindir.</div>
       <div id="paper-summary"></div>
       <h3 id="paper-equity-title">Equity Grafiği</h3>
+      <div class="tabs" id="paper-equity-range-tabs">
+        <button class="tab-btn" data-range="1m">1A</button>
+        <button class="tab-btn" data-range="3m">3A</button>
+        <button class="tab-btn" data-range="6m">6A</button>
+        <button class="tab-btn" data-range="1y">1Y</button>
+      </div>
       <div id="paper-equity-chart"></div>
       <div id="paper-cash-edit">
         <input type="text" inputmode="decimal" id="paper-cash-input" placeholder="Yeni nakit (TL)">
@@ -129,14 +135,104 @@ const PAPER_SOURCE_LABELS = { auto: 'Otomatik', manual: 'Manuel' };
 // KATILMIYOR, ayri/kendine ait bir grafik.
 let paperEquityChart = null, paperEquityLineSeries = null;
 
+// Zaman araligi (1A/3A/6A/1Y, aynı gun eklendi) - ana mum grafiginin
+// chartRange'inden TAMAMEN BAGIMSIZ kendi state'i (ayri localStorage key'i,
+// varsayilan "1A" - ana grafikten FARKLI, kullanici istegiyle). Ana
+// grafikteki #chart-range-tabs deseni (updateChartRangeButtons/
+// changeChartRange, _view_graphic.html) burada AYNI sekilde tekrarlaniyor,
+// ama ayri bir fonksiyon seti olarak - ikisi farkli DOM elemanlarina/
+// backend endpoint'ine bagli, ortak bir yardimci cikarmak gereksiz
+// karmasiklik katardi.
+let paperEquityRange = '1m';
+try {
+  const savedPaperRange = localStorage.getItem('paperEquityRange');
+  if (savedPaperRange && ['1m', '3m', '6m', '1y'].includes(savedPaperRange)) paperEquityRange = savedPaperRange;
+} catch (e) {
+  // localStorage erisilemez (gizli pencere vb.) - varsayilan 1A ile devam
+}
+
+function updatePaperEquityRangeButtons() {
+  document.querySelectorAll('#paper-equity-range-tabs .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === paperEquityRange);
+  });
+}
+updatePaperEquityRangeButtons(); // sayfa yuklenirken localStorage'daki secimi HTML'e yansit
+
+async function fetchPaperEquityHistory() {
+  const res = await fetch(`/api/paper/equity?range=${paperEquityRange}`);
+  return res.json();
+}
+
+async function changePaperEquityRange(range) {
+  if (range === paperEquityRange) return;
+  paperEquityRange = range;
+  try { localStorage.setItem('paperEquityRange', range); } catch (e) {
+    // localStorage erisilemez - sadece bu oturum icin gecerli kalir
+  }
+  updatePaperEquityRangeButtons();
+  try {
+    renderPaperEquityChart(await fetchPaperEquityHistory());
+  } catch (e) {
+    // sessizce gec - bir sonraki duzenli yenilemede (refreshPaperTrading) tekrar denenir
+  }
+}
+
+document.querySelectorAll('#paper-equity-range-tabs .tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => changePaperEquityRange(btn.dataset.range));
+});
+
+// ⚠️ GERCEK iki hata, bu oturumda Playwright ile bulundu (2026-11-04):
+// Kullanici "default 1A degil 1Y geliyormus gibi gorunuyor, grafik gunluk
+// degil sadece alim-satim anlarinda degisiyor gibi" diye bildirdi. Kok
+// sebep ikisi de AYNI tasarim hatasindaydi - gercek UTCTimestamp (epoch
+// saniye) kullanmak:
+// (1) **Cokme:** iki equity satiri AYNI saniyeye denk gelirse (nadir ama
+//     gercekten yasanmis - 2026-11-03'teki "_ensure_scanned_once + _scan_loop
+//     ayni anda" hatasindan KALMA eski kayitlar) setData()'ya AYNI "time"
+//     degeriyle 2 nokta gider - lightweight-charts kesinlikle ARTAN/BENZERSIZ
+//     zaman degeri gerektirir, aksi halde "Value is null" (yaniltici bir
+//     mesaj - gercek sebep "time" cakismasi) hatasiyla PATLAR ve grafik hic
+//     cizilmez/eski haliyle bozuk kalir.
+// (2) **Gorsel sikisma:** cokme olmasa bile, gercek epoch saniye kullanmak
+//     lightweight-charts'in noktalari GERCEK zaman farkina GORE orantili
+//     yerlestirmesine yol acar - piyasa KAPALI saatleri (gece ~15-19 saat,
+//     hafta sonu daha fazla) da genislik kaplar. 2-3 gunluk bir aralikta bu
+//     "bos" saatler toplam genisligin >%60'ini yutup GERCEK (islem saatleri
+//     icindeki) hareketi ekranin kucuk bir dilimine sikistiriyordu - tam
+//     olarak kullanicinin tarif ettigi "sadece alim-satim anlarinda
+//     degisiyor gibi" gorunumu. (Ana mum grafigi bunu YASAMIYOR cunku
+//     "YYYY-MM-DD" GUNLUK STRING zaman kullaniyor - lightweight-charts bu
+//     formatta hafta sonlarini otomatik SIFIR genislige sikistiriyor, ama bu
+//     SADECE gunde 1 nokta olan gunluk mumlar icin gecerli, bizim 5 dakikalik
+//     gun-ici verimiz icin kullanilamaz, bkz. asagidaki not.)
+//
+// Duzeltme: gercek zaman yerine SIRALI INDEX (0,1,2,...) "time" olarak
+// veriliyor - ana mum grafiginin gunluk string'leri gibi, her nokta ESIT
+// genislikte yer kaplar, gece/hafta sonu bosluklari SIFIR genislige
+// sikisir (tipki hafta sonunun gunluk mumlarda hic gorunmemesi gibi).
+// Gercek tarih/saat BILGISI kaybolmaz - paperEquityTimestamps paralel
+// dizisinde saklanip tickMarkFormatter/timeFormatter ile eksen
+// etiketlerinde/crosshair'de gosterilir (bkz. ensurePaperEquityChart).
+let paperEquityTimestamps = []; // index -> "YYYY-MM-DD HH:MM:SS" (gercek zaman)
+
+function formatPaperEquityTime(index) {
+  const ts = paperEquityTimestamps[index];
+  if (!ts) return '';
+  const d = new Date(ts.replace(' ', 'T'));
+  const datePart = d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+  const timePart = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  return `${datePart} ${timePart}`;
+}
+
 function ensurePaperEquityChart() {
   if (paperEquityChart) return;
   const container = document.getElementById('paper-equity-chart');
   paperEquityChart = LightweightCharts.createChart(container, {
     layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
     grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
-    timeScale: { borderColor: '#2a2e38' },
+    timeScale: { borderColor: '#2a2e38', tickMarkFormatter: formatPaperEquityTime },
     rightPriceScale: { borderColor: '#2a2e38' },
+    localization: { timeFormatter: formatPaperEquityTime },
     height: container.clientHeight,
   });
   paperEquityLineSeries = paperEquityChart.addAreaSeries({
@@ -150,32 +246,37 @@ function ensurePaperEquityChart() {
   }).observe(container);
 }
 
-// paper_equity_history satirlari "YYYY-MM-DD HH:MM:SS" (naif, TR yerel saat
-// - sunucunun kendi datetime.now()'u, tum uygulamada ayni varsayim kullanilir)
-// - lightweight-charts'ta GUN-ICI granularite icin "YYYY-MM-DD" string'i
-// KULLANILAMAZ (o format SADECE gunluk barlar icindir, saat bilgisini yok
-// sayar), bu yuzden UTCTimestamp (epoch saniye) sayisina cevrilir. Not:
-// tarayicinin kendi saat dilimiyle yorumlanir - uygulamanin birincil
-// kullanim alani TR oldugu icin pratikte dogru sonucu verir.
-function paperEquityTimeToUnix(ts) {
-  return Math.floor(new Date(ts.replace(' ', 'T')).getTime() / 1000);
-}
-
 function renderPaperEquityChart(history) {
   const container = document.getElementById('paper-equity-chart');
   const title = document.getElementById('paper-equity-title');
-  // Hesap az once sifirlanmissa (reset_paper_trading) henuz hic equity
-  // satiri olmayabilir - bos bir grafik gostermek yerine basligiyla
-  // BIRLIKTE gizlenir, ilk tarama dongusunden sonra kendiliginden gorunur olur.
+  const tabs = document.getElementById('paper-equity-range-tabs');
+  // Hesap az once sifirlanmissa (reset_paper_trading) ya da secili aralikta
+  // (orn. "1A") henuz hic equity satiri olmayabilir - bos bir grafik
+  // gostermek yerine basligi/aralik butonlariyla BIRLIKTE gizlenir, veri
+  // gelince (bir sonraki tarama dongusu ya da daha genis bir aralik
+  // secilince) kendiliginden gorunur olur.
   if (!Array.isArray(history) || history.length === 0) {
     container.style.display = 'none';
     title.style.display = 'none';
+    tabs.style.display = 'none';
     return;
   }
   container.style.display = 'block';
   title.style.display = '';
+  tabs.style.display = '';
   ensurePaperEquityChart();
-  const data = history.map(h => ({ time: paperEquityTimeToUnix(h.timestamp), value: h.equity }));
+  // Ayni saniyeye denk gelen (nadir) satirlar varsa SONUNCUSU (zaten ORDER
+  // BY timestamp ASC geldigi icin en guncel deger) tutulur - string key
+  // karsilastirmasi (ISO-benzeri "YYYY-MM-DD HH:MM:SS" formati zaten
+  // lexicographic sirali = kronolojik sirali) epoch cevirimine gerek
+  // birakmadan hem tekillestirir hem sirali tutar.
+  const byTimestamp = new Map();
+  for (const h of history) {
+    byTimestamp.set(h.timestamp, h.equity);
+  }
+  const sortedTimestamps = Array.from(byTimestamp.keys()).sort();
+  paperEquityTimestamps = sortedTimestamps; // tickMarkFormatter/timeFormatter BUNDAN okur, setData'dan ONCE guncellenmeli
+  const data = sortedTimestamps.map((ts, index) => ({ time: index, value: byTimestamp.get(ts) }));
   paperEquityLineSeries.setData(data);
   paperEquityChart.timeScale().fitContent();
 }
@@ -358,7 +459,7 @@ async function refreshPaperTrading() {
       fetch('/api/paper/positions'),
       fetch('/api/paper/trades'),
       fetch('/api/paper/watchlist'),
-      fetch('/api/paper/equity'),
+      fetch(`/api/paper/equity?range=${paperEquityRange}`),
     ]);
     const positions = await positionsRes.json();
     const watchlist = await watchlistRes.json();

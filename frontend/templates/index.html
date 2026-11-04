@@ -144,6 +144,27 @@ function showView(view) {
   if (paperView) paperView.hidden = !isPaper;
   const toggleBtn = document.getElementById('paper-view-toggle');
   if (toggleBtn) toggleBtn.classList.toggle('active', isPaper);
+  // ⚠️ GERCEK bir hata, Playwright ile bulundu (2026-11-04): equity grafigi
+  // (_view_paper_trading.html) sayfa ilk acildiginda, kullanici henuz
+  // "Sanal Al-Sat"a hic GECMEMISKEN DOMContentLoaded'daki ilk
+  // refreshPaperTrading() cagrisiyla OLUSTURULUYOR - o an #view-paper-trading
+  // hala "hidden" (genisligi 0) oldugu icin lightweight-charts'in o anda
+  // cagirdigimiz fitContent()'i bozuk/asiri genis bir gorunur aralik
+  // hesapliyordu (gercek veri ekranin kucuk bir kosesine sikisiyordu, bkz.
+  // CLAUDE.md). Paper gorunumune GECERKEN (container GERCEKTEN gorunur hale
+  // gelince) fitContent()'i TEKRAR cagirmak, artik dogru genislikle yeniden
+  // hesaplanmasini saglayip bunu duzeltiyor. "typeof" kontrolu LOGGED_IN=false
+  // durumunda bu degiskenin (_view_paper_trading.html hic include edilmedigi
+  // icin) hic tanimli olmamasina karsi guvenlik.
+  if (isPaper && typeof paperEquityChart !== 'undefined' && paperEquityChart) {
+    // setTimeout(...,0) ile bir sonraki event loop donguye ertelenir - "hidden"
+    // kaldirildiktan HEMEN sonra senkron cagrilirsa container'i izleyen
+    // ResizeObserver callback'i HENUZ calismamis olabiliyor (o da asenkron
+    // tetikleniyor), bu durumda fitContent() grafigin hala ESKI (0 genislikte
+    // olusturulmus) boyutuyla hesaplama yapip sorunu COZMUYORDU - Playwright
+    // ile dogrulandi.
+    setTimeout(() => paperEquityChart.timeScale().fitContent(), 0);
+  }
 }
 
 // BIST sekmelerinin sagindaki doviz/emtia/BIST100/BTC seridi - hisse

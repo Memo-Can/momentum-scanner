@@ -789,6 +789,26 @@ def api_paper_trades():
     return jsonify(scanner.get_paper_trades())
 
 
+# Equity grafigi zaman araligi secici (1A/3A/6A/1Y, 2026-11-04'te eklendi) -
+# mum grafiginin CHART_RANGE_TRADING_DAYS'inden FARKLI olarak burada ISLEM
+# GUNU degil TAKVIM GUNU sayiliyor - equity verisi gun-ici (5 dakikalik)
+# granularitede surekli biriktigi icin "islem gunu" kavrami burada anlamli
+# degil (candlestick'te oldugu gibi "tail(N)" ile satir kesmek de islemiyor,
+# cunku piyasa kapaliyken/hafta sonu HIC satir eklenmiyor - bu yuzden tarih
+# bazli bir cutoff kullanilir, bkz. SCORE_HISTORY_WINDOW_DAYS_GUEST ile AYNI
+# desen). Varsayilan "1A" (3A DEGIL) - kullanici istegiyle, ana grafikten
+# BILEREK farkli secildi.
+PAPER_EQUITY_RANGE_DAYS = {"1m": 30, "3m": 90, "6m": 180, "1y": 365}
+PAPER_EQUITY_RANGE_DEFAULT = "1m"
+
+
+def _resolve_paper_equity_range() -> str:
+    """?range= query parametresini okur - gecersiz/eksikse sessizce
+    varsayilana (1A) duser, hataya yol acmaz."""
+    range_key = request.args.get("range", PAPER_EQUITY_RANGE_DEFAULT)
+    return range_key if range_key in PAPER_EQUITY_RANGE_DAYS else PAPER_EQUITY_RANGE_DEFAULT
+
+
 @app.route("/api/paper/equity")
 @_login_required
 def api_paper_equity():
@@ -796,10 +816,14 @@ def api_paper_equity():
     Al-Sat panelindeki equity egrisi grafigi icin (2026-11-04'te GERI
     EKLENDI, bkz. CLAUDE.md "Olu kod taramasi #2" - bu route + scanner.
     get_paper_equity_history() daha once hic kullanilmadigi icin
-    kaldirilmisti, simdi grafik ekleniyor). Gunluk/saatlik gruplama
-    (Skor Gecmisi'yle AYNI desen) frontend'de yapilir, burada ham veri
-    donulur."""
-    return jsonify(scanner.get_paper_equity_history("2000-01-01 00:00:00"))
+    kaldirilmisti, simdi grafik ekleniyor). ?range= ile 1A/3A/6A/1Y araligi
+    secilebilir (varsayilan 1A, bkz. PAPER_EQUITY_RANGE_DAYS). Gunluk/saatlik
+    gruplama (Skor Gecmisi'yle AYNI desen) YAPILMAZ - veri zaten gun-ici
+    granularitede, ham olarak donulur."""
+    range_key = _resolve_paper_equity_range()
+    days = PAPER_EQUITY_RANGE_DAYS[range_key]
+    cutoff_ts = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    return jsonify(scanner.get_paper_equity_history(cutoff_ts))
 
 
 @app.route("/api/paper/cash", methods=["POST"])
