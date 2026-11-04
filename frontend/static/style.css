@@ -148,6 +148,16 @@
     tbody tr:hover { background: #1b1f29; }
   }
   tbody tr.selected { background: #2a2f45; box-shadow: inset 3px 0 0 var(--yellow); }
+  /* tbody tr.selected ile tbody tr:hover AYNI ozguculukte (specificity) oldugu
+     icin, .selected kaynak kodda SONRA geldigi icin HER ZAMAN kazaniyordu -
+     secili bir satirin uzerine gelindiginde hover arka plani hic gorunmuyordu
+     (2026-11-04, kullanici bildirimiyle bulundu/duzeltildi). Bu kural daha
+     yuksek ozguculukle (class+pseudo-class) secili SATIRIN hover halini de
+     AYRICA tanimliyor, boylece secim isareti (sari cizgi) kalirken arka plan
+     da hover'da degisiyor. */
+  @media (hover: hover) and (pointer: fine) {
+    tbody tr.selected:hover { background: #333a56; }
+  }
   .pos { color: var(--green); }
   .neg { color: var(--red); }
   .sym-AL { color: var(--green); }
@@ -424,7 +434,7 @@
       padding: 14px;
     }
     #chart { height: 220px; }
-    .sig-row { font-size: 11px; }
+    .hist-row { font-size: 11px; }
 
     /* Pager (2026-11-03'te eklendi): ustteki genel ".market-tab-btn {flex:1}"
        kurali BURADA 6 kucuk butonu (25/50/100/Tumu/Onceki/Sonraki) esit
