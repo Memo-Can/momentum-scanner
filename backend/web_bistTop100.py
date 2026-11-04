@@ -789,6 +789,19 @@ def api_paper_trades():
     return jsonify(scanner.get_paper_trades())
 
 
+@app.route("/api/paper/equity")
+@_login_required
+def api_paper_equity():
+    """Sanal hesabin equity (nakit + acik pozisyon degeri) gecmisi - Sanal
+    Al-Sat panelindeki equity egrisi grafigi icin (2026-11-04'te GERI
+    EKLENDI, bkz. CLAUDE.md "Olu kod taramasi #2" - bu route + scanner.
+    get_paper_equity_history() daha once hic kullanilmadigi icin
+    kaldirilmisti, simdi grafik ekleniyor). Gunluk/saatlik gruplama
+    (Skor Gecmisi'yle AYNI desen) frontend'de yapilir, burada ham veri
+    donulur."""
+    return jsonify(scanner.get_paper_equity_history("2000-01-01 00:00:00"))
+
+
 @app.route("/api/paper/cash", methods=["POST"])
 @_login_required
 def api_paper_set_cash():

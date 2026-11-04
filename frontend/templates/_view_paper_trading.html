@@ -6,6 +6,8 @@
     <div id="paper-body">
       <div class="sub">GÜÇLÜ AL veya MUTLAK AL'a yeni geçen hisseler otomatik "satın alınır" - SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönünce "satılır" (stop/hedef/süre aşımı artık kullanılmıyor). Gerçek para değildir, sadece Skor'un performansını ölçmek içindir.</div>
       <div id="paper-summary"></div>
+      <h3 id="paper-equity-title">Equity Grafiği</h3>
+      <div id="paper-equity-chart"></div>
       <div id="paper-cash-edit">
         <input type="text" inputmode="decimal" id="paper-cash-input" placeholder="Yeni nakit (TL)">
         <button id="paper-cash-save" type="button">Nakti Güncelle</button>
@@ -120,6 +122,63 @@ function parseTLAmount(str) {
 }
 const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Süre Aşımı', manual_sat_signal: 'Sinyal (SAT)', manual: 'Elle Satış' };
 const PAPER_SOURCE_LABELS = { auto: 'Otomatik', manual: 'Manuel' };
+
+// Equity egrisi grafigi (2026-11-04'te eklendi) - #view-graphic'teki
+// ensureChart() ile AYNI koyu tema (renkler/grid), ama BAGIMSIZ bir
+// lightweight-charts ornegi - crosshair senkronizasyonuna (wireCrosshairSync)
+// KATILMIYOR, ayri/kendine ait bir grafik.
+let paperEquityChart = null, paperEquityLineSeries = null;
+
+function ensurePaperEquityChart() {
+  if (paperEquityChart) return;
+  const container = document.getElementById('paper-equity-chart');
+  paperEquityChart = LightweightCharts.createChart(container, {
+    layout: { background: { color: '#171a21' }, textColor: '#e6e6e6' },
+    grid: { vertLines: { color: '#232733' }, horzLines: { color: '#232733' } },
+    timeScale: { borderColor: '#2a2e38' },
+    rightPriceScale: { borderColor: '#2a2e38' },
+    height: container.clientHeight,
+  });
+  paperEquityLineSeries = paperEquityChart.addAreaSeries({
+    lineColor: '#e8c547', topColor: 'rgba(232,197,71,0.25)', bottomColor: 'rgba(232,197,71,0.02)',
+    lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+  });
+  new ResizeObserver(entries => {
+    for (const entry of entries) {
+      paperEquityChart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+    }
+  }).observe(container);
+}
+
+// paper_equity_history satirlari "YYYY-MM-DD HH:MM:SS" (naif, TR yerel saat
+// - sunucunun kendi datetime.now()'u, tum uygulamada ayni varsayim kullanilir)
+// - lightweight-charts'ta GUN-ICI granularite icin "YYYY-MM-DD" string'i
+// KULLANILAMAZ (o format SADECE gunluk barlar icindir, saat bilgisini yok
+// sayar), bu yuzden UTCTimestamp (epoch saniye) sayisina cevrilir. Not:
+// tarayicinin kendi saat dilimiyle yorumlanir - uygulamanin birincil
+// kullanim alani TR oldugu icin pratikte dogru sonucu verir.
+function paperEquityTimeToUnix(ts) {
+  return Math.floor(new Date(ts.replace(' ', 'T')).getTime() / 1000);
+}
+
+function renderPaperEquityChart(history) {
+  const container = document.getElementById('paper-equity-chart');
+  const title = document.getElementById('paper-equity-title');
+  // Hesap az once sifirlanmissa (reset_paper_trading) henuz hic equity
+  // satiri olmayabilir - bos bir grafik gostermek yerine basligiyla
+  // BIRLIKTE gizlenir, ilk tarama dongusunden sonra kendiliginden gorunur olur.
+  if (!Array.isArray(history) || history.length === 0) {
+    container.style.display = 'none';
+    title.style.display = 'none';
+    return;
+  }
+  container.style.display = 'block';
+  title.style.display = '';
+  ensurePaperEquityChart();
+  const data = history.map(h => ({ time: paperEquityTimeToUnix(h.timestamp), value: h.equity }));
+  paperEquityLineSeries.setData(data);
+  paperEquityChart.timeScale().fitContent();
+}
 
 function renderPaperSummary(s) {
   const wrap = document.getElementById('paper-summary');
@@ -294,11 +353,12 @@ async function manualSellTrade(tradeId, ticker) {
 
 async function refreshPaperTrading() {
   try {
-    const [summaryRes, positionsRes, tradesRes, watchlistRes] = await Promise.all([
+    const [summaryRes, positionsRes, tradesRes, watchlistRes, equityRes] = await Promise.all([
       fetch('/api/paper/summary'),
       fetch('/api/paper/positions'),
       fetch('/api/paper/trades'),
       fetch('/api/paper/watchlist'),
+      fetch('/api/paper/equity'),
     ]);
     const positions = await positionsRes.json();
     const watchlist = await watchlistRes.json();
@@ -306,6 +366,7 @@ async function refreshPaperTrading() {
     renderPaperPositions(positions);
     renderPaperTrades(await tradesRes.json());
     renderPaperWatchlist(watchlist);
+    renderPaperEquityChart(await equityRes.json());
 
     watchlistTickers = new Set(watchlist.map(w => w.ticker));
     updateWatchlistToggleButton();

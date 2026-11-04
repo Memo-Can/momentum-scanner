@@ -487,6 +487,21 @@ Kullanıcı "aylık, 3 aylık, 6 aylık ve yıllık mum verileri oluşturmak mü
   - `#side-sub` metni (`"3 aylık günlük mum"`) artık `CHART_RANGE_LABELS`'tan dinamik üretiliyor, seçilen aralığa göre değişiyor.
 - **Doğrulama:** Sentetik (gerçek Yahoo isteği olmayan) 260 günlük bir DataFrame ile Flask `test_client()` üzerinden 6 senaryo test edildi (`range` yok/1m/3m/6m/1y/geçersiz) — her biri beklenen gün sayısını döndürdü, geçersiz değer sessizce 3A'ya düştü, candle ve indikator serilerinin son tarihleri eşleşti. `node --check` ile hem login hem login-olmayan render edilen `<script>` içerikleri sözdizimi doğrulandı, mevcut 25 birim test regresyonsuz geçti.
 
+## Sanal Al-Sat equity eğrisi grafiği GERİ eklendi (2026-11-04'te eklendi)
+
+Kullanıcı "projeye başka ne eklenirse faydalı olur" diye sorunca önerilen 3 maddeden biri. **DB yedeği cron'u zaten kurulu olduğu doğrulandı** (crontab'da `0 3 * * * ... backup_db.py`, 2 başarılı yedek mevcuttu, 63-88 MB) — CLAUDE.md'deki "henüz kurulmadı" notu güncelliğini kaybetmişti, muhtemelen önceki bir oturumda kurulmuş ama not güncellenmemişti.
+
+- **`scanner_bistTop100.py: get_paper_equity_history()`** ve **`web_bistTop100.py: /api/paper/equity`** — 2026-11-03'teki "Ölü kod taraması #2"nde hiç kullanılmadığı için kaldırılmışlardı (bkz. o bölüm), aynı haliyle (git geçmişinden) GERİ eklendi. `paper_equity_history` tablosuna YAZMA tarafı (`run_paper_trading_cycle()`'ın her döngüdeki INSERT'i) hiç kaldırılmamıştı, veri zaten bu süre boyunca birikiyordu — sadece okuma tarafı eksikti.
+- **`frontend/templates/_view_paper_trading.html`** — `#paper-summary`'nin altına, nakit düzenleme kutusunun ÜSTÜNE `#paper-equity-chart` (160px, `#chart` ile AYNI koyu tema/ResizeObserver deseni, ama `wireCrosshairSync`'e KATILMIYOR, bağımsız bir lightweight-charts örneği) eklendi. `refreshPaperTrading()` artık 5. bir istek (`/api/paper/equity`) atıyor, `renderPaperEquityChart()` ile çiziyor.
+  - Equity geçmişi satırları `"YYYY-MM-DD HH:MM:SS"` (naif, TR yerel saat) — lightweight-charts'ta gün-içi granülerlik için `"YYYY-MM-DD"` string'i KULLANILAMAZ (o format sadece günlük barlar içindir), bu yüzden `paperEquityTimeToUnix()` ile epoch saniyeye çevriliyor. **Not:** tarayıcının kendi saat dilimiyle yorumlanıyor (uygulamanın tüm zaman modeli zaten naif-TR-yerel varsayımı üzerine kurulu, örn. `BIST_MARKET_OPEN_HOUR` kontrolleri) — pratik bir basitleştirme, timezone-doğru bir çözüm değil.
+  - Hesap az önce sıfırlanmışsa (`reset_paper_trading`) henüz hiç equity satırı olmayabilir — bu durumda grafik + başlığı (`#paper-equity-title`) birlikte gizleniyor, ilk tarama döngüsünden sonra kendiliğinden görünür oluyor.
+- **Doğrulama:** İzole bir geçici test DB'siyle `/api/paper/equity`'nin gerçek satırları doğru döndürdüğü `test_client()` ile doğrulandı, `node --check` ile render edilmiş `<script>` içerikleri sözdizimi kontrolünden geçti, mevcut 25 birim test regresyonsuz geçti.
+- **VPS'e deploy edildi** (hash doğrulanarak, servis restart edilerek).
+
+## Aylık backfill cron'u (2026-11-04'te VPS'e eklendi)
+
+Aynı "projeye ne eklenebilir" sorusunun 3. maddesi. VPS crontab'ına (mevcut `backup_db.py` satırı KORUNARAK, üstüne eklenerek) şu satır eklendi: `0 4 1 * * cd /root/momentum-scanner/backend && /root/momentum-scanner/venv/bin/python3 backfill_daily_bist.py 365 >> data/backfill.log 2>&1` — her ayın 1'i gece 04:00'te çalışır, yeni listelenen hisselerin (CLAUDE.md'de bahsedilen "39 ince-geçmişli ticker" gibi) eksik günlük geçmişini otomatik tamamlar, elle tekrar çalıştırmaya gerek kalmaz. Sıklık kullanıcıyla netleştirildi (haftalık/aylık arasından aylık seçildi — Yahoo'ya gereksiz ek yük bindirmesin diye). `backfill_daily_bist.py` zaten additive/idempotent olduğu için (sadece eksik `(ticker, date)` satırlarını doldurur, var olanı bozmaz) her ay tekrar çalıştırmak güvenli.
+
 ## Bilinen tuzaklar / dersler (tekrar düşmemek için)
 
 - **Yahoo rate-limit:** Tam piyasa (~628 hisse × 3 istek/hisse) taraması art arda/sık yapılınca `YFRateLimitError` ve "Invalid Crumb" hatalarına yol açıyor. Hem yerel sandbox hem VPS bunu yaşadı. Büyük hacimli canlı test yapmadan önce düşün; gerçekten gerekliyse VPS'in kendi (genelde daha "temiz") IP'sinden doğal 5 dakikalık döngülerle gözlemle, art arda patlamalar yapma.

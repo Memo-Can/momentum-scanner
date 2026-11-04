@@ -1865,6 +1865,29 @@ def get_paper_trades(limit: int = 200):
         conn.close()
 
 
+def get_paper_equity_history(since_timestamp: str):
+    """since_timestamp'ten itibaren equity (nakit + acik pozisyon degeri)
+    gecmisini dondurur - Skor Gecmisi'ndeki gunluk/saatlik/5dk sekmeleriyle
+    ayni sekilde (ham veri, agregasyon okuma anında) grafik/tablo icin.
+    (2026-11-03'teki olu kod taramasinda okuma tarafi - bu fonksiyon + ona
+    bagli /api/paper/equity route'u - hic kullanilmadigi icin kaldirilmisti;
+    2026-11-04'te kullanicinin "projeye ne eklenebilir" sorusuna yanit olarak
+    Sanal Al-Sat equity egrisi grafigi istenince GERI EKLENDI, bkz. CLAUDE.md.
+    Yazma tarafi - run_paper_trading_cycle()'in paper_equity_history'ye
+    INSERT'i - HIC KALDIRILMAMISTI, veri zaten tum bu sure boyunca
+    birikiyordu.)"""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "SELECT timestamp, cash, positions_value, equity FROM paper_equity_history "
+            "WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (since_timestamp,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def get_paper_summary():
     """Sanal hesabin o anki ozetini dondurur: nakit, acik pozisyon degeri,
     toplam equity, gerceklesmis/gerceklesmemis K-Z, kazanma orani. Acik
