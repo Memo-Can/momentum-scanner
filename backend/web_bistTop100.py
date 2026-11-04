@@ -603,7 +603,14 @@ def api_history(ticker: str):
     return jsonify(_cache_set(cache_key, candles))
 
 
-SCORE_HISTORY_WINDOW_DAYS = 7  # Skor Gecmisi her zaman bugunden geriye bu kadar gun gosterir (2026-11-04'te kullanici istegiyle 365'ten 7'ye dusuruldu)
+# Skor Gecmisi de bir "sinyal" bilgisi kaynagi sayilir (2026-11-04'te
+# kullanici istegiyle netlestirildi, bkz. CLAUDE.md "Sinyal bilgisi artik
+# login olmayan..."): LOGIN OLANA gun siniri YOK (TUM gecmis, DB'de ne kadar
+# varsa - pratikte backfill_daily_bist.py'nin BACKFILL_DAYS'ina, varsayilan
+# 365, kadar). LOGIN OLMAYANA ise SADECE son SCORE_HISTORY_WINDOW_DAYS_GUEST
+# (5) gun gosterilir.
+SCORE_HISTORY_WINDOW_DAYS_GUEST = 5
+_SCORE_HISTORY_NO_LIMIT_TS = "1970-01-01 00:00:00"  # login olana "tum gecmis" icin alt sinir
 
 
 @app.route("/api/score-history/<ticker>")
@@ -613,24 +620,29 @@ def api_score_history(ticker: str):
     source="backfill" ile isaretli), sonra HER dongudeki (5 dk) ham canli
     kayit (source="live"). Gunluk sekmesi ikisini birlikte kullanir;
     Saatlik/5-Dakikalik sekmeleri sadece canli (gercek gun-ici
-    granulariteli) kayitlari kullanir - bkz. templates/index.html
+    granulariteli) kayitlari kullanir - bkz. templates/_view_graphic.html
     renderScoreHistory().
 
-    SCORE_HISTORY_WINDOW_DAYS'ten (7) eski satirlar ATLANIR - boylece
-    "Skor Gecmisi" her istekte bugune gore yeniden hesaplanip HER ZAMAN
-    tam olarak son 1 haftayi gosterir.
+    Login durumuna gore PENCERE FARKLI (yukaridaki SCORE_HISTORY_WINDOW_DAYS_GUEST
+    aciklamasina bkz.) - bu yuzden cache_key login durumunu da icerir, aksi
+    halde login olan/olmayan AYNI onbellek girdisini paylasip biri digerinin
+    (yanlis pencereli) sonucunu CHART_CACHE_TTL suresince gorebilirdi.
 
     Veri scanner.get_score_history() uzerinden (ticker, timestamp)
     indeksli bir SQLite sorgusuyla okunur - eskiden bellek ici bir
     index'ten okunurdu (canli CSV milyonlarca satira ciktiginda dosyayi
     bastan taramak grafigi saniyelerce yavaslatiyordu), artik ne dosya
     taramasi ne de tam tabloyu belleğe yukleme gerekiyor."""
-    cache_key = ("score-history", ticker)
+    logged_in = _is_logged_in()
+    cache_key = ("score-history", ticker, logged_in)
     cached = _cache_get(cache_key)
     if cached is not None:
         return jsonify(cached)
 
-    cutoff_ts = (datetime.now() - timedelta(days=SCORE_HISTORY_WINDOW_DAYS)).strftime("%Y-%m-%d 00:00:00")
+    if logged_in:
+        cutoff_ts = _SCORE_HISTORY_NO_LIMIT_TS
+    else:
+        cutoff_ts = (datetime.now() - timedelta(days=SCORE_HISTORY_WINDOW_DAYS_GUEST)).strftime("%Y-%m-%d 00:00:00")
     rows = scanner.get_score_history(ticker, cutoff_ts)
 
     live_rows = [r for r in rows if r["source"] == "live"]
