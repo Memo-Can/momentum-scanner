@@ -126,6 +126,24 @@ function fmtScoreSince(v) {
   if (!y || !m || !d) return '-';
   return `${d}.${m}.${y} ${(timePart || '').slice(0, 5)}`;
 }
+// "Sinyal Zamanı" hucresinde GORUNEN metin (2026-11-05'te eklendi, kullanici
+// istegi: tam tarih yerine "3 gün önce" gibi tek bakista okunan bir ifade,
+// tam tarih hucrenin title='' (tarayicinin kendi hover tooltip'i) ozniteliginde
+// kaliyor - bkz. _view_stocks.html: renderRows()). Naif-TR-yerel varsayimi
+// (uygulamanin tum zaman modeliyle AYNI, bkz. paperEquityTimeToUnix()) ile
+// tarayicinin kendi saatine gore hesaplanir.
+function fmtRelativeTime(v) {
+  if (!v) return '-';
+  const then = new Date(v.replace(' ', 'T'));
+  if (isNaN(then.getTime())) return '-';
+  const diffMin = Math.floor((Date.now() - then.getTime()) / 60000);
+  if (diffMin < 1) return 'az önce';
+  if (diffMin < 60) return `${diffMin} dakika önce`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} saat önce`;
+  const diffDay = Math.floor(diffHour / 24);
+  return `${diffDay} gün önce`;
+}
 function pctClass(v) { if (v === null || v === undefined) return ''; return v >= 0 ? 'pos' : 'neg'; }
 
 // ticker/sector Yahoo Finance'in dinamik tarama sonuclarindan geliyor (ozellikle
