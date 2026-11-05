@@ -151,7 +151,11 @@ def _row_to_json(row: dict) -> dict:
 # (_login_required'daki ayni gerekce - bkz. yukarida). _state["rows"]/
 # _chart_cache HER ZAMAN TAM veriyi tutar (login olanlar icin) - filtreleme
 # SADECE yanit anında, bu iki fonksiyonla, bir KOPYA uzerinde yapilir.
-_SIGNAL_ONLY_ROW_FIELDS = ("score", "signal_macd", "volume_ratio", "day_range_pos", "rsi", "bb_percent", "rel_strength")
+# score_since (2026-11-05'te eklendi, bkz. CLAUDE.md "Skor'un yanina sinyal
+# zamani sutunu") da buraya eklendi - Skor'un KENDISI gibi dogrudan sinyal
+# bilgisi sayilir (hangi skorun NE ZAMANDAN BERI aktif oldugunu gosterir),
+# ayni politika.
+_SIGNAL_ONLY_ROW_FIELDS = ("score", "score_since", "signal_macd", "volume_ratio", "day_range_pos", "rsi", "bb_percent", "rel_strength")
 _SIGNAL_ONLY_INDICATOR_FIELDS = ("rsi", "macd", "macd_signal", "macd_hist")
 
 
@@ -212,7 +216,7 @@ def _skeleton_row(ticker: str, price, daily_pct) -> dict:
         "daily": daily_pct if daily_pct is not None else nan,
         "d5": nan, "m1": nan, "y1": nan,
         "signal_1d": "NOTR", "signal_macd": "NOTR",
-        "score": "BEKLIYOR", "score_raw": None,
+        "score": "BEKLIYOR", "score_raw": None, "score_since": None,
         "rsi": nan, "bb_percent": nan, "adx": nan, "rel_strength": nan,
         "day_stop": None, "day_target": None,
         "swing_stop": None, "swing_target": None,
@@ -787,6 +791,23 @@ def api_paper_positions():
 def api_paper_trades():
     """Kapanmis sanal islemler (en yeni once)."""
     return jsonify(scanner.get_paper_trades())
+
+
+@app.route("/api/paper/trades/<int:trade_id>/note", methods=["POST"])
+@_login_required
+def api_paper_trade_note(trade_id: int):
+    """Kapanan bir islemin aciklama notunu gunceller (2026-11-05'te eklendi)
+    - body {note}, en fazla scanner.PAPER_TRADE_NOTE_MAX_LEN (250) karakter.
+    Bos string/eksik alan notu SILER (kullanici onceden yazdigi notu
+    kaldirmak isteyebilir)."""
+    data = request.get_json(silent=True) or {}
+    note = (data.get("note") or "").strip()
+    if len(note) > scanner.PAPER_TRADE_NOTE_MAX_LEN:
+        return jsonify({"error": f"açıklama en fazla {scanner.PAPER_TRADE_NOTE_MAX_LEN} karakter olabilir"}), 400
+    updated = scanner.set_paper_trade_note(trade_id, note or None)
+    if not updated:
+        return jsonify({"error": "işlem bulunamadı (ya da henüz açık)"}), 404
+    return jsonify({"status": "ok", "note": note})
 
 
 # Equity grafigi zaman araligi secici (1A/3A/6A/1Y, 2026-11-04'te eklendi) -

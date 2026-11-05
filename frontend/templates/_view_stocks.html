@@ -8,6 +8,7 @@
       <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kısa sektör kodu - Yahoo Finance'in canlı 'sector' alanından türetilir.">Sektör<span class="arrow"></span></th>
       {% if logged_in %}
       <th data-key="score" data-type="score" data-tip="1d, MACD, RSI, BB% ve RS sinyallerinin tek bir konfluens puanında (-5..+5) birleştirilmiş hali: GÜÇLÜ AL(▲▲)/AL(▲)/NÖTR(–)/SAT(▼)/GÜÇLÜ SAT(▼▼). ADX(14), GÜÇLÜ AL/SAT etiketini teyit eden bir güven filtresidir - ADX<20 ise 'güçlü' etiket normal AL/SAT'a düşer.">Skor<span class="arrow"></span></th>
+      <th class="left" data-key="score_since" data-type="text" data-tip="Güncel Skor değerine en son ne zaman geçildi (gün.ay.yıl saat:dakika) - skor değişmediği sürece bu zaman sabit kalır.">Sinyal Zamanı<span class="arrow"></span></th>
       {% endif %}
       <th data-key="signal_1d" data-type="signal" data-tip="Günlük mumda EMA9/EMA21'e göre sürekli trend yönü (AL/SAT/NÖTR).">1d<span class="arrow"></span></th>
       {% if logged_in %}
@@ -118,7 +119,7 @@ function renderRows(rows) {
       <td class="left">${escapeHtml(r.ticker)}</td>
       <td class="left">${indexDisplayLabel(r)}</td>
       <td class="left">${escapeHtml(r.sector || '-')}</td>
-      ${LOGGED_IN ? `<td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td>` : ''}
+      ${LOGGED_IN ? `<td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td><td class="left">${fmtScoreSince(r.score_since)}</td>` : ''}
       <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
       ${LOGGED_IN ? `<td class="sym-${r.signal_macd}">${SIGNAL_SYMBOLS[r.signal_macd] || r.signal_macd}</td>` : ''}
       <td>${fmtPrice(r.price)}</td>

@@ -115,6 +115,17 @@ function fmtRatio(v) { return (v === null || v === undefined) ? '-' : `${v.toFix
 function fmtRangePos(v) { return (v === null || v === undefined) ? '-' : `${v.toFixed(0)}%`; }
 function fmtRsi(v) { return (v === null || v === undefined) ? '-' : v.toFixed(0); }
 function fmtPrice(v) { return (v === null || v === undefined) ? '-' : v.toFixed(2); }
+// Backend "YYYY-MM-DD HH:MM:SS" (ISO siralama icin, scanner.log_score_history()'nin
+// score_since'i) donuyor - GORUNUMDE kullanicinin istedigi "gun ay yil saat
+// dakika" sirasina (DD.MM.YYYY HH:MM) ceviriliyor, ISO'nun yil-ay-gun
+// sirasindan BILEREK farkli (2026-11-05'te eklendi, bkz. CLAUDE.md).
+function fmtScoreSince(v) {
+  if (!v) return '-';
+  const [datePart, timePart] = v.split(' ');
+  const [y, m, d] = (datePart || '').split('-');
+  if (!y || !m || !d) return '-';
+  return `${d}.${m}.${y} ${(timePart || '').slice(0, 5)}`;
+}
 function pctClass(v) { if (v === null || v === undefined) return ''; return v >= 0 ? 'pos' : 'neg'; }
 
 // ticker/sector Yahoo Finance'in dinamik tarama sonuclarindan geliyor (ozellikle

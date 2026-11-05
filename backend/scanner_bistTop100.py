@@ -247,6 +247,12 @@ def _init_db() -> None:
                     timestamp TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS score_since (
+                    ticker TEXT PRIMARY KEY,
+                    score TEXT NOT NULL,
+                    since TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS paper_account (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     cash REAL NOT NULL,
@@ -300,6 +306,13 @@ def _init_db() -> None:
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(paper_trades)").fetchall()]
             if "source" not in cols:
                 conn.execute("ALTER TABLE paper_trades ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'")
+                conn.commit()
+            # 'note' sutunu - kapanan islemlere kullanicinin elle yazdigi
+            # serbest metin aciklama (2026-11-05'te eklendi, bkz. CLAUDE.md).
+            # Nullable - mevcut/yeni satirlar varsayilan NULL (aciklama yok),
+            # frontend'de bos string olarak gosterilir.
+            if "note" not in cols:
+                conn.execute("ALTER TABLE paper_trades ADD COLUMN note TEXT")
                 conn.commit()
         finally:
             conn.close()
@@ -1090,6 +1103,32 @@ def _seed_last_logged_scores() -> None:
 _seed_last_logged_scores()
 
 
+# ticker -> (score, since) - GUNCEL skorun NE ZAMANDAN BERI aktif oldugu
+# (2026-11-05'te eklendi, bkz. CLAUDE.md "BIST sayfasinda sinyal zamani
+# sutunu"). last_known_score'dan FARKLI: o her dongude upsert edilir (sadece
+# "en son ne zaman gorduk" bilgisi), bu ise SADECE skor DEGISTIGINDE
+# guncellenir - restart sonrasi bile "since" degeri DOGRU kalsin diye ayri
+# bir tablo/cache.
+_score_since_cache = {}
+
+
+def _seed_score_since() -> None:
+    """Process (re)basladiginda _score_since_cache'i score_since tablosundan
+    doldurur - _seed_last_logged_scores() ile AYNI amac/desen (O(1), buyuk
+    score_history taranmaz): restart, zaten uzun suredir ayni skorda olan
+    hisseler icin "since" degerini YANLISLIKLA 'simdi' olarak sifirlamasin."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute("SELECT ticker, score, since FROM score_since").fetchall()
+        for row in rows:
+            _score_since_cache[row["ticker"]] = (row["score"], row["since"])
+    finally:
+        conn.close()
+
+
+_seed_score_since()
+
+
 def _seed_paper_last_score() -> None:
     """Process (re)basladiginda _paper_last_score'u last_known_score
     tablosundan doldurur - _seed_last_logged_scores() ile AYNI amac/desen
@@ -1361,18 +1400,41 @@ def log_score_history(rows):
     dongude TUM hisseler icin bir satir yazar. Web arayuzundeki Skor Gecmisi
     panelinin 3 sekmesinin (gunluk ortalama / saatlik ortalama / 5 dakikalik
     ham veri) kaynagi budur - BIST_REFRESH_SECONDS zaten 5 dakika oldugu icin her
-    dongu dogal olarak bir "5 dakikalik" ornek temsil eder."""
+    dongu dogal olarak bir "5 dakikalik" ornek temsil eder.
+
+    Ayrica (2026-11-05'te eklendi) her satirin GUNCEL skorunun NE ZAMANDAN
+    BERI aktif oldugunu _score_since_cache/score_since tablosundan hesaplayip
+    satirin KENDISINE row["score_since"] ("YYYY-MM-DD HH:MM:SS") olarak
+    ekler - rows zaten _run_scan()'daki top_rows ile AYNI liste/dict
+    nesneleri oldugu icin burada yapilan mutasyon _state["rows"]'a dogrudan
+    yansir, web_bistTop100.py'de EK bir degisiklik gerekmez. Skor
+    DEGISMEDIYSE onceki "since" korunur, DEGISTIYSE bu dongunun zamanina
+    sifirlanir VE SADECE degisen ticker'lar icin score_since tablosuna
+    yazilir (degismeyenler icin gereksiz yazim yapilmaz, last_known_score'un
+    aksine)."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    entries = [
-        {
-            "timestamp": now,
-            "ticker": row["ticker"],
-            "score_raw": row["score_raw"],
-            "score": row["score"],
-            "price": row["price"],
-        }
-        for row in rows
-    ]
+    entries = []
+    since_changes = []
+    for row in rows:
+        ticker = row["ticker"]
+        score = row["score"]
+        cached = _score_since_cache.get(ticker)
+        if cached is None or cached[0] != score:
+            since = now
+            _score_since_cache[ticker] = (score, since)
+            since_changes.append({"ticker": ticker, "score": score, "since": since})
+        else:
+            since = cached[1]
+        row["score_since"] = since
+        entries.append(
+            {
+                "timestamp": now,
+                "ticker": ticker,
+                "score_raw": row["score_raw"],
+                "score": score,
+                "price": row["price"],
+            }
+        )
     with _DB_LOCK:
         conn = get_db_connection()
         try:
@@ -1390,6 +1452,13 @@ def log_score_history(rows):
                    ON CONFLICT(ticker) DO UPDATE SET score=excluded.score, timestamp=excluded.timestamp""",
                 entries,
             )
+            if since_changes:
+                conn.executemany(
+                    """INSERT INTO score_since (ticker, score, since)
+                       VALUES (:ticker, :score, :since)
+                       ON CONFLICT(ticker) DO UPDATE SET score=excluded.score, since=excluded.since""",
+                    since_changes,
+                )
             conn.commit()
         finally:
             conn.close()
@@ -1684,19 +1753,26 @@ def set_paper_cash(amount: float) -> None:
 
 
 def reset_paper_trading(starting_balance: float) -> None:
-    """Sanal al-sat'i TAMAMEN sifirlar: tum acik/kapali islemler, equity
-    gecmisi ve manuel takip listesi SILINIR. Nakit VE starting_balance
-    (toplam K/Z'nin olculdugu baz) verilen starting_balance'a esitlenir -
-    sabit PAPER_STARTING_BALANCE kullanilmaz, kullanici her sifirlamada
-    kendi baslangic tutarini seciyor. Frontend'de bu, "emin misin" onayi
+    """Sanal al-sat'i sifirlar: ACIK islemler, equity gecmisi ve manuel
+    takip listesi SILINIR. Nakit VE starting_balance (toplam K/Z'nin
+    olculdugu baz) verilen starting_balance'a esitlenir - sabit
+    PAPER_STARTING_BALANCE kullanilmaz, kullanici her sifirlamada kendi
+    baslangic tutarini seciyor. Frontend'de bu, "emin misin" onayi
     SONRASINDA cagrilir. _paper_last_score (hangi ticker'in GUCLU_AL'a
     yeni gectigini takip eden hafiza) KASITLI olarak DOKUNULMAZ - yoksa
     sifirlama hemen ardindan, zaten GUCLU_AL'da olan tum hisseleri 'yeni
-    gecis' sayip ayni restart-hatasini (bkz. CLAUDE.md) tekrar tetikler."""
+    gecis' sayip ayni restart-hatasini (bkz. CLAUDE.md) tekrar tetikler.
+
+    ⚠️ KAPANAN (status='closed') islemler ARTIK SILINMIYOR (2026-11-05'te
+    kullanici istegiyle degistirildi - "nakit sifirlanirken kapanan
+    islemler hicbir zaman sifirlanmasin") - gecmis performans/aciklama
+    notlari (bkz. note sutunu) kalici bir kayit olarak korunuyor, sadece
+    ACIK pozisyonlar (henuz sonuclanmamis, yeni baslangic sermayesiyle
+    artik anlamsiz kalan) temizleniyor."""
     with _DB_LOCK:
         conn = get_db_connection()
         try:
-            conn.execute("DELETE FROM paper_trades")
+            conn.execute("DELETE FROM paper_trades WHERE status = 'open'")
             conn.execute("DELETE FROM paper_equity_history")
             conn.execute("DELETE FROM paper_watchlist")
             conn.execute(
@@ -1852,8 +1928,14 @@ def get_paper_positions():
         conn.close()
 
 
-def get_paper_trades(limit: int = 200):
-    """Kapanmis sanal islemleri (en yeni once) dondurur."""
+def get_paper_trades(limit: int = 2000):
+    """Kapanmis sanal islemleri (en yeni once) dondurur. Varsayilan limit
+    200'den 2000'e cikarildi (2026-11-05) - reset_paper_trading() artik
+    kapanan islemleri SILMEDIGI icin (bkz. orada) bu liste zamanla
+    biriken, buyuyen bir gecmis oluyor; frontend'deki pager (hisse
+    tablosuyla AYNI desen - bkz. CLAUDE.md) TUM satirlari tek seferde
+    cekip kendi icinde sayfaliyor, bu yuzden backend'in cok erken
+    kesmemesi gerekiyor."""
     conn = get_db_connection()
     try:
         cur = conn.execute(
@@ -1863,6 +1945,37 @@ def get_paper_trades(limit: int = 200):
         return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+PAPER_TRADE_NOTE_MAX_LEN = 250
+
+
+def set_paper_trade_note(trade_id: int, note: str) -> bool:
+    """Kapanan bir sanal islemin aciklama notunu gunceller (2026-11-05'te
+    eklendi, kullanici istegi: "kapanan islemlerde aciklama kismi olsun,
+    250 karakteri asmayacak sekilde istenilen her sey yazilabilsin").
+    SADECE status='closed' olan bir satiri gunceller - acik pozisyonlar
+    icin bu endpoint kullanilmaz (henuz sonuclanmamis bir islemin "notu"
+    kavrami yok, kullanici isteginin kapsami zaten SADECE kapanan
+    islemlerdi). Boş/None not SILMEK icin kullanilir (notu kaldirmak
+    isteyen kullanici input'u bosaltabilir). Uzunluk kontrolu burada DA
+    yapilir (cagiran taraf - API route - zaten kontrol etse de, bu
+    fonksiyon DOGRUDAN cagrilsa bile guvenli kalsin diye). Eslesen satir
+    yoksa (yanlis id ya da hala acik) False doner, cagiran taraf 404/400
+    donebilsin diye."""
+    if note is not None and len(note) > PAPER_TRADE_NOTE_MAX_LEN:
+        raise ValueError(f"Aciklama en fazla {PAPER_TRADE_NOTE_MAX_LEN} karakter olabilir.")
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE paper_trades SET note = ? WHERE id = ? AND status = 'closed'",
+                (note or None, trade_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
 
 
 def get_paper_equity_history(since_timestamp: str):

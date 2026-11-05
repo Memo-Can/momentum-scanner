@@ -68,11 +68,23 @@
               <th>K/Z</th>
               <th class="left">Çıkış Nedeni</th>
               <th class="left">Çıkış Tarihi</th>
+              <th class="left">Açıklama</th>
             </tr>
           </thead>
           <tbody id="paper-trades"></tbody>
         </table>
         <div id="paper-trades-empty" hidden>Henüz kapanan işlem yok.</div>
+      </div>
+      <div id="paper-trades-pager">
+        <div id="paper-trades-pager-page-indicator"></div>
+        <div id="paper-trades-pager-controls">
+          <button class="market-tab-btn active" data-size="25" type="button">25</button>
+          <button class="market-tab-btn" data-size="50" type="button">50</button>
+          <button class="market-tab-btn" data-size="100" type="button">100</button>
+          <button class="market-tab-btn" data-size="max" type="button">Tümü</button>
+          <button class="market-tab-btn" id="paper-trades-pager-prev" type="button">&lsaquo; Önceki</button>
+          <button class="market-tab-btn" id="paper-trades-pager-next" type="button">Sonraki &rsaquo;</button>
+        </div>
       </div>
     </div>
   </section>
@@ -340,12 +352,70 @@ function renderPaperPositions(positions) {
   });
 }
 
+// Kapanan Islemler sayfalamasi (2026-11-05'te eklendi) - hisse tablosunun
+// #pager'iyla AYNI desen (bkz. _view_stocks.html: paginate()), ama tamamen
+// AYRI bir state/fonksiyon seti (farkli DOM elemanlarina bagli, ortak bir
+// yardimci cikarmak gereksiz karmasiklik katardi - equity grafigi araligiyla
+// AYNI gerekce). reset_paper_trading() artik kapanan islemleri SILMEDIGI
+// icin (bkz. CLAUDE.md) bu liste zamanla buyuyen bir gecmis oluyor, pager bu
+// yuzden eklendi. lastPaperTrades, sayfa/boyut butonlarina tiklaninca
+// SUNUCUYA TEKRAR GITMEDEN (zaten elimizdeki tam listeden) yeniden cizmek icin.
+let paperTradesPageSize = 25;
+let paperTradesCurrentPage = 1;
+let lastPaperTrades = [];
+
+function paginatePaperTrades(trades) {
+  const indicator = document.getElementById('paper-trades-pager-page-indicator');
+  const prevBtn = document.getElementById('paper-trades-pager-prev');
+  const nextBtn = document.getElementById('paper-trades-pager-next');
+  if (paperTradesPageSize === 'max') {
+    indicator.textContent = `${trades.length} işlem (tümü)`;
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    return trades;
+  }
+  const totalPages = Math.max(1, Math.ceil(trades.length / paperTradesPageSize));
+  if (paperTradesCurrentPage > totalPages) paperTradesCurrentPage = totalPages;
+  if (paperTradesCurrentPage < 1) paperTradesCurrentPage = 1;
+  const start = (paperTradesCurrentPage - 1) * paperTradesPageSize;
+  indicator.textContent = `Sayfa ${paperTradesCurrentPage}/${totalPages}`;
+  prevBtn.disabled = paperTradesCurrentPage <= 1;
+  nextBtn.disabled = paperTradesCurrentPage >= totalPages;
+  return trades.slice(start, start + paperTradesPageSize);
+}
+
+// Aciklama notu kaydet (2026-11-05'te eklendi) - SADECE kapanan islemler
+// icin (bkz. scanner.set_paper_trade_note()), en fazla 250 karakter (input'un
+// kendi maxlength'i zaten engelliyor ama sunucu tarafi da AYRICA kontrol
+// ediyor). Butonun kendi metnini gecici olarak "Kaydedildi" yapip eski
+// haline donduruyor - ayri bir basari mesaji kutusu gerekmiyor.
+async function savePaperTradeNote(tradeId, note, btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/paper/trades/${tradeId}/note`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Not kaydedilemedi.'); return; }
+    btn.textContent = 'Kaydedildi';
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1500);
+    return;
+  } catch (e) {
+    alert('Not kaydedilemedi.');
+  }
+  btn.disabled = false;
+}
+
 function renderPaperTrades(trades) {
+  lastPaperTrades = trades;
   const tbody = document.getElementById('paper-trades');
   const empty = document.getElementById('paper-trades-empty');
   tbody.innerHTML = '';
   empty.hidden = trades.length > 0;
-  trades.forEach(t => {
+  paginatePaperTrades(trades).forEach(t => {
     const tr = document.createElement('tr');
     if (t.ticker === selectedTicker) tr.classList.add('selected');
     tr.onclick = () => openTickerFromPaper(t.ticker);
@@ -357,10 +427,48 @@ function renderPaperTrades(trades) {
       <td class="${pctClass(t.pnl)}">${fmtPaperMoney(t.pnl)}</td>
       <td class="left">${escapeHtml(PAPER_EXIT_LABELS[t.exit_reason] || t.exit_reason || '-')}</td>
       <td class="left">${escapeHtml((t.exit_time || '').slice(0, 16))}</td>
+      <td class="left"></td>
     `;
+    // Not input'u/kaydet butonu tiklamasi satirin kendi onclick'ini (grafige
+    // gitme) TETIKLEMESIN diye ikisi de stopPropagation ediyor.
+    const noteTd = tr.lastElementChild;
+    const noteInput = document.createElement('input');
+    noteInput.type = 'text';
+    noteInput.maxLength = 250;
+    noteInput.placeholder = 'Açıklama ekle...';
+    noteInput.className = 'paper-note-input';
+    noteInput.value = t.note || '';
+    noteInput.onclick = (e) => e.stopPropagation();
+    noteTd.appendChild(noteInput);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'paper-action-btn';
+    saveBtn.textContent = 'Kaydet';
+    saveBtn.onclick = (e) => { e.stopPropagation(); savePaperTradeNote(t.id, noteInput.value, saveBtn); };
+    noteTd.appendChild(saveBtn);
+
     tbody.appendChild(tr);
   });
 }
+
+document.querySelectorAll('#paper-trades-pager-controls [data-size]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const size = btn.dataset.size;
+    paperTradesPageSize = size === 'max' ? 'max' : parseInt(size, 10);
+    paperTradesCurrentPage = 1;
+    document.querySelectorAll('#paper-trades-pager-controls [data-size]').forEach(b => b.classList.toggle('active', b === btn));
+    renderPaperTrades(lastPaperTrades);
+  });
+});
+document.getElementById('paper-trades-pager-prev').addEventListener('click', () => {
+  paperTradesCurrentPage -= 1;
+  renderPaperTrades(lastPaperTrades);
+});
+document.getElementById('paper-trades-pager-next').addEventListener('click', () => {
+  paperTradesCurrentPage += 1;
+  renderPaperTrades(lastPaperTrades);
+});
 
 function renderPaperWatchlist(items) {
   const tbody = document.getElementById('paper-watchlist');
@@ -517,8 +625,9 @@ if (LOGGED_IN) {
       return;
     }
     const ok = confirm(
-      `Bu işlem TÜM Sanal Al-Sat verilerini sıfırlar: açık/kapalı tüm işlemler, ` +
-      `equity geçmişi ve manuel takip listesi SİLİNİR, nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanır. ` +
+      `Bu işlem Sanal Al-Sat'ı sıfırlar: açık pozisyonlar, equity geçmişi ve manuel takip ` +
+      `listesi SİLİNİR, nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanır. ` +
+      `Kapanan işlemler geçmişi (ve açıklamaları) KORUNUR, silinmez. ` +
       `Bu işlem GERİ ALINAMAZ. Emin misin?`
     );
     if (!ok) return;

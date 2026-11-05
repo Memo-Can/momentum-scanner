@@ -344,6 +344,31 @@
   }
   #pager-page-indicator { color: var(--muted); font-size: 12px; white-space: nowrap; }
   #pager-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* Kapanan Islemler (Sanal Al-Sat) sayfalama cubugu (2026-11-05'te eklendi) -
+     #pager ile AYNI tasarim/desen (ayri id'ler, kendi JS state'i - bkz.
+     _view_paper_trading.html), kapanan islemler artik hesap sifirlanirken
+     SILINMEDIGI icin (bkz. CLAUDE.md) zamanla buyuyen bir liste oluyor. */
+  #paper-trades-pager {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 14px;
+    margin-top: 8px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+  }
+  #paper-trades-pager-page-indicator { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  #paper-trades-pager-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+  .paper-note-input {
+    width: 160px; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; font-size: 12px; outline: none; margin-right: 6px;
+  }
+  .paper-note-input:focus { border-color: var(--yellow); }
   #market-ticker {
     display: flex; gap: 18px; align-items: center;
     margin-left: 14px; padding-left: 14px;
@@ -448,6 +473,12 @@
     #pager { padding: 8px 10px; }
     #pager-controls .market-tab-btn { flex: 0 0 auto; padding: 5px 9px; font-size: 11px; }
     #pager-page-indicator { font-size: 11px; width: 100%; }
+    /* Kapanan Islemler pager'i - #pager ile AYNI mobil duzeltme (bkz. yukarida
+       "Pager" yorumu) - genel ".market-tab-btn {flex:1}" kurali bunun 6 kucuk
+       butonunu da esit genislikte uzatirdi, ayni sebeple ozellestirildi. */
+    #paper-trades-pager { padding: 8px 10px; }
+    #paper-trades-pager-controls .market-tab-btn { flex: 0 0 auto; padding: 5px 9px; font-size: 11px; }
+    #paper-trades-pager-page-indicator { font-size: 11px; width: 100%; }
   }
 
   @media (max-width: 420px) {
@@ -455,6 +486,9 @@
     #chart { height: 190px; }
     #pager-controls { gap: 4px; }
     #pager-controls .market-tab-btn { padding: 5px 7px; font-size: 10px; }
+    #paper-trades-pager-controls { gap: 4px; }
+    #paper-trades-pager-controls .market-tab-btn { padding: 5px 7px; font-size: 10px; }
+    .paper-note-input { width: 110px; }
   }
 
   /* --- Giris/Cikis linki (header) --- */
