@@ -1129,6 +1129,66 @@ def _seed_score_since() -> None:
 _seed_score_since()
 
 
+def backfill_score_since() -> dict:
+    """TEK SEFERLIK (idempotent, tekrar calistirilabilir) backfill -
+    score_since ozelligi 2026-11-05'te EKLENDIGINDE tablo BOMBOS basladigi
+    icin ILK dongude TUM ticker'lar yanlislikla "since=o an" aldi (gercek
+    gecis anlari henuz bilinmiyordu - kullanici bunu fark edip "nötr'den
+    al'a geçiş gibi GERÇEK degisim anini yazmali" diye bildirdi). Bu
+    fonksiyon score_history'deki (SADECE source='live' - backfill'in GUNLUK
+    tek-ornegi gercek saat/dakika hassasiyetini TEMSIL ETMIYOR, bu yuzden
+    KASITLI disarida birakildi) gecmis veriyi her ticker icin EN YENIDEN
+    geriye dogru tarayip GUNCEL skorun GERCEKTEN ne zamandan beri (ayni
+    skorla kesintisiz) aktif oldugunu hesaplar, score_since tablosunu bu
+    DOGRU degerlerle UZERINE YAZAR ve bellek-ici _score_since_cache'i de
+    gunceller. Yahoo'ya hic istek ATMAZ, sadece yerel DB'yi okur/yazar.
+    Canli veri Eylul 2026'dan beri biriktigi icin (bkz. CLAUDE.md) bu
+    tarihten ONCE baslamis bir skorun GERCEK baslangici bilinemez - o
+    durumda elimizdeki EN ESKI canli kaydin zamani kullanilir (olduğundan
+    KISA gosterir, olduğundan UZUN asla gostermez)."""
+    conn = get_db_connection()
+    try:
+        tickers = [
+            r["ticker"]
+            for r in conn.execute("SELECT DISTINCT ticker FROM score_history WHERE source='live'").fetchall()
+        ]
+        updates = []
+        for ticker in tickers:
+            rows = conn.execute(
+                "SELECT timestamp, score FROM score_history WHERE ticker = ? AND source = 'live' "
+                "ORDER BY timestamp DESC",
+                (ticker,),
+            ).fetchall()
+            if not rows:
+                continue
+            current_score = rows[0]["score"]
+            since = rows[0]["timestamp"]
+            for row in rows[1:]:
+                if row["score"] != current_score:
+                    break
+                since = row["timestamp"]
+            updates.append({"ticker": ticker, "score": current_score, "since": since})
+    finally:
+        conn.close()
+
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.executemany(
+                """INSERT INTO score_since (ticker, score, since) VALUES (:ticker, :score, :since)
+                   ON CONFLICT(ticker) DO UPDATE SET score=excluded.score, since=excluded.since""",
+                updates,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    for u in updates:
+        _score_since_cache[u["ticker"]] = (u["score"], u["since"])
+
+    return {"tickers_updated": len(updates)}
+
+
 def _seed_paper_last_score() -> None:
     """Process (re)basladiginda _paper_last_score'u last_known_score
     tablosundan doldurur - _seed_last_logged_scores() ile AYNI amac/desen
