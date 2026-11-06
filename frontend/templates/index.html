@@ -42,6 +42,7 @@ const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
 <div id="market-tabs">
   {% if logged_in %}
   <button id="paper-view-toggle" class="market-tab-btn" type="button">Sanal Al-Sat</button>
+  <button id="settings-view-toggle" class="market-tab-btn" type="button">Ayarlar</button>
   {% endif %}
   <div id="search-wrap">
     <input type="text" id="search-input" placeholder="Ara..." autocomplete="off">
@@ -55,6 +56,7 @@ const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
     {% include "_view_stocks.html" %}
     {% if logged_in %}
       {% include "_view_paper_trading.html" %}
+      {% include "_view_settings.html" %}
     {% endif %}
   </div>
 
@@ -168,11 +170,16 @@ let watchlistTickers = new Set();
 // goruntu (#view-stocks <-> #view-paper-trading) degisir.
 function showView(view) {
   const isPaper = view === 'paper';
-  document.getElementById('view-stocks').hidden = isPaper;
+  const isSettings = view === 'settings';
+  document.getElementById('view-stocks').hidden = isPaper || isSettings;
   const paperView = document.getElementById('view-paper-trading');
   if (paperView) paperView.hidden = !isPaper;
+  const settingsView = document.getElementById('view-settings');
+  if (settingsView) settingsView.hidden = !isSettings;
   const toggleBtn = document.getElementById('paper-view-toggle');
   if (toggleBtn) toggleBtn.classList.toggle('active', isPaper);
+  const settingsToggleBtn = document.getElementById('settings-view-toggle');
+  if (settingsToggleBtn) settingsToggleBtn.classList.toggle('active', isSettings);
   // ⚠️ GERCEK bir hata, Playwright ile bulundu (2026-11-04): equity grafigi
   // (_view_paper_trading.html) sayfa ilk acildiginda, kullanici henuz
   // "Sanal Al-Sat"a hic GECMEMISKEN DOMContentLoaded'daki ilk

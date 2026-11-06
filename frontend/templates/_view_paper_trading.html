@@ -14,35 +14,6 @@
         <span id="paper-max-positions-msg"></span>
         <button id="paper-reset" type="button" class="paper-action-btn-muted">Her Şeyi Sıfırla</button>
       </div>
-      <div id="paper-criteria-edit">
-        <div class="paper-criteria-group">
-          <span class="paper-criteria-label">Otomatik Alım Kriteri:</span>
-          <label><input type="checkbox" class="paper-criteria-buy" value="AL"> AL</label>
-          <label><input type="checkbox" class="paper-criteria-buy" value="GUCLU_AL"> GÜÇLÜ AL</label>
-          <label><input type="checkbox" class="paper-criteria-buy" value="MUTLAK_AL"> MUTLAK AL</label>
-        </div>
-        <div class="paper-criteria-group">
-          <span class="paper-criteria-label">Otomatik Satış Kriteri:</span>
-          <label><input type="checkbox" class="paper-criteria-sell" value="SAT"> SAT</label>
-          <label><input type="checkbox" class="paper-criteria-sell" value="GUCLU_SAT"> GÜÇLÜ SAT</label>
-          <label><input type="checkbox" class="paper-criteria-sell" value="MUTLAK_SAT"> MUTLAK SAT</label>
-          <label title="Fiyat, giriş anındaki stop-loss seviyesinin altına düşerse satar."><input type="checkbox" class="paper-criteria-sell" value="STOP"> Stop</label>
-          <label title="Fiyat, giriş anındaki hedef seviyesinin üstüne çıkarsa satar."><input type="checkbox" class="paper-criteria-sell" value="TARGET"> Hedef</label>
-        </div>
-        <div class="paper-criteria-group">
-          <span class="paper-criteria-label">Telegram Sinyal Bildirimi Kriteri:</span>
-          <label><input type="checkbox" class="paper-criteria-notify" value="GUCLU_AL"> GÜÇLÜ AL</label>
-          <label><input type="checkbox" class="paper-criteria-notify" value="MUTLAK_AL"> MUTLAK AL</label>
-          <label><input type="checkbox" class="paper-criteria-notify" value="GUCLU_SAT"> GÜÇLÜ SAT</label>
-          <label><input type="checkbox" class="paper-criteria-notify" value="MUTLAK_SAT"> MUTLAK SAT</label>
-        </div>
-        <div class="sub">Not: Bu, yukarıdaki alım/satış kriterlerinden BAĞIMSIZ - sadece hangi skor geçişlerinde genel Telegram sinyal mesajı (🟢/🔴) gelsin onu belirler, otomatik alım/satımı etkilemez.</div>
-        <div class="paper-criteria-group">
-          <button class="paper-action-btn" id="paper-criteria-save" type="button">Kriterleri Kaydet</button>
-          <span id="paper-criteria-msg"></span>
-        </div>
-        <div class="sub" id="paper-criteria-current"></div>
-      </div>
       <div id="paper-summary"></div>
       <h3 id="paper-equity-title">Equity Grafiği</h3>
       <div class="tabs" id="paper-equity-range-tabs">
@@ -172,15 +143,6 @@ function parseTLAmount(str) {
   return isNaN(val) ? NaN : val;
 }
 const PAPER_EXIT_LABELS = { stop: 'Stop', target: 'Hedef', signal_reversal: 'Sinyal Tersi', time_stop: 'Süre Aşımı', manual_sat_signal: 'Sinyal (SAT)', manual: 'Elle Satış' };
-// Otomatik al/sat kriter checkbox'larinin etiketleri (2026-11-06'da eklendi) -
-// index.html'in SCORE_SYMBOLS'una BAGIMLI DEGIL (script sirasindan bagimsiz
-// olsun diye, bkz. CLAUDE.md "Frontend dosya bolunmesi" script-sirasi dersi).
-const PAPER_CRITERIA_LABELS = {
-  AL: 'AL', GUCLU_AL: 'GÜÇLÜ AL', MUTLAK_AL: 'MUTLAK AL',
-  SAT: 'SAT', GUCLU_SAT: 'GÜÇLÜ SAT', MUTLAK_SAT: 'MUTLAK SAT',
-  STOP: 'Stop', TARGET: 'Hedef',
-};
-let paperCriteriaDirty = false;
 const PAPER_SOURCE_LABELS = { auto: 'Otomatik', manual: 'Manuel' };
 
 // Equity egrisi grafigi (2026-11-04'te eklendi) - #view-graphic'teki
@@ -354,32 +316,6 @@ function renderPaperSummary(s) {
   const maxPosInput = document.getElementById('paper-max-positions-input');
   if (maxPosInput && document.activeElement !== maxPosInput) {
     maxPosInput.placeholder = `Maks. pozisyon (şu an: ${s.max_positions})`;
-  }
-  renderPaperCriteria(s);
-}
-
-// Otomatik al/sat kriter checkbox'larini DB'deki guncel secimle senkronlar -
-// kullanici kaydetmeden ONCE (checkbox'lari tiklamis ama henuz "Kriterleri
-// Kaydet"e basmamisken) her refreshPaperTrading() dongusu (BIST_REFRESH_SECONDS'ta
-// bir) bu checkbox'lari EZMESIN diye paperCriteriaDirty bayragiyla korunuyor -
-// paper-cash-input'un placeholder/value korumasiyla AYNI gerekce.
-function renderPaperCriteria(s) {
-  if (paperCriteriaDirty) return;
-  document.querySelectorAll('.paper-criteria-buy').forEach(cb => {
-    cb.checked = (s.buy_criteria || []).includes(cb.value);
-  });
-  document.querySelectorAll('.paper-criteria-sell').forEach(cb => {
-    cb.checked = (s.sell_criteria || []).includes(cb.value);
-  });
-  document.querySelectorAll('.paper-criteria-notify').forEach(cb => {
-    cb.checked = (s.notify_criteria || []).includes(cb.value);
-  });
-  const buyText = (s.buy_criteria || []).map(v => PAPER_CRITERIA_LABELS[v] || v).join(', ') || 'YOK (otomatik alım tamamen kapalı)';
-  const sellText = (s.sell_criteria || []).map(v => PAPER_CRITERIA_LABELS[v] || v).join(', ') || 'YOK (sinyal tersiyle otomatik satış kapalı)';
-  const notifyText = (s.notify_criteria || []).map(v => PAPER_CRITERIA_LABELS[v] || v).join(', ') || 'YOK (genel Telegram sinyal bildirimi kapalı)';
-  const currentEl = document.getElementById('paper-criteria-current');
-  if (currentEl) {
-    currentEl.textContent = `Şu an aktif — Alım: ${buyText} | Satış: ${sellText} | Telegram Bildirimi: ${notifyText}`;
   }
 }
 
@@ -702,30 +638,6 @@ if (LOGGED_IN) {
       if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
       input.value = '';
       msg.textContent = 'Güncellendi.';
-      refreshPaperTrading();
-    } catch (e) {
-      msg.textContent = 'Güncellenemedi.';
-    }
-  });
-
-  document.querySelectorAll('.paper-criteria-buy, .paper-criteria-sell, .paper-criteria-notify').forEach(cb => {
-    cb.addEventListener('change', () => { paperCriteriaDirty = true; });
-  });
-
-  document.getElementById('paper-criteria-save').addEventListener('click', async () => {
-    const msg = document.getElementById('paper-criteria-msg');
-    const buy = Array.from(document.querySelectorAll('.paper-criteria-buy:checked')).map(cb => cb.value);
-    const sell = Array.from(document.querySelectorAll('.paper-criteria-sell:checked')).map(cb => cb.value);
-    const notify = Array.from(document.querySelectorAll('.paper-criteria-notify:checked')).map(cb => cb.value);
-    try {
-      const res = await fetch('/api/paper/criteria', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buy, sell, notify }),
-      });
-      if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
-      paperCriteriaDirty = false;
-      msg.textContent = 'Kaydedildi.';
       refreshPaperTrading();
     } catch (e) {
       msg.textContent = 'Güncellenemedi.';

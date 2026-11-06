@@ -28,6 +28,7 @@ import time
 from datetime import datetime, timedelta
 
 import scanner_bistTop100 as scanner
+import settings
 import yfinance as yf
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -891,21 +892,28 @@ def api_paper_set_max_positions():
     return jsonify({"status": "ok", "max_positions": n})
 
 
-@app.route("/api/paper/criteria", methods=["POST"])
+@app.route("/api/settings/criteria", methods=["GET", "POST"])
 @_login_required
-def api_paper_set_criteria():
-    """Otomatik alim/satimi VE (BAGIMSIZ, 2026-11-06'da ayrildi, bkz.
-    CLAUDE.md) Telegram SKOR sinyali bildirimini tetikleyen kriter
-    kumelerini elle degistirir. Body: {"buy": [...], "sell": [...],
-    "notify": [...]} - her liste kendi gecerli kumesine (PAPER_BUY_CRITERIA_OPTIONS/
-    PAPER_SELL_CRITERIA_OPTIONS/PAPER_NOTIFY_CRITERIA_OPTIONS) gore
-    dogrulanir, gecersiz bir etiket iceren liste 400 doner (scanner
-    tarafinda SESSIZCE elemek YERINE burada SIKI dogrulama - kullanici
-    yazim hatasini fark etsin). "notify" ALANI OPSIYONEL - hic gonderilmezse
-    (None) notify_criteria'ya dokunulmaz, SADECE buy/sell guncellenir.
-    Bos liste (hicbir etiket secilmemis) HER UCU icin GECERLI bir secim -
-    o yonde otomatik islem/bildirim tamamen durur, bu kullanicinin kendi
-    karari."""
+def api_settings_criteria():
+    """Ayarlar ekraninin (frontend/templates/_view_settings.html) backend
+    ucu - otomatik alim/satimi VE (BAGIMSIZ, bkz. CLAUDE.md) Telegram SKOR
+    sinyali bildirimini tetikleyen kriter kumelerini okur/yazar. Is mantigi
+    settings.py'de (bkz. o dosyanin modul docstring'i - scanner_bistTop100.py'den
+    BILEREK AYRI).
+
+    GET: settings.get_paper_criteria()'yi dondurur.
+    POST: Body {"buy": [...], "sell": [...], "notify": [...]} - her liste
+    kendi gecerli kumesine (settings.PAPER_*_CRITERIA_OPTIONS) gore
+    dogrulanir, gecersiz bir etiket iceren liste 400 doner (settings.py'nin
+    kendi SESSIZCE elemesinden farkli olarak burada SIKI dogrulama -
+    kullanici yazim hatasini fark etsin). "notify" ALANI OPSIYONEL - hic
+    gonderilmezse (None) notify_criteria'ya dokunulmaz, SADECE buy/sell
+    guncellenir. Bos liste (hicbir etiket secilmemis) HER UCU icin GECERLI
+    bir secim - o yonde otomatik islem/bildirim tamamen durur, bu
+    kullanicinin kendi karari."""
+    if request.method == "GET":
+        return jsonify(settings.get_paper_criteria())
+
     data = request.get_json(silent=True) or {}
     buy = data.get("buy")
     sell = data.get("sell")
@@ -914,22 +922,22 @@ def api_paper_set_criteria():
         return jsonify({"error": "buy ve sell alanları liste olmalı"}), 400
     if notify is not None and not isinstance(notify, list):
         return jsonify({"error": "notify alanı liste olmalı"}), 400
-    if any(b not in scanner.PAPER_BUY_CRITERIA_OPTIONS for b in buy):
+    if any(b not in settings.PAPER_BUY_CRITERIA_OPTIONS for b in buy):
         return jsonify({
-            "error": f"buy için geçerli değerler: {', '.join(scanner.PAPER_BUY_CRITERIA_OPTIONS)}"
+            "error": f"buy için geçerli değerler: {', '.join(settings.PAPER_BUY_CRITERIA_OPTIONS)}"
         }), 400
-    if any(s not in scanner.PAPER_SELL_CRITERIA_OPTIONS for s in sell):
+    if any(s not in settings.PAPER_SELL_CRITERIA_OPTIONS for s in sell):
         return jsonify({
-            "error": f"sell için geçerli değerler: {', '.join(scanner.PAPER_SELL_CRITERIA_OPTIONS)}"
+            "error": f"sell için geçerli değerler: {', '.join(settings.PAPER_SELL_CRITERIA_OPTIONS)}"
         }), 400
-    if notify is not None and any(n not in scanner.PAPER_NOTIFY_CRITERIA_OPTIONS for n in notify):
+    if notify is not None and any(n not in settings.PAPER_NOTIFY_CRITERIA_OPTIONS for n in notify):
         return jsonify({
-            "error": f"notify için geçerli değerler: {', '.join(scanner.PAPER_NOTIFY_CRITERIA_OPTIONS)}"
+            "error": f"notify için geçerli değerler: {', '.join(settings.PAPER_NOTIFY_CRITERIA_OPTIONS)}"
         }), 400
-    scanner.set_paper_buy_criteria(buy)
-    scanner.set_paper_sell_criteria(sell)
+    settings.set_paper_buy_criteria(buy)
+    settings.set_paper_sell_criteria(sell)
     if notify is not None:
-        scanner.set_paper_notify_criteria(notify)
+        settings.set_paper_notify_criteria(notify)
     return jsonify({"status": "ok", "buy": buy, "sell": sell, "notify": notify})
 
 

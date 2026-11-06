@@ -1,0 +1,135 @@
+<div id="view-settings" hidden>
+  <section id="settings-panel">
+    <div id="settings-header">
+      <h2>Ayarlar</h2>
+    </div>
+    <div class="sub">Sanal Al-Sat'ın otomatik alım/satım kararlarını ve Telegram sinyal bildirimlerini buradan kontrol edebilirsin.</div>
+    <div id="criteria-edit">
+      <div class="criteria-group">
+        <span class="criteria-label">Otomatik Alım Kriteri:</span>
+        <label><input type="checkbox" class="criteria-buy" value="AL"> AL</label>
+        <label><input type="checkbox" class="criteria-buy" value="GUCLU_AL"> GÜÇLÜ AL</label>
+        <label><input type="checkbox" class="criteria-buy" value="MUTLAK_AL"> MUTLAK AL</label>
+      </div>
+      <div class="criteria-group">
+        <span class="criteria-label">Otomatik Satış Kriteri:</span>
+        <label><input type="checkbox" class="criteria-sell" value="SAT"> SAT</label>
+        <label><input type="checkbox" class="criteria-sell" value="GUCLU_SAT"> GÜÇLÜ SAT</label>
+        <label><input type="checkbox" class="criteria-sell" value="MUTLAK_SAT"> MUTLAK SAT</label>
+        <label title="Fiyat, giriş anındaki stop-loss seviyesinin altına düşerse satar."><input type="checkbox" class="criteria-sell" value="STOP"> Stop</label>
+        <label title="Fiyat, giriş anındaki hedef seviyesinin üstüne çıkarsa satar."><input type="checkbox" class="criteria-sell" value="TARGET"> Hedef</label>
+      </div>
+      <div class="criteria-group">
+        <span class="criteria-label">Telegram Sinyal Bildirimi Kriteri:</span>
+        <label><input type="checkbox" class="criteria-notify" value="GUCLU_AL"> GÜÇLÜ AL</label>
+        <label><input type="checkbox" class="criteria-notify" value="MUTLAK_AL"> MUTLAK AL</label>
+        <label><input type="checkbox" class="criteria-notify" value="GUCLU_SAT"> GÜÇLÜ SAT</label>
+        <label><input type="checkbox" class="criteria-notify" value="MUTLAK_SAT"> MUTLAK SAT</label>
+      </div>
+      <div class="sub">Not: Telegram Sinyal Bildirimi Kriteri, yukarıdaki alım/satış kriterlerinden BAĞIMSIZ - sadece hangi skor geçişlerinde genel Telegram sinyal mesajı (🟢/🔴) gelsin onu belirler, otomatik alım/satımı etkilemez.</div>
+      <div class="criteria-group">
+        <button class="paper-action-btn" id="criteria-save" type="button">Kriterleri Kaydet</button>
+        <span id="criteria-msg"></span>
+      </div>
+      <div class="sub" id="criteria-current"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// Ayarlar ekrani (2026-11-06'da Sanal Al-Sat'tan AYRI bir goruntuye/dosyaya
+// tasindi, bkz. CLAUDE.md "Ayarlar ekrani ayrildi") - otomatik al/sat +
+// Telegram sinyal bildirimi kriterlerini yonetir. Backend tarafi
+// backend/settings.py'de (scanner_bistTop100.py'den AYRI, kendi get/set
+// fonksiyonlari) - web_bistTop100.py bu modulu import edip /api/settings/criteria
+// route'unu ona delege ediyor.
+// CRITERIA_LABELS index.html'in SCORE_SYMBOLS'una BAGIMLI DEGIL (script
+// sirasindan bagimsiz olsun diye, bkz. CLAUDE.md "Frontend dosya bolunmesi"
+// script-sirasi dersi).
+const CRITERIA_LABELS = {
+  AL: 'AL', GUCLU_AL: 'GÜÇLÜ AL', MUTLAK_AL: 'MUTLAK AL',
+  SAT: 'SAT', GUCLU_SAT: 'GÜÇLÜ SAT', MUTLAK_SAT: 'MUTLAK SAT',
+  STOP: 'Stop', TARGET: 'Hedef',
+};
+let criteriaDirty = false;
+
+// Checkbox'lari DB'deki guncel secimle senkronlar - kullanici kaydetmeden
+// ONCE (checkbox'lari tiklamis ama henuz "Kriterleri Kaydet"e basmamisken)
+// her refreshSettings() dongusu (BIST_REFRESH_SECONDS'ta bir) bu checkbox'lari
+// EZMESIN diye criteriaDirty bayragiyla korunuyor - diger ekranlardaki
+// (paper-cash-input placeholder/value korumasi) ile AYNI desen.
+function renderCriteria(c) {
+  if (criteriaDirty) return;
+  document.querySelectorAll('.criteria-buy').forEach(cb => {
+    cb.checked = (c.buy || []).includes(cb.value);
+  });
+  document.querySelectorAll('.criteria-sell').forEach(cb => {
+    cb.checked = (c.sell || []).includes(cb.value);
+  });
+  document.querySelectorAll('.criteria-notify').forEach(cb => {
+    cb.checked = (c.notify || []).includes(cb.value);
+  });
+  const buyText = (c.buy || []).map(v => CRITERIA_LABELS[v] || v).join(', ') || 'YOK (otomatik alım tamamen kapalı)';
+  const sellText = (c.sell || []).map(v => CRITERIA_LABELS[v] || v).join(', ') || 'YOK (sinyal tersiyle otomatik satış kapalı)';
+  const notifyText = (c.notify || []).map(v => CRITERIA_LABELS[v] || v).join(', ') || 'YOK (genel Telegram sinyal bildirimi kapalı)';
+  const currentEl = document.getElementById('criteria-current');
+  if (currentEl) {
+    currentEl.textContent = `Şu an aktif — Alım: ${buyText} | Satış: ${sellText} | Telegram Bildirimi: ${notifyText}`;
+  }
+}
+
+async function refreshSettings() {
+  try {
+    const res = await fetch('/api/settings/criteria');
+    if (!res.ok) return;
+    renderCriteria(await res.json());
+  } catch (e) {
+    // sessizce gec - bir sonraki duzenli yenilemede tekrar denenir
+  }
+}
+
+if (LOGGED_IN) {
+  document.querySelectorAll('.criteria-buy, .criteria-sell, .criteria-notify').forEach(cb => {
+    cb.addEventListener('change', () => { criteriaDirty = true; });
+  });
+
+  document.getElementById('criteria-save').addEventListener('click', async () => {
+    const msg = document.getElementById('criteria-msg');
+    const buy = Array.from(document.querySelectorAll('.criteria-buy:checked')).map(cb => cb.value);
+    const sell = Array.from(document.querySelectorAll('.criteria-sell:checked')).map(cb => cb.value);
+    const notify = Array.from(document.querySelectorAll('.criteria-notify:checked')).map(cb => cb.value);
+    try {
+      const res = await fetch('/api/settings/criteria', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ buy, sell, notify }),
+      });
+      if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
+      criteriaDirty = false;
+      msg.textContent = 'Kaydedildi.';
+      refreshSettings();
+    } catch (e) {
+      msg.textContent = 'Güncellenemedi.';
+    }
+  });
+
+  // #settings-view-toggle butonu index.html'deki #market-tabs icinde, bu
+  // script'ten ONCE basildigi icin (sayfa yukaridan asagi parse edildigi
+  // icin) burada top-level (DOMContentLoaded'a SARILMAMIS) erisim guvenli -
+  // #paper-view-toggle'in KENDI dinleyicisiyle (_view_paper_trading.html)
+  // AYNI desen.
+  document.getElementById('settings-view-toggle').addEventListener('click', () => {
+    const isSettings = !document.getElementById('view-settings').hidden;
+    showView(isSettings ? 'stocks' : 'settings');
+  });
+
+  // showView()/REFRESH_SECONDS gibi ORTAK fonksiyon/sabitlere guvenen
+  // bootstrap cagrisi - DOMContentLoaded'a sarili (diger goruntulerin KENDI
+  // bootstrap'larinda oldugu gibi, bkz. CLAUDE.md "Frontend dosya bolunmesi"
+  // script-sirasi dersi).
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshSettings();
+    setInterval(refreshSettings, REFRESH_SECONDS * 1000);
+  });
+}
+</script>

@@ -229,14 +229,25 @@
   .paper-action-btn-muted { background: none; border: 1px solid var(--border); color: var(--muted); margin-left: 6px; }
   .paper-action-btn-muted:hover { color: var(--text); border-color: var(--yellow); }
   #paper-cash-msg { font-size: 12px; color: var(--muted); }
-  /* Otomatik al/sat kriter secimi (2026-11-06'da eklendi, bkz. CLAUDE.md) -
-     #indicator-toggles (_view_graphic.html) ile AYNI checkbox deseni. */
-  #paper-criteria-edit { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-  .paper-criteria-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
-  .paper-criteria-label { color: var(--muted); min-width: 150px; }
-  .paper-criteria-group label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-  .paper-criteria-group input[type="checkbox"] { cursor: pointer; accent-color: var(--yellow); }
-  #paper-criteria-msg { font-size: 12px; color: var(--muted); }
+
+  /* --- Ayarlar ekrani (otomatik al/sat + Telegram kriterleri, 2026-11-06'da
+     ayri bir goruntuye/dosyaya tasindi, bkz. CLAUDE.md) - #paper-trading
+     panel goruntusuyle (yukarida) AYNI kutu/baslik stili, #indicator-toggles
+     (_view_graphic.html) ile AYNI checkbox deseni. */
+  #settings-panel {
+    margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px;
+  }
+  #settings-header { margin-bottom: 4px; }
+  #settings-panel h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  #settings-panel .sub { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
+  #criteria-edit { display: flex; flex-direction: column; gap: 6px; }
+  .criteria-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+  .criteria-label { color: var(--muted); min-width: 150px; }
+  .criteria-group label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .criteria-group input[type="checkbox"] { cursor: pointer; accent-color: var(--yellow); }
+  #criteria-msg { font-size: 12px; color: var(--muted); }
+
   #watchlist-toggle {
     background: var(--yellow); border: none; color: #1a1a1a;
     border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 700;
