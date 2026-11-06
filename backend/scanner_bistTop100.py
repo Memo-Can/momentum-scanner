@@ -209,6 +209,18 @@ _DEFAULT_SELL_ZONE = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "STOP", "TARGET")
 PAPER_BUY_CRITERIA_OPTIONS = ("AL", "GUCLU_AL", "MUTLAK_AL")
 PAPER_SELL_CRITERIA_OPTIONS = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "STOP", "TARGET")
 
+# Genel SKOR sinyali Telegram bildirimini (_send_push_notifications, 🟢/🔴
+# ile gelen "X hissesi GUCLU AL'a gecti" mesajlari) tetikleyen etiketler -
+# otomatik alim/satim kriterinden (buy_criteria/sell_criteria) 2026-11-06'da
+# BILINCLI olarak AYRILDI (kullanici istegi: "otomatik alim satim
+# kriterleriyle telegram mesaj kriterlerini birbirinden ayiralim") - artik
+# TAMAMEN BAGIMSIZ bir secim, kendi DB sutunu (notify_criteria) var.
+# Varsayilan deger ESKI (buy/sell'le birlesmeden ONCEki, 2026-10-30'dan
+# kalma) spam-guvenli davranisla AYNI: SADECE AL tarafi (GUCLU_AL/MUTLAK_AL)
+# bildiriliyor, SAT tarafi (GUCLU_SAT/MUTLAK_SAT) varsayilan KAPALI.
+PAPER_NOTIFY_CRITERIA_OPTIONS = ("GUCLU_AL", "MUTLAK_AL", "GUCLU_SAT", "MUTLAK_SAT")
+_DEFAULT_NOTIFY_ZONE = ("GUCLU_AL", "MUTLAK_AL")
+
 # SQLite tek-yazarli oldugu icin tum INSERT/DELETE'ler bu kilit altinda
 # yapilir - WAL modu zaten coklu OKUYUCUYA izin veriyor (Flask'in threaded=True
 # istek thread'leri bu yuzden yazma sirasinda bile okuyabilir), ama ayni
@@ -281,7 +293,8 @@ def _init_db() -> None:
                     starting_balance REAL NOT NULL,
                     max_positions INTEGER NOT NULL DEFAULT {PAPER_MAX_POSITIONS},
                     buy_criteria TEXT NOT NULL DEFAULT '{",".join(_STRONG_BUY_ZONE)}',
-                    sell_criteria TEXT NOT NULL DEFAULT '{",".join(_DEFAULT_SELL_ZONE)}'
+                    sell_criteria TEXT NOT NULL DEFAULT '{",".join(_DEFAULT_SELL_ZONE)}',
+                    notify_criteria TEXT NOT NULL DEFAULT '{",".join(_DEFAULT_NOTIFY_ZONE)}'
                 );
 
                 CREATE TABLE IF NOT EXISTS paper_trades (
@@ -365,6 +378,16 @@ def _init_db() -> None:
             if "sell_criteria" not in account_cols:
                 conn.execute(
                     f"ALTER TABLE paper_account ADD COLUMN sell_criteria TEXT NOT NULL DEFAULT '{','.join(_DEFAULT_SELL_ZONE)}'"
+                )
+                conn.commit()
+            # 'notify_criteria' - Telegram SKOR sinyali bildirimini tetikleyen
+            # etiketler, buy_criteria/sell_criteria'dan BAGIMSIZ (2026-11-06'da
+            # kullanici istegiyle AYRILDI, bkz. CLAUDE.md). Varsayilan deger
+            # ESKI (ayrilmadan ONCEki) spam-guvenli davranisla AYNI - SADECE
+            # AL tarafi.
+            if "notify_criteria" not in account_cols:
+                conn.execute(
+                    f"ALTER TABLE paper_account ADD COLUMN notify_criteria TEXT NOT NULL DEFAULT '{','.join(_DEFAULT_NOTIFY_ZONE)}'"
                 )
                 conn.commit()
         finally:
@@ -1426,18 +1449,16 @@ _SIGNAL_NOTIFY_LABELS = {
 def _send_push_notifications(entries) -> None:
     """entries (log_signal_changes'in az once tespit ettigi MUTLAK_AL/
     GUCLU_AL/GUCLU_SAT/MUTLAK_SAT gecisleri) icin Telegram'a bir mesaj
-    gonderir - SADECE kullanicinin Sanal Al-Sat kriterlerinde (buy_criteria/
-    sell_criteria) ISARETLI olan etiketler icin (2026-11-06'da eklendi, bkz.
-    CLAUDE.md). Eskiden GUCLU_SAT/MUTLAK_SAT burada KOSULSUZ/sabit olarak
-    bastiriliyordu (spam sikayeti uzerine 2026-10-30'da) - artik bu sabit
-    engel YERINE kullanicinin kendi secimi gecerli: "GUCLU SAT"/"MUTLAK SAT"
-    checkbox'i isaretliyse bildirim ARTIK GELIR. Varsayilan secimde
-    (sell_criteria = SAT+GUCLU_SAT+MUTLAK_SAT+STOP+TARGET) bu checkbox'lar
-    ISARETLI oldugu icin kullanici hicbir sey degistirmezse SAT-tarafi
-    bildirimleri eskiden farkli olarak YENIDEN aktif olur - spam istemiyorsa
-    GUCLU SAT/MUTLAK SAT kutucuklarini Sanal Al-Sat ekranindan kapatmasi
-    yeterli (bu ayni checkbox otomatik SATIM'i da durdurur, ikisi ayni
-    ayardan besleniyor)."""
+    gonderir - SADECE kullanicinin notify_criteria'sinda ISARETLI olan
+    etiketler icin (2026-11-06'da eklendi, bkz. CLAUDE.md). **Bu, otomatik
+    alim/satim kriterinden (buy_criteria/sell_criteria) TAMAMEN BAGIMSIZ**
+    (ayni gun ikinci bir degisiklikle AYRILDI - kullanici istegi: "otomatik
+    alim satim kriterleriyle telegram mesaj kriterlerini birbirinden
+    ayiralim") - bir hisseyi otomatik ALMAYA/SATMAYA karar vermekle o
+    hisse icin Telegram bildirimi almak artik birbirine BAGLI DEGIL, iki
+    ayri ayar. Varsayilan notify_criteria SADECE AL tarafi (GUCLU_AL/
+    MUTLAK_AL) - SAT tarafi (GUCLU_SAT/MUTLAK_SAT) varsayilan KAPALI (eski,
+    2026-10-30'dan kalma spam-guvenli davranisla AYNI)."""
     # Sanal Al-Sat'ta (kaynak auto/manual farki yok) ZATEN ACIK pozisyonu
     # olan hisseler icin GUCLU_AL/MUTLAK_AL bildirimi tekrar gonderilmez
     # (2026-11-02, kullanici istegi) - "elimde zaten var" bilgisini tekrar
@@ -1452,15 +1473,9 @@ def _send_push_notifications(entries) -> None:
     # gonderilir, SADECE zaten ONCEKI bir dongude acilmis pozisyonlar icin
     # bastirilir.
     held_tickers = {p["ticker"] for p in get_paper_positions()}
-    criteria = get_paper_criteria()
-    # "STOP"/"TARGET" sahte etiketleri bu kumede olsa da gercek bir
-    # entry["score"] degeri ASLA olamadigi icin (confluence_label() bu
-    # stringleri uretmez) burada ekstra bir filtre GEREKMEZ - set birlesimi
-    # sadece gercek 4 "guclu" etiketin (GUCLU_AL/MUTLAK_AL/GUCLU_SAT/MUTLAK_SAT)
-    # kullanicinin secimine gore acik/kapali olmasini saglar.
-    active_labels = set(criteria["buy"]) | set(criteria["sell"])
+    notify_zone = set(get_paper_criteria()["notify"])
     for entry in entries:
-        if entry["score"] not in active_labels:
+        if entry["score"] not in notify_zone:
             continue
         if entry["ticker"] in held_tickers:
             continue
@@ -1980,20 +1995,30 @@ def set_paper_max_positions(n: int) -> None:
 
 
 def get_paper_criteria() -> dict:
-    """Kullanicinin elle sectigi, otomatik al/sat'i tetikleyen skor etiket
-    kumelerini DB'den okur (2026-11-06'da eklendi, bkz. CLAUDE.md) - eskiden
-    sabit _STRONG_BUY_ZONE/_DEFAULT_SELL_ZONE idi. Bos string (kullanici
-    bir grubun TUMUNU bilerek secmemis) bos listeye donusur - run_paper_trading_cycle()
-    bu durumda o yonde (alim/satim) hic islem yapmaz, bu KASITLI (kullanicinin
-    kendi secimi)."""
+    """Kullanicinin elle sectigi UC AYRI kriter kumesini DB'den okur
+    (2026-11-06'da eklendi, bkz. CLAUDE.md): "buy"/"sell" (otomatik alim/
+    satimi tetikler, run_paper_trading_cycle() kullanir) ve "notify" (SADECE
+    Telegram SKOR sinyali bildirimini tetikler, _send_push_notifications()
+    kullanir - 2026-11-06'da buy/sell'den BILINCLI olarak AYRILDI, kullanici
+    istegi: "otomatik alim satim kriterleriyle telegram mesaj kriterlerini
+    birbirinden ayiralim"). Bos string (kullanici bir grubun TUMUNU bilerek
+    secmemis) bos listeye donusur - o yonde (alim/satim/bildirim) hic islem
+    yapilmaz, bu KASITLI (kullanicinin kendi secimi)."""
     conn = get_db_connection()
     try:
-        row = conn.execute("SELECT buy_criteria, sell_criteria FROM paper_account WHERE id = 1").fetchone()
+        row = conn.execute(
+            "SELECT buy_criteria, sell_criteria, notify_criteria FROM paper_account WHERE id = 1"
+        ).fetchone()
         if row is None:
-            return {"buy": list(_STRONG_BUY_ZONE), "sell": list(_DEFAULT_SELL_ZONE)}
+            return {
+                "buy": list(_STRONG_BUY_ZONE),
+                "sell": list(_DEFAULT_SELL_ZONE),
+                "notify": list(_DEFAULT_NOTIFY_ZONE),
+            }
         return {
             "buy": [s for s in row["buy_criteria"].split(",") if s],
             "sell": [s for s in row["sell_criteria"].split(",") if s],
+            "notify": [s for s in row["notify_criteria"].split(",") if s],
         }
     finally:
         conn.close()
@@ -2042,6 +2067,23 @@ def set_paper_sell_criteria(labels) -> None:
         conn = get_db_connection()
         try:
             conn.execute("UPDATE paper_account SET sell_criteria = ? WHERE id = 1", (value,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def set_paper_notify_criteria(labels) -> None:
+    """Telegram SKOR sinyali bildirimini (_send_push_notifications) tetikleyen
+    etiket kumesini degistirir - PAPER_NOTIFY_CRITERIA_OPTIONS disindaki
+    degerler sessizce elenir. buy_criteria/sell_criteria'dan TAMAMEN
+    BAGIMSIZ (2026-11-06'da ayrildi, bkz. CLAUDE.md) - bu ayari degistirmek
+    otomatik alim/satim davranisini HIC ETKILEMEZ, SADECE Telegram'a
+    gidip gitmeyecegini belirler."""
+    value = _clean_criteria_labels(labels, PAPER_NOTIFY_CRITERIA_OPTIONS)
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute("UPDATE paper_account SET notify_criteria = ? WHERE id = 1", (value,))
             conn.commit()
         finally:
             conn.close()
@@ -2322,7 +2364,7 @@ def get_paper_summary():
     conn = get_db_connection()
     try:
         account = conn.execute(
-            "SELECT cash, starting_balance, max_positions, buy_criteria, sell_criteria FROM paper_account WHERE id = 1"
+            "SELECT cash, starting_balance, max_positions, buy_criteria, sell_criteria, notify_criteria FROM paper_account WHERE id = 1"
         ).fetchone()
         last_equity = conn.execute(
             "SELECT equity, positions_value FROM paper_equity_history ORDER BY id DESC LIMIT 1"
@@ -2354,6 +2396,7 @@ def get_paper_summary():
             "max_positions": account["max_positions"],
             "buy_criteria": [s for s in account["buy_criteria"].split(",") if s],
             "sell_criteria": [s for s in account["sell_criteria"].split(",") if s],
+            "notify_criteria": [s for s in account["notify_criteria"].split(",") if s],
         }
     finally:
         conn.close()

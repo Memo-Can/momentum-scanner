@@ -894,20 +894,26 @@ def api_paper_set_max_positions():
 @app.route("/api/paper/criteria", methods=["POST"])
 @_login_required
 def api_paper_set_criteria():
-    """Otomatik alim/satimi tetikleyen skor etiket kumelerini elle
-    degistirir (2026-11-06'da eklendi, bkz. CLAUDE.md). Body:
-    {"buy": [...], "sell": [...]} - her liste kendi gecerli kumesine
-    (PAPER_BUY_CRITERIA_OPTIONS/PAPER_SELL_CRITERIA_OPTIONS) gore
+    """Otomatik alim/satimi VE (BAGIMSIZ, 2026-11-06'da ayrildi, bkz.
+    CLAUDE.md) Telegram SKOR sinyali bildirimini tetikleyen kriter
+    kumelerini elle degistirir. Body: {"buy": [...], "sell": [...],
+    "notify": [...]} - her liste kendi gecerli kumesine (PAPER_BUY_CRITERIA_OPTIONS/
+    PAPER_SELL_CRITERIA_OPTIONS/PAPER_NOTIFY_CRITERIA_OPTIONS) gore
     dogrulanir, gecersiz bir etiket iceren liste 400 doner (scanner
     tarafinda SESSIZCE elemek YERINE burada SIKI dogrulama - kullanici
-    yazim hatasini fark etsin). Bos liste (hicbir etiket secilmemis)
-    GECERLI bir secim - o yonde otomatik islem tamamen durur, bu
-    kullanicinin kendi karari."""
+    yazim hatasini fark etsin). "notify" ALANI OPSIYONEL - hic gonderilmezse
+    (None) notify_criteria'ya dokunulmaz, SADECE buy/sell guncellenir.
+    Bos liste (hicbir etiket secilmemis) HER UCU icin GECERLI bir secim -
+    o yonde otomatik islem/bildirim tamamen durur, bu kullanicinin kendi
+    karari."""
     data = request.get_json(silent=True) or {}
     buy = data.get("buy")
     sell = data.get("sell")
+    notify = data.get("notify")
     if not isinstance(buy, list) or not isinstance(sell, list):
         return jsonify({"error": "buy ve sell alanları liste olmalı"}), 400
+    if notify is not None and not isinstance(notify, list):
+        return jsonify({"error": "notify alanı liste olmalı"}), 400
     if any(b not in scanner.PAPER_BUY_CRITERIA_OPTIONS for b in buy):
         return jsonify({
             "error": f"buy için geçerli değerler: {', '.join(scanner.PAPER_BUY_CRITERIA_OPTIONS)}"
@@ -916,9 +922,15 @@ def api_paper_set_criteria():
         return jsonify({
             "error": f"sell için geçerli değerler: {', '.join(scanner.PAPER_SELL_CRITERIA_OPTIONS)}"
         }), 400
+    if notify is not None and any(n not in scanner.PAPER_NOTIFY_CRITERIA_OPTIONS for n in notify):
+        return jsonify({
+            "error": f"notify için geçerli değerler: {', '.join(scanner.PAPER_NOTIFY_CRITERIA_OPTIONS)}"
+        }), 400
     scanner.set_paper_buy_criteria(buy)
     scanner.set_paper_sell_criteria(sell)
-    return jsonify({"status": "ok", "buy": buy, "sell": sell})
+    if notify is not None:
+        scanner.set_paper_notify_criteria(notify)
+    return jsonify({"status": "ok", "buy": buy, "sell": sell, "notify": notify})
 
 
 @app.route("/api/paper/reset", methods=["POST"])

@@ -30,10 +30,17 @@
           <label title="Fiyat, giriş anındaki hedef seviyesinin üstüne çıkarsa satar."><input type="checkbox" class="paper-criteria-sell" value="TARGET"> Hedef</label>
         </div>
         <div class="paper-criteria-group">
+          <span class="paper-criteria-label">Telegram Sinyal Bildirimi Kriteri:</span>
+          <label><input type="checkbox" class="paper-criteria-notify" value="GUCLU_AL"> GÜÇLÜ AL</label>
+          <label><input type="checkbox" class="paper-criteria-notify" value="MUTLAK_AL"> MUTLAK AL</label>
+          <label><input type="checkbox" class="paper-criteria-notify" value="GUCLU_SAT"> GÜÇLÜ SAT</label>
+          <label><input type="checkbox" class="paper-criteria-notify" value="MUTLAK_SAT"> MUTLAK SAT</label>
+        </div>
+        <div class="sub">Not: Bu, yukarıdaki alım/satış kriterlerinden BAĞIMSIZ - sadece hangi skor geçişlerinde genel Telegram sinyal mesajı (🟢/🔴) gelsin onu belirler, otomatik alım/satımı etkilemez.</div>
+        <div class="paper-criteria-group">
           <button class="paper-action-btn" id="paper-criteria-save" type="button">Kriterleri Kaydet</button>
           <span id="paper-criteria-msg"></span>
         </div>
-        <div class="sub">Not: GÜÇLÜ AL/MUTLAK AL/GÜÇLÜ SAT/MUTLAK SAT için gelen genel Telegram skor bildirimleri de bu kriterlere göre açılır/kapanır.</div>
         <div class="sub" id="paper-criteria-current"></div>
       </div>
       <div id="paper-summary"></div>
@@ -364,11 +371,15 @@ function renderPaperCriteria(s) {
   document.querySelectorAll('.paper-criteria-sell').forEach(cb => {
     cb.checked = (s.sell_criteria || []).includes(cb.value);
   });
+  document.querySelectorAll('.paper-criteria-notify').forEach(cb => {
+    cb.checked = (s.notify_criteria || []).includes(cb.value);
+  });
   const buyText = (s.buy_criteria || []).map(v => PAPER_CRITERIA_LABELS[v] || v).join(', ') || 'YOK (otomatik alım tamamen kapalı)';
   const sellText = (s.sell_criteria || []).map(v => PAPER_CRITERIA_LABELS[v] || v).join(', ') || 'YOK (sinyal tersiyle otomatik satış kapalı)';
+  const notifyText = (s.notify_criteria || []).map(v => PAPER_CRITERIA_LABELS[v] || v).join(', ') || 'YOK (genel Telegram sinyal bildirimi kapalı)';
   const currentEl = document.getElementById('paper-criteria-current');
   if (currentEl) {
-    currentEl.textContent = `Şu an aktif — Alım: ${buyText} | Satış: ${sellText}`;
+    currentEl.textContent = `Şu an aktif — Alım: ${buyText} | Satış: ${sellText} | Telegram Bildirimi: ${notifyText}`;
   }
 }
 
@@ -697,7 +708,7 @@ if (LOGGED_IN) {
     }
   });
 
-  document.querySelectorAll('.paper-criteria-buy, .paper-criteria-sell').forEach(cb => {
+  document.querySelectorAll('.paper-criteria-buy, .paper-criteria-sell, .paper-criteria-notify').forEach(cb => {
     cb.addEventListener('change', () => { paperCriteriaDirty = true; });
   });
 
@@ -705,11 +716,12 @@ if (LOGGED_IN) {
     const msg = document.getElementById('paper-criteria-msg');
     const buy = Array.from(document.querySelectorAll('.paper-criteria-buy:checked')).map(cb => cb.value);
     const sell = Array.from(document.querySelectorAll('.paper-criteria-sell:checked')).map(cb => cb.value);
+    const notify = Array.from(document.querySelectorAll('.paper-criteria-notify:checked')).map(cb => cb.value);
     try {
       const res = await fetch('/api/paper/criteria', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buy, sell }),
+        body: JSON.stringify({ buy, sell, notify }),
       });
       if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
       paperCriteriaDirty = false;
