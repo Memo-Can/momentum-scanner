@@ -1445,9 +1445,13 @@ def _send_paper_trade_notification(event: dict) -> None:
     (2026-10-28'de, sepet+daire denemesi sinyallerle ayni gorundugu icin
     degistirildi): alim = sepet (giris, henuz iyi/kotu degil), satis =
     kar/zarara gore yukari/asagi grafik oku (trading botlarinda kar/zarar
-    yonu icin yaygin kullanilan ikon). SADECE source='auto' islemler icin
-    cagirilir - manuel alim/satimda kullanici zaten ne yaptigini bildigi
-    icin bildirime gerek yok."""
+    yonu icin yaygin kullanilan ikon). ⚠️ Docstring DUZELTMESI (2026-11-06,
+    eskiden burada "SADECE source='auto' icin cagirilir" yaziyordu ama bu
+    HICBIR ZAMAN dogru olmamisti - trade_events source'a gore filtrelenmez,
+    hem auto hem manual alim/satim bildiriliyor (2026-10-31'de manuel
+    SAT-sinyali satislari da dahil edildi, bkz. CLAUDE.md "Bildirimler").
+    SADECE kullanicinin manual_sell() ile DOGRUDAN elle sattigi islemler bu
+    akisin DISINDA - cunku kullanici zaten ne yaptigini biliyor."""
     if event["kind"] == "buy":
         text = (
             f"🛒 SANAL ALIM: {event['ticker']}\n"
