@@ -119,7 +119,7 @@ function renderRows(rows) {
       <td class="left">${escapeHtml(r.ticker)}</td>
       <td class="left">${indexDisplayLabel(r)}</td>
       <td class="left">${escapeHtml(r.sector || '-')}</td>
-      ${LOGGED_IN ? `<td class="sym-${r.score}">${SCORE_SYMBOLS[r.score] || r.score}</td><td class="left" title="${escapeHtml(fmtScoreSince(r.score_since))}">${fmtRelativeTime(r.score_since)}</td>` : ''}
+      ${LOGGED_IN ? `<td class="sym-${r.score} score-cell" title="Günlük Skor Geçmişi'ni büyütülmüş görüntüde aç">${SCORE_SYMBOLS[r.score] || r.score}</td><td class="left" title="${escapeHtml(fmtScoreSince(r.score_since))}">${fmtRelativeTime(r.score_since)}</td>` : ''}
       <td class="sym-${r.signal_1d}">${SIGNAL_SYMBOLS[r.signal_1d] || r.signal_1d}</td>
       ${LOGGED_IN ? `<td class="sym-${r.signal_macd}">${SIGNAL_SYMBOLS[r.signal_macd] || r.signal_macd}</td>` : ''}
       <td>${fmtPrice(r.price)}</td>
@@ -135,6 +135,24 @@ function renderRows(rows) {
       <td class="${pctClass(r.m1)}">${fmtPct(r.m1)}</td>
       <td class="${pctClass(r.y1)}">${fmtPct(r.y1)}</td>
     `;
+    // Skor hucresi tiklanabilir (2026-11-06'da eklendi, kullanici istegi:
+    // "skorlar tiklanabilir olsun, tiklandiginda gunluk alim satim listesi
+    // bir popup'ta gorunsun") - inline onclick="" STRING'i YERINE DOM
+    // property atamasi kullanilir (tr.onclick = () => selectTicker(r.ticker)
+    // ile AYNI desen) cunku r.ticker Yahoo'nun dinamik tarama sonuclarindan
+    // geliyor (bizim kontrolumuzde degil) - bir HTML string'ine inline
+    // gomulseydi (onclick="...${r.ticker}...") tirnak/HTML enjeksiyonuna
+    // acik olurdu, DOM property atamasi bu riski tasimaz. stopPropagation()
+    // satirin kendi tiklamasinin (selectTicker) AYRICA tetiklenmesini onler -
+    // openScoreHistoryPopup() zaten kendi icinde gerekirse selectTicker'i
+    // cagiriyor (bkz. _view_graphic.html).
+    const scoreCell = tr.querySelector('.score-cell');
+    if (scoreCell) {
+      scoreCell.onclick = (e) => {
+        e.stopPropagation();
+        openScoreHistoryPopup(r.ticker);
+      };
+    }
     tbody.appendChild(tr);
   });
 }

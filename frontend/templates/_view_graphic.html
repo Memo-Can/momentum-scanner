@@ -349,6 +349,24 @@ document.getElementById('side-sub').addEventListener('click', () => {
 document.querySelector('#score-history h3').addEventListener('click', () => {
   openInModal(document.getElementById('score-history'), 'modal-score-history');
 });
+
+// BIST tablosundaki Skor hucresine tiklayinca (2026-11-06'da eklendi, bkz.
+// _view_stocks.html: renderRows()) cagrilir - hisse HENUZ secili degilse
+// (ya da BASKA bir hisse seciliyse) once selectTicker() ile veriyi cekip
+// BEKLER, SONRA Skor Gecmisi'ni (#score-history h3'e tiklamakla AYNI
+// openInModal() cagrisi) buyutulmus gorunumde acar. "Gunluk" sekmesi her
+// zaman ZORLA aktif hale getirilir - kullanici onceden "Saatlik"/"5 Dakikalik"
+// sekmesine gecmis olsa bile (sekme secimi DOM'da kalici, hisseler arasi
+// paylasiliyor) kullanicinin istedigi "gunluk alim satim listesi" GARANTI
+// gosterilir.
+async function openScoreHistoryPopup(ticker) {
+  if (selectedTicker !== ticker) {
+    await selectTicker(ticker);
+  }
+  document.querySelectorAll('#score-tabs .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'daily'));
+  document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== 'tab-daily'; });
+  openInModal(document.getElementById('score-history'), 'modal-score-history');
+}
 // #modal-close/#modal-overlay index.html'de (bu partial'in DISINDA, .layout'tan
 // SONRA) duruyor - bu script o elemanlardan ONCE basildigi icin DOMContentLoaded'a
 // kadar beklenir (tum sayfa parse edildikten sonra elemanlar kesin var olur).

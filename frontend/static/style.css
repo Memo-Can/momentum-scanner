@@ -168,6 +168,21 @@
   .sym-MUTLAK_AL { color: var(--green-strong); font-weight: 700; }
   .sym-MUTLAK_SAT { color: var(--red-strong); font-weight: 700; }
   .dash { color: var(--muted); }
+  /* Skor hucresi (2026-11-06'da eklendi) - tiklanince Gunluk Skor Gecmisi
+     popup'ini acar, satirin kendi tiklamasindan (hisse secimi) FARKLI bir
+     hedef oldugu icin kullanici bunu HOVER ETMEDEN de anlamali - sadece
+     ":hover" ile gosterilen bir ipucu (ilk tasarim) kesfedilebilir degildi,
+     kullanici "tiklanabilir oldugu ANLASILMALI" diye bildirdi. Duzeltme:
+     alt cizgi HER ZAMAN gorunur (link benzeri evrensel "tiklanabilir metin"
+     kurali), hover'da ARKA PLAN vurgusu ile EK bir geri bildirim saglanir -
+     satirin kendi hover'indan (tum satir rengi degisir) ayri, SADECE bu
+     hucreye ozel oldugu belli olsun diye kendi arka plani var. */
+  .score-cell {
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    border-radius: 3px;
+  }
+  .score-cell:hover { background: rgba(255, 255, 255, 0.12); }
 
   /* #table-wrap'in ICINDE, hisse tablosunun YERINE gecen bir goruntu (bkz.
      index.html #view-stocks / #view-paper-trading, showView()) - 2026-10-30'da
