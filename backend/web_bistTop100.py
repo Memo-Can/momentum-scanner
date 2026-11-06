@@ -891,6 +891,36 @@ def api_paper_set_max_positions():
     return jsonify({"status": "ok", "max_positions": n})
 
 
+@app.route("/api/paper/criteria", methods=["POST"])
+@_login_required
+def api_paper_set_criteria():
+    """Otomatik alim/satimi tetikleyen skor etiket kumelerini elle
+    degistirir (2026-11-06'da eklendi, bkz. CLAUDE.md). Body:
+    {"buy": [...], "sell": [...]} - her liste kendi gecerli kumesine
+    (PAPER_BUY_CRITERIA_OPTIONS/PAPER_SELL_CRITERIA_OPTIONS) gore
+    dogrulanir, gecersiz bir etiket iceren liste 400 doner (scanner
+    tarafinda SESSIZCE elemek YERINE burada SIKI dogrulama - kullanici
+    yazim hatasini fark etsin). Bos liste (hicbir etiket secilmemis)
+    GECERLI bir secim - o yonde otomatik islem tamamen durur, bu
+    kullanicinin kendi karari."""
+    data = request.get_json(silent=True) or {}
+    buy = data.get("buy")
+    sell = data.get("sell")
+    if not isinstance(buy, list) or not isinstance(sell, list):
+        return jsonify({"error": "buy ve sell alanları liste olmalı"}), 400
+    if any(b not in scanner.PAPER_BUY_CRITERIA_OPTIONS for b in buy):
+        return jsonify({
+            "error": f"buy için geçerli değerler: {', '.join(scanner.PAPER_BUY_CRITERIA_OPTIONS)}"
+        }), 400
+    if any(s not in scanner.PAPER_SELL_CRITERIA_OPTIONS for s in sell):
+        return jsonify({
+            "error": f"sell için geçerli değerler: {', '.join(scanner.PAPER_SELL_CRITERIA_OPTIONS)}"
+        }), 400
+    scanner.set_paper_buy_criteria(buy)
+    scanner.set_paper_sell_criteria(sell)
+    return jsonify({"status": "ok", "buy": buy, "sell": sell})
+
+
 @app.route("/api/paper/reset", methods=["POST"])
 @_login_required
 def api_paper_reset():

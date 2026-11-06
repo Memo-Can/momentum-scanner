@@ -275,7 +275,7 @@ document.getElementById('pager-next').addEventListener('click', () => {
 });
 
 document.getElementById('search-input').addEventListener('input', (e) => {
-  searchQuery = e.target.value.trim();
+  searchQuery = e.target.value.toUpperCase().trim();
   document.getElementById('search-clear').style.display = searchQuery ? 'block' : 'none';
   currentPage = 1;
   renderTable();

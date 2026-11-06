@@ -188,8 +188,26 @@ PAPER_MIN_VOL20 = 0.0213
 # GUCLU_AL ve MUTLAK_AL (2026-11-01'de eklendi) TEK bir "guclu alim bolgesi"
 # sayilir - otomatik alim, bu bolgenin DISINDAN icine girildiginde tetiklenir,
 # ikisi arasinda (eskalasyon/dusus) gidip gelmek YENI alim SAYILMAZ (bkz.
-# run_paper_trading_cycle).
+# run_paper_trading_cycle). Bu sabit artik SADECE paper_account.buy_criteria
+# sutununun ilk/varsayilan degeri (2026-11-06'da kullanici elle
+# degistirebilsin diye DB'ye tasindi, bkz. get_paper_criteria()/CLAUDE.md) -
+# gercek calisma zamani degeri icin DB'ye bak.
 _STRONG_BUY_ZONE = ("GUCLU_AL", "MUTLAK_AL")
+# Otomatik SATIS icin "varsayilan" kume - ayni sekilde artik SADECE
+# paper_account.sell_criteria'nin ilk degeri, bkz. yukarida. "STOP"/"TARGET"
+# (2026-11-06'da eklendi) GERCEK skor etiketleri DEGIL - fiyat-bazli stop-loss/
+# hedef kontrolunu (bkz. run_paper_trading_cycle) ac/kapa yapan birer SAHTE
+# ("pseudo") etiket, SADECE bu kumenin icinde "STOP"/"TARGET" VAR MI diye
+# kontrol edilmek icin var, hicbir skorun GERCEK degeri olamaz (confluence_label()
+# bu stringleri asla uretmez) - bu yuzden row["score"] in sell_zone kontrolunde
+# yanlislikla eslesme RISKI YOK.
+_DEFAULT_SELL_ZONE = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "STOP", "TARGET")
+# Kullanicinin secebilecegi TEK gecerli etiket kumeleri - AL tarafinda NOTR/SAT
+# etiketlerinin, SAT tarafinda NOTR/AL etiketlerinin secilmesi anlamsiz
+# oldugu icin (otomatik alim/satim SADECE bu yonlere ozgu bir strateji)
+# kasitli olarak sinirlandirildi.
+PAPER_BUY_CRITERIA_OPTIONS = ("AL", "GUCLU_AL", "MUTLAK_AL")
+PAPER_SELL_CRITERIA_OPTIONS = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "STOP", "TARGET")
 
 # SQLite tek-yazarli oldugu icin tum INSERT/DELETE'ler bu kilit altinda
 # yapilir - WAL modu zaten coklu OKUYUCUYA izin veriyor (Flask'in threaded=True
@@ -217,7 +235,7 @@ def _init_db() -> None:
         conn = get_db_connection()
         try:
             conn.executescript(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS score_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -261,7 +279,9 @@ def _init_db() -> None:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     cash REAL NOT NULL,
                     starting_balance REAL NOT NULL,
-                    max_positions INTEGER NOT NULL DEFAULT 5
+                    max_positions INTEGER NOT NULL DEFAULT {PAPER_MAX_POSITIONS},
+                    buy_criteria TEXT NOT NULL DEFAULT '{",".join(_STRONG_BUY_ZONE)}',
+                    sell_criteria TEXT NOT NULL DEFAULT '{",".join(_DEFAULT_SELL_ZONE)}'
                 );
 
                 CREATE TABLE IF NOT EXISTS paper_trades (
@@ -327,6 +347,25 @@ def _init_db() -> None:
             account_cols = [r["name"] for r in conn.execute("PRAGMA table_info(paper_account)").fetchall()]
             if "max_positions" not in account_cols:
                 conn.execute(f"ALTER TABLE paper_account ADD COLUMN max_positions INTEGER NOT NULL DEFAULT {PAPER_MAX_POSITIONS}")
+                conn.commit()
+            # 'buy_criteria'/'sell_criteria' - kullanicinin elle secebildigi,
+            # otomatik al/sat'i tetikleyen skor etiketleri (virgulle ayrilmis
+            # TEXT, 2026-11-06'da eklendi, bkz. CLAUDE.md). Varsayilan deger
+            # ESKI sabit davranisla (GUCLU_AL+MUTLAK_AL alim, SAT+GUCLU_SAT+
+            # MUTLAK_SAT satis) AYNI - mevcut deploy'larda davranis DEGISMEZ.
+            # ALTER TABLE ... DEFAULT bir SABIT ifade gerektirir, parametre
+            # bind EDILEMEZ - degerler (_STRONG_BUY_ZONE/_DEFAULT_SELL_ZONE)
+            # sabit, kod-ici bir listeden geldigi icin (kullanici girdisi
+            # DEGIL) f-string ile gömmek güvenli.
+            if "buy_criteria" not in account_cols:
+                conn.execute(
+                    f"ALTER TABLE paper_account ADD COLUMN buy_criteria TEXT NOT NULL DEFAULT '{','.join(_STRONG_BUY_ZONE)}'"
+                )
+                conn.commit()
+            if "sell_criteria" not in account_cols:
+                conn.execute(
+                    f"ALTER TABLE paper_account ADD COLUMN sell_criteria TEXT NOT NULL DEFAULT '{','.join(_DEFAULT_SELL_ZONE)}'"
+                )
                 conn.commit()
         finally:
             conn.close()
@@ -1387,7 +1426,18 @@ _SIGNAL_NOTIFY_LABELS = {
 def _send_push_notifications(entries) -> None:
     """entries (log_signal_changes'in az once tespit ettigi MUTLAK_AL/
     GUCLU_AL/GUCLU_SAT/MUTLAK_SAT gecisleri) icin Telegram'a bir mesaj
-    gonderir."""
+    gonderir - SADECE kullanicinin Sanal Al-Sat kriterlerinde (buy_criteria/
+    sell_criteria) ISARETLI olan etiketler icin (2026-11-06'da eklendi, bkz.
+    CLAUDE.md). Eskiden GUCLU_SAT/MUTLAK_SAT burada KOSULSUZ/sabit olarak
+    bastiriliyordu (spam sikayeti uzerine 2026-10-30'da) - artik bu sabit
+    engel YERINE kullanicinin kendi secimi gecerli: "GUCLU SAT"/"MUTLAK SAT"
+    checkbox'i isaretliyse bildirim ARTIK GELIR. Varsayilan secimde
+    (sell_criteria = SAT+GUCLU_SAT+MUTLAK_SAT+STOP+TARGET) bu checkbox'lar
+    ISARETLI oldugu icin kullanici hicbir sey degistirmezse SAT-tarafi
+    bildirimleri eskiden farkli olarak YENIDEN aktif olur - spam istemiyorsa
+    GUCLU SAT/MUTLAK SAT kutucuklarini Sanal Al-Sat ekranindan kapatmasi
+    yeterli (bu ayni checkbox otomatik SATIM'i da durdurur, ikisi ayni
+    ayardan besleniyor)."""
     # Sanal Al-Sat'ta (kaynak auto/manual farki yok) ZATEN ACIK pozisyonu
     # olan hisseler icin GUCLU_AL/MUTLAK_AL bildirimi tekrar gonderilmez
     # (2026-11-02, kullanici istegi) - "elimde zaten var" bilgisini tekrar
@@ -1402,23 +1452,20 @@ def _send_push_notifications(entries) -> None:
     # gonderilir, SADECE zaten ONCEKI bir dongude acilmis pozisyonlar icin
     # bastirilir.
     held_tickers = {p["ticker"] for p in get_paper_positions()}
+    criteria = get_paper_criteria()
+    # "STOP"/"TARGET" sahte etiketleri bu kumede olsa da gercek bir
+    # entry["score"] degeri ASLA olamadigi icin (confluence_label() bu
+    # stringleri uretmez) burada ekstra bir filtre GEREKMEZ - set birlesimi
+    # sadece gercek 4 "guclu" etiketin (GUCLU_AL/MUTLAK_AL/GUCLU_SAT/MUTLAK_SAT)
+    # kullanicinin secimine gore acik/kapali olmasini saglar.
+    active_labels = set(criteria["buy"]) | set(criteria["sell"])
     for entry in entries:
-        # GUCLU_SAT/MUTLAK_SAT bildirimleri KULLANICI ISTEGIYLE gecici olarak
-        # KAPATILDI (2026-10-30, MUTLAK_SAT eklenince 2026-11-01'de buraya da
-        # genisletildi) - "SAT" tarafi cok daha sik tetiklendigi icin (bkz.
-        # CLAUDE.md) Telegram'i spam'liyordu. GUCLU_SAT artik canli taramada
-        # hic uretilmiyor (confluence_label artik MUTLAK_SAT'a gidiyor) ama
-        # defansif olarak kontrolde tutuluyor. signal_log'a yazilmasini
-        # ETKILEMEZ (bu fonksiyon DB yazimindan SONRA cagriliyor, bkz.
-        # log_signal_changes()) - sadece push gonderimi atlaniyor. Tekrar
-        # acmak icin asagidaki continue satirini kaldir.
-        if entry["score"] in ("GUCLU_SAT", "MUTLAK_SAT"):
+        if entry["score"] not in active_labels:
             continue
         if entry["ticker"] in held_tickers:
             continue
         # Telegram mesajlarinda gercek metin rengi desteklenmiyor - yesil/kirmizi
-        # algisi icin renkli daire emoji kullanilir (AL taraf=yesil, SAT taraf=kirmizi) -
-        # bu noktada SAT taraf zaten yukarida atlandigi icin pratikte hep yesil.
+        # algisi icin renkli daire emoji kullanilir (AL taraf=yesil, SAT taraf=kirmizi).
         symbol = "🟢" if entry["score"] in ("GUCLU_AL", "MUTLAK_AL") else "🔴"
         label = _SIGNAL_NOTIFY_LABELS.get(entry["score"], entry["score"])
         text = (
@@ -1624,7 +1671,10 @@ def run_paper_trading_cycle(rows) -> None:
     1) Acik pozisyonlari cikis kuralina gore kapatir. 'auto' pozisyonlar
        icin 4 kural (stop/hedef/PAPER_MAX_HOLD_DAYS sure asimi/sinyal
        tersi) - bu 3 ek kural 2026-11-02'de kullanici istegiyle kaldirilip
-       2026-11-06'da GERI eklendi, bkz. CLAUDE.md. 'manual' pozisyonlar
+       2026-11-06'da GERI eklendi, bkz. CLAUDE.md. stop/hedef kurallarinin
+       IKISI de artik kullanicinin sell_criteria'sindan ayri ayri
+       ac/kapa yapilabiliyor ("STOP"/"TARGET" sahte etiketleri, 2026-11-06'da
+       eklendi) - kapatilirsa o mekanizma hic calismaz. 'manual' pozisyonlar
        icin stop_price/target_price zaten hep NULL oldugundan (manual_buy())
        SADECE sinyal tersi kurali gecerli - bu hic degismedi.
     2) rows'taki YENI GUCLU_AL/MUTLAK_AL gecislerini (_paper_last_score ile
@@ -1658,9 +1708,16 @@ def run_paper_trading_cycle(rows) -> None:
     with _DB_LOCK:
         conn = get_db_connection()
         try:
-            account_row = conn.execute("SELECT cash, max_positions FROM paper_account WHERE id = 1").fetchone()
+            account_row = conn.execute(
+                "SELECT cash, max_positions, buy_criteria, sell_criteria FROM paper_account WHERE id = 1"
+            ).fetchone()
             cash = account_row["cash"]
             max_positions = account_row["max_positions"]
+            # Kullanicinin elle sectigi (2026-11-06'da eklendi, bkz. CLAUDE.md)
+            # otomatik alim/satim kriterleri - bos string (hic secim yok)
+            # bos set'e donusur, "in" kontrolu dogal olarak hep False olur.
+            buy_zone = set(account_row["buy_criteria"].split(",")) if account_row["buy_criteria"] else set()
+            sell_zone = set(account_row["sell_criteria"].split(",")) if account_row["sell_criteria"] else set()
             # 'auto' pozisyonlar icin stop/hedef/sure asimi/sinyal tersi
             # (4 kural, oncelik sirasi: stop > hedef > sure asimi > sinyal) -
             # 2026-11-02'de kaldirilip 2026-11-06'da kullanici istegiyle GERI
@@ -1684,13 +1741,17 @@ def run_paper_trading_cycle(rows) -> None:
 
                 price = row["price"]
                 exit_reason = None
-                if pos["stop_price"] is not None and price <= pos["stop_price"]:
+                # "STOP"/"TARGET" kullanicinin sell_criteria'dan kaldirabildigi
+                # SAHTE etiketler (2026-11-06'da eklendi) - kapatilirsa o
+                # mekanizma TAMAMEN devre disi kalir (auto/manual farki yok,
+                # zaten stop_price/target_price manual'de hep NULL).
+                if "STOP" in sell_zone and pos["stop_price"] is not None and price <= pos["stop_price"]:
                     exit_reason = "stop"
-                elif pos["target_price"] is not None and price >= pos["target_price"]:
+                elif "TARGET" in sell_zone and pos["target_price"] is not None and price >= pos["target_price"]:
                     exit_reason = "target"
                 elif pos["source"] == "auto" and now_str >= pos["max_hold_until"]:
                     exit_reason = "time_stop"
-                elif row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
+                elif row["score"] in sell_zone:
                     exit_reason = "signal_reversal" if pos["source"] == "auto" else "manual_sat_signal"
 
                 if exit_reason is not None:
@@ -1772,25 +1833,26 @@ def run_paper_trading_cycle(rows) -> None:
 
             # YENI GUCLU_AL/MUTLAK_AL gecislerini tespit et - ikisi TEK bir
             # "guclu alim bolgesi" sayilir (frontend'deki markerZone() ile
-            # AYNI mantik): GUCLU_AL<->MUTLAK_AL arasinda (bolgenin
-            # KENDISI degismeden) gidip gelmek YENI alim tetiklemez, sadece
-            # bolgenin DISINDAN (AL/NOTR/SAT/.../hic gorulmemis) icine girmek
-            # tetikler. "hic gorulmemis" (prev=None) BILINCLI olarak "bolge
-            # disi" sayilir (prev is not None kontrolu KALDIRILDI, 2026-11-02) -
-            # restart korumasi artik _seed_paper_last_score()'un last_known_score'dan
-            # yaptigi seed ile saglaniyor, bu yuzden prev=None SADECE gercekten
-            # YENI (ilk kez dinamik BIST 300 havuzuna giren) bir hisse icin
-            # olur ve bu da GECERLI bir alim adayi sayilmali - eskiden boyle
-            # bir hisse ZATEN GUCLU_AL/MUTLAK_AL olarak havuza girdiginde
-            # SONSUZA KADAR atlaniyordu (bkz. CLAUDE.md). rows zaten skor
-            # gucu + gunluk % sirali (bkz. web_bistTop100.py: _scan_once()'taki
-            # _sort_key), bu yuzden candidate_tickers de dogal olarak o
-            # oncelik sirasinda.
+            # AYNI mantik): buy_zone'un (kullanicinin sectigi etiket kumesi,
+            # ESKIDEN sabit GUCLU_AL+MUTLAK_AL idi, 2026-11-06'da elle
+            # degistirilebilir oldu) KENDI ICINDE (bolge degismeden) gidip
+            # gelmek YENI alim tetiklemez, sadece bolgenin DISINDAN icine
+            # girmek tetikler. "hic gorulmemis" (prev=None) BILINCLI olarak
+            # "bolge disi" sayilir (prev is not None kontrolu KALDIRILDI,
+            # 2026-11-02) - restart korumasi artik _seed_paper_last_score()'un
+            # last_known_score'dan yaptigi seed ile saglaniyor, bu yuzden
+            # prev=None SADECE gercekten YENI (ilk kez dinamik BIST 300
+            # havuzuna giren) bir hisse icin olur ve bu da GECERLI bir alim
+            # adayi sayilmali - eskiden boyle bir hisse ZATEN GUCLU_AL/
+            # MUTLAK_AL olarak havuza girdiginde SONSUZA KADAR atlaniyordu
+            # (bkz. CLAUDE.md). rows zaten skor gucu + gunluk % sirali (bkz.
+            # web_bistTop100.py: _scan_once()'taki _sort_key), bu yuzden
+            # candidate_tickers de dogal olarak o oncelik sirasinda.
             candidates = []
             for row in rows:
                 ticker = row["ticker"]
                 prev = _paper_last_score.get(ticker)
-                if prev not in _STRONG_BUY_ZONE and row["score"] in _STRONG_BUY_ZONE:
+                if prev not in buy_zone and row["score"] in buy_zone:
                     candidates.append(row)
                 _paper_last_score[ticker] = row["score"]
 
@@ -1912,6 +1974,74 @@ def set_paper_max_positions(n: int) -> None:
         conn = get_db_connection()
         try:
             conn.execute("UPDATE paper_account SET max_positions = ? WHERE id = 1", (n,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_paper_criteria() -> dict:
+    """Kullanicinin elle sectigi, otomatik al/sat'i tetikleyen skor etiket
+    kumelerini DB'den okur (2026-11-06'da eklendi, bkz. CLAUDE.md) - eskiden
+    sabit _STRONG_BUY_ZONE/_DEFAULT_SELL_ZONE idi. Bos string (kullanici
+    bir grubun TUMUNU bilerek secmemis) bos listeye donusur - run_paper_trading_cycle()
+    bu durumda o yonde (alim/satim) hic islem yapmaz, bu KASITLI (kullanicinin
+    kendi secimi)."""
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT buy_criteria, sell_criteria FROM paper_account WHERE id = 1").fetchone()
+        if row is None:
+            return {"buy": list(_STRONG_BUY_ZONE), "sell": list(_DEFAULT_SELL_ZONE)}
+        return {
+            "buy": [s for s in row["buy_criteria"].split(",") if s],
+            "sell": [s for s in row["sell_criteria"].split(",") if s],
+        }
+    finally:
+        conn.close()
+
+
+def _clean_criteria_labels(labels, allowed) -> str:
+    """Verilen etiket listesini `allowed` kumesine gore filtreler (gecersiz
+    bir etiket sessizce ATILIR, hata FIRLATILMAZ - cagiran taraf/API zaten
+    kendi dogrulamasini yapmali), tekrarlari sirayi koruyarak eler ve
+    DB'ye yazilacak virgullu string'e cevirir."""
+    seen = set()
+    result = []
+    for label in labels:
+        if label in allowed and label not in seen:
+            seen.add(label)
+            result.append(label)
+    return ",".join(result)
+
+
+def set_paper_buy_criteria(labels) -> None:
+    """Otomatik ALIM'i tetikleyen skor etiket kumesini degistirir -
+    PAPER_BUY_CRITERIA_OPTIONS disindaki degerler sessizce elenir. Mevcut
+    ACIK pozisyonlara dokunmaz, sadece run_paper_trading_cycle()'in
+    bundan sonraki dongulerde hangi YENI gecisleri alim adayi sayacagini
+    degistirir."""
+    value = _clean_criteria_labels(labels, PAPER_BUY_CRITERIA_OPTIONS)
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute("UPDATE paper_account SET buy_criteria = ? WHERE id = 1", (value,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def set_paper_sell_criteria(labels) -> None:
+    """Otomatik SATIM'i tetikleyen kriter kumesini degistirir -
+    PAPER_SELL_CRITERIA_OPTIONS disindaki degerler sessizce elenir. Skor
+    etiketleri (SAT/GUCLU_SAT/MUTLAK_SAT) hem auto HEM manual acik
+    pozisyonlari ETKILER. "STOP"/"TARGET" (2026-11-06'da eklendi, GERCEK
+    skor DEGIL) ise SADECE auto pozisyonlarin fiyat-bazli stop/hedef
+    kontrolunu ac/kapa yapar (manual'de zaten hep NULL). Sure asimi
+    kurali bundan BAGIMSIZ, hep aktif (SADECE auto)."""
+    value = _clean_criteria_labels(labels, PAPER_SELL_CRITERIA_OPTIONS)
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute("UPDATE paper_account SET sell_criteria = ? WHERE id = 1", (value,))
             conn.commit()
         finally:
             conn.close()
@@ -2191,7 +2321,9 @@ def get_paper_summary():
     run_paper_trading_cycle her dongude bunu zaten gunceller)."""
     conn = get_db_connection()
     try:
-        account = conn.execute("SELECT cash, starting_balance, max_positions FROM paper_account WHERE id = 1").fetchone()
+        account = conn.execute(
+            "SELECT cash, starting_balance, max_positions, buy_criteria, sell_criteria FROM paper_account WHERE id = 1"
+        ).fetchone()
         last_equity = conn.execute(
             "SELECT equity, positions_value FROM paper_equity_history ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -2220,6 +2352,8 @@ def get_paper_summary():
             "closed_trades": len(closed),
             "win_rate": (wins / len(closed) * 100.0) if closed else None,
             "max_positions": account["max_positions"],
+            "buy_criteria": [s for s in account["buy_criteria"].split(",") if s],
+            "sell_criteria": [s for s in account["sell_criteria"].split(",") if s],
         }
     finally:
         conn.close()
