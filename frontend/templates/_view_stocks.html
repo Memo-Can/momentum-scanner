@@ -21,6 +21,10 @@
       <th data-key="rsi" data-type="num" data-tip="Wilder RSI(14) değeri (0-100). >=70 aşırı alım, <=30 aşırı satım sayılır; momentum taramasında 50 üzeri boğa teyidi.">RSI<span class="arrow"></span></th>
       <th data-key="bb_percent" data-type="num" data-tip="Bollinger Bantları (20, 2 sigma) içindeki konum (%). 100% = üst bant, 0% = alt bant. Bandın dışına çıkan değer (>100%/<0%), hacimle birlikteyse güçlü kırılım sayılabilir.">BB%<span class="arrow"></span></th>
       <th data-key="rel_strength" data-type="num" data-tip="Göreceli güç: hissenin günlük % değişimi eksi BIST100 endeksinin (XU100) günlük % değişimi. |RS| < 0.5 NÖTR sayılır.">RS<span class="arrow"></span></th>
+      <th data-key="day_stop" data-type="num" data-tip="ATR(14)x1.5 mesafeli, Skor'un yönüne (AL/SAT) göre gün içi (day trade) stop-loss fiyatı. Skor NÖTR ise gösterilmez.">GünStop<span class="arrow"></span></th>
+      <th data-key="day_target" data-type="num" data-tip="Gün içi hedef fiyat - stop mesafesinin 3 katı uzaklıkta (risk:ödül ~1:3).">GünHedef<span class="arrow"></span></th>
+      <th data-key="swing_stop" data-type="num" data-tip="ATR(14)x3.0 mesafeli, birkaç gün/hafta taşınacak swing pozisyonlar için stop-loss fiyatı. Sanal Al-Sat'ın otomatik alımlarının stop/hedefi de budur.">SwStop<span class="arrow"></span></th>
+      <th data-key="swing_target" data-type="num" data-tip="Swing pozisyon için hedef fiyat - stop mesafesinin 3 katı uzaklıkta (risk:ödül ~1:3).">SwHedef<span class="arrow"></span></th>
       {% endif %}
       <th data-key="daily" data-type="num" data-tip="Canlı fiyat ile Yahoo'nun canlı 'önceki kapanış' alanı arasındaki yüzde fark. Liste varsayılan olarak (Skor grubu içinde) bu sütuna göre büyükten küçüğe sıralanır.">Günlük<span class="arrow"></span></th>
       <th data-key="d5" data-type="num" data-tip="Son 5 işlem günündeki yüzde değişim - kayan pencere (takvim haftası değil), Yahoo'nun web sitesindeki '5D' ile aynı mantık.">5D<span class="arrow"></span></th>
@@ -129,6 +133,10 @@ function renderRows(rows) {
       <td>${fmtRsi(r.rsi)}</td>
       <td>${fmtRangePos(r.bb_percent)}</td>
       <td>${fmtPct(r.rel_strength)}</td>
+      <td class="${r.day_stop === null || r.day_stop === undefined ? 'dash' : ''}">${fmtPrice(r.day_stop)}</td>
+      <td class="${r.day_target === null || r.day_target === undefined ? 'dash' : ''}">${fmtPrice(r.day_target)}</td>
+      <td class="${r.swing_stop === null || r.swing_stop === undefined ? 'dash' : ''}">${fmtPrice(r.swing_stop)}</td>
+      <td class="${r.swing_target === null || r.swing_target === undefined ? 'dash' : ''}">${fmtPrice(r.swing_target)}</td>
       ` : ''}
       <td class="${pctClass(r.daily)}">${fmtPct(r.daily)}</td>
       <td class="${pctClass(r.d5)}">${fmtPct(r.d5)}</td>

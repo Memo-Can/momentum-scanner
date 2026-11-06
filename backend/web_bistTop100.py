@@ -154,8 +154,17 @@ def _row_to_json(row: dict) -> dict:
 # score_since (2026-11-05'te eklendi, bkz. CLAUDE.md "Skor'un yanina sinyal
 # zamani sutunu") da buraya eklendi - Skor'un KENDISI gibi dogrudan sinyal
 # bilgisi sayilir (hangi skorun NE ZAMANDAN BERI aktif oldugunu gosterir),
-# ayni politika.
-_SIGNAL_ONLY_ROW_FIELDS = ("score", "score_since", "signal_macd", "volume_ratio", "day_range_pos", "rsi", "bb_percent", "rel_strength")
+# ayni politika. day_stop/day_target/swing_stop/swing_target (2026-11-06'da
+# BIST tablosuna GERI eklendi, bkz. CLAUDE.md) de buraya eklendi - stop/hedef
+# seviyeleri Skor'un yonunu (AL/SAT) dolayli olarak aciga cikardigi icin
+# (stop fiyatin ALTINDAYSA AL, USTUNDEYSE SAT yonu demektir) bu da dogrudan
+# sinyal bilgisi sayilir - bu sutunlar zaten eskiden (2026-11-02'de
+# kaldirilmadan once) de login-only idi.
+_SIGNAL_ONLY_ROW_FIELDS = (
+    "score", "score_since", "signal_macd", "volume_ratio", "day_range_pos",
+    "rsi", "bb_percent", "rel_strength",
+    "day_stop", "day_target", "swing_stop", "swing_target",
+)
 _SIGNAL_ONLY_INDICATOR_FIELDS = ("rsi", "macd", "macd_signal", "macd_hist")
 
 
@@ -861,6 +870,25 @@ def api_paper_set_cash():
         return jsonify({"error": "tutar negatif olamaz"}), 400
     scanner.set_paper_cash(amount)
     return jsonify({"status": "ok", "cash": amount})
+
+
+@app.route("/api/paper/max-positions", methods=["POST"])
+@_login_required
+def api_paper_set_max_positions():
+    """Maksimum acik pozisyon slotunu elle degistirir (2026-11-06'da
+    eklendi, bkz. CLAUDE.md) - eskiden sabit 5'ti. scanner.set_paper_max_positions()
+    degeri PAPER_MAX_POSITIONS_MIN..MAX (1..50) araligina sinirlar."""
+    data = request.get_json(silent=True) or {}
+    try:
+        n = int(data.get("max_positions"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "geçerli bir pozisyon sayısı (max_positions) gerekli"}), 400
+    if not (scanner.PAPER_MAX_POSITIONS_MIN <= n <= scanner.PAPER_MAX_POSITIONS_MAX):
+        return jsonify({
+            "error": f"pozisyon sayısı {scanner.PAPER_MAX_POSITIONS_MIN} ile {scanner.PAPER_MAX_POSITIONS_MAX} arasında olmalı"
+        }), 400
+    scanner.set_paper_max_positions(n)
+    return jsonify({"status": "ok", "max_positions": n})
 
 
 @app.route("/api/paper/reset", methods=["POST"])

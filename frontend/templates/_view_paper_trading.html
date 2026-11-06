@@ -4,7 +4,7 @@
       <h2>Sanal Al-Sat</h2>
     </div>
     <div id="paper-body">
-      <div class="sub">GÜÇLÜ AL veya MUTLAK AL'a yeni geçen hisseler otomatik "satın alınır" - SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönünce "satılır" (stop/hedef/süre aşımı artık kullanılmıyor). Gerçek para değildir, sadece Skor'un performansını ölçmek içindir.</div>
+      <div class="sub">GÜÇLÜ AL veya MUTLAK AL'a yeni geçen hisseler otomatik "satın alınır" - stop/hedef/süre aşımına ulaşırsa ya da SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönerse "satılır". Gerçek para değildir, sadece Skor'un performansını ölçmek içindir.</div>
       <div id="paper-summary"></div>
       <h3 id="paper-equity-title">Equity Grafiği</h3>
       <div class="tabs" id="paper-equity-range-tabs">
@@ -18,10 +18,13 @@
         <input type="text" inputmode="decimal" id="paper-cash-input" placeholder="Yeni nakit (TL)">
         <button id="paper-cash-save" type="button">Nakti Güncelle</button>
         <span id="paper-cash-msg"></span>
+        <input type="number" min="1" max="50" step="1" class="paper-amount-input" id="paper-max-positions-input" placeholder="Maks. pozisyon">
+        <button class="paper-action-btn" id="paper-max-positions-save" type="button">Pozisyon Sayısını Güncelle</button>
+        <span id="paper-max-positions-msg"></span>
         <button id="paper-reset" type="button" class="paper-action-btn-muted">Her Şeyi Sıfırla</button>
       </div>
       <h3>Manuel Takip Listesi</h3>
-      <div class="sub">Yan panelden "Sanal Al-Sat Takibine Ekle" ile eklenen hisseler - istediğin an, istediğin tutarla elle al/sat. Otomatik sistemin 5 pozisyon limitine DAHİL DEĞİL. Aldığın bir hisse SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönerse otomatik olarak satılır (ayrıca elinle de istediğin an satabilirsin).</div>
+      <div class="sub">Yan panelden "Sanal Al-Sat Takibine Ekle" ile eklenen hisseler - istediğin an, istediğin tutarla elle al/sat. Toplam açık pozisyon (otomatik + manuel) sayısı maksimum pozisyon sınırına ulaşınca yeni alım (elle de) yapılamaz. Aldığın bir hisse SAT, GÜÇLÜ SAT ya da MUTLAK SAT sinyaline dönerse otomatik olarak satılır (ayrıca elinle de istediğin an satabilirsin).</div>
       <div id="paper-watchlist-wrap">
         <table>
           <thead>
@@ -302,10 +305,17 @@ function renderPaperSummary(s) {
     <div class="stat">Açık Pozisyon Değeri<b>${fmtPaperMoney(s.positions_value)}</b></div>
     <div class="stat">Toplam Değer<b>${fmtPaperMoney(s.equity)}</b></div>
     <div class="stat">Toplam K/Z<b class="${pctClass(s.total_pnl)}">${fmtPaperMoney(s.total_pnl)} (${fmtPct(totalPct)})</b></div>
-    <div class="stat">Açık Pozisyon<b>${s.open_positions} / 5</b></div>
+    <div class="stat">Açık Pozisyon<b>${s.open_positions} / ${s.max_positions}</b></div>
     <div class="stat">Kapanan İşlem<b>${s.closed_trades}</b></div>
     <div class="stat">Kazanma Oranı<b>${s.win_rate === null || s.win_rate === undefined ? '-' : s.win_rate.toFixed(0) + '%'}</b></div>
   `;
+  // Kullanici o anki degeri bilsin diye input'un placeholder'ina yaziliyor -
+  // input'un value'su DOKUNULMAZ ki kullanici yazarken her refreshPaperTrading()
+  // dongusunde (BIST_REFRESH_SECONDS'ta bir) imleci/yazdigi deger silinmesin.
+  const maxPosInput = document.getElementById('paper-max-positions-input');
+  if (maxPosInput && document.activeElement !== maxPosInput) {
+    maxPosInput.placeholder = `Maks. pozisyon (şu an: ${s.max_positions})`;
+  }
 }
 
 // Pozisyon/islem/takip listesi satirlarina tiklamak Sanal Al-Sat ekranindan
@@ -600,6 +610,29 @@ if (LOGGED_IN) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount }),
+      });
+      if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
+      input.value = '';
+      msg.textContent = 'Güncellendi.';
+      refreshPaperTrading();
+    } catch (e) {
+      msg.textContent = 'Güncellenemedi.';
+    }
+  });
+
+  document.getElementById('paper-max-positions-save').addEventListener('click', async () => {
+    const input = document.getElementById('paper-max-positions-input');
+    const msg = document.getElementById('paper-max-positions-msg');
+    const maxPositions = parseInt(input.value, 10);
+    if (!(maxPositions >= 1 && maxPositions <= 50)) {
+      msg.textContent = '1-50 arası bir sayı gir.';
+      return;
+    }
+    try {
+      const res = await fetch('/api/paper/max-positions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_positions: maxPositions }),
       });
       if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
       input.value = '';

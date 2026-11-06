@@ -169,6 +169,10 @@ DB_PATH = os.path.join(DATA_DIR, "momentum_scanner.db")
 # ampirik olcmek. _init_paper_trading() bu sabitlere ihtiyac duydugu icin
 # (asagida cagriliyor) burada, DB kurulumundan ONCE tanimlanmalari gerekiyor.
 PAPER_STARTING_BALANCE = 1_000_000.0
+# Artik SADECE paper_account.max_positions sutununun varsayilan/ilk degeri -
+# gercek calisma zamani degeri icin get_paper_max_positions()/DB'ye bak.
+# Kullanici Sanal Al-Sat panelinden bunu degistirebiliyor (2026-11-06'da
+# eklendi, bkz. CLAUDE.md ve set_paper_max_positions()).
 PAPER_MAX_POSITIONS = 5
 PAPER_MAX_HOLD_DAYS = 21  # ~15 islem gunune denk takvim gunu yaklasimi
 # Otomatik alim icin minimum volatilite filtresi (2026-10-30, backtest sonucu
@@ -256,7 +260,8 @@ def _init_db() -> None:
                 CREATE TABLE IF NOT EXISTS paper_account (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     cash REAL NOT NULL,
-                    starting_balance REAL NOT NULL
+                    starting_balance REAL NOT NULL,
+                    max_positions INTEGER NOT NULL DEFAULT 5
                 );
 
                 CREATE TABLE IF NOT EXISTS paper_trades (
@@ -313,6 +318,15 @@ def _init_db() -> None:
             # frontend'de bos string olarak gosterilir.
             if "note" not in cols:
                 conn.execute("ALTER TABLE paper_trades ADD COLUMN note TEXT")
+                conn.commit()
+            # 'max_positions' sutunu - kullanicinin elle degistirebildigi
+            # maksimum acik pozisyon slotu (2026-11-06'da eklendi, bkz.
+            # CLAUDE.md) - eskiden sabit PAPER_MAX_POSITIONS=5 idi. CREATE
+            # TABLE IF NOT EXISTS var olan paper_account satirini (deploy
+            # oncesi acilmis) GUNCELLEMEDIGI icin ayrica kontrol edilir.
+            account_cols = [r["name"] for r in conn.execute("PRAGMA table_info(paper_account)").fetchall()]
+            if "max_positions" not in account_cols:
+                conn.execute(f"ALTER TABLE paper_account ADD COLUMN max_positions INTEGER NOT NULL DEFAULT {PAPER_MAX_POSITIONS}")
                 conn.commit()
         finally:
             conn.close()
@@ -1603,22 +1617,25 @@ def run_paper_trading_cycle(rows) -> None:
     icinde sarmali - burada beklenmeyen bir hata ana tarama/skor
     loglama akisini bozmamali.
 
-    1) Acik pozisyonlari (source farki YOK, auto VE manual) cikis kuralina
-       gore kapatir - SADECE SAT/GUCLU_SAT/MUTLAK_SAT sinyaline donus
-       (2026-11-02'de kullanici istegiyle stop/hedef/21-gun sure asimi
-       kurallari TAMAMEN KALDIRILDI, bkz. asagida ve CLAUDE.md - artik
-       auto/manual arasinda cikis kurali FARKI yok, ikisi de SADECE sinyale
-       gore kapanir).
+    1) Acik pozisyonlari cikis kuralina gore kapatir. 'auto' pozisyonlar
+       icin 4 kural (stop/hedef/PAPER_MAX_HOLD_DAYS sure asimi/sinyal
+       tersi) - bu 3 ek kural 2026-11-02'de kullanici istegiyle kaldirilip
+       2026-11-06'da GERI eklendi, bkz. CLAUDE.md. 'manual' pozisyonlar
+       icin stop_price/target_price zaten hep NULL oldugundan (manual_buy())
+       SADECE sinyal tersi kurali gecerli - bu hic degismedi.
     2) rows'taki YENI GUCLU_AL/MUTLAK_AL gecislerini (_paper_last_score ile
        karsilastirarak, ikisi TEK bir "guclu alim bolgesi" sayilir) tespit
        eder, zaten ACIK bir pozisyonu (source farki YOK) olan ticker'lari
        atlayarak acik slot kadarini sirayla satin alir. Acik slot sayisi
        ARTIK TOPLAM acik pozisyon sayisina (auto+manual, 2026-11-03'te
-       degistirildi - bkz. asagidaki yorum) gore hesaplanir - toplam 5
-       aciksa HICBIR yeni alim yapilmaz. Pozisyon buyuklugu SABIT bir
-       deger DEGIL - her alimda o anki GUNCEL toplam deger
-       (nakit + acik pozisyonlarin o anki degeri) 5'e bolunerek hesaplanir
-       (2026-11-02'de kullanici istegiyle degistirildi, bkz. CLAUDE.md).
+       degistirildi - bkz. asagidaki yorum) gore hesaplanir - toplam
+       max_positions (artik sabit 5 DEGIL, kullanici tarafindan
+       degistirilebilir, bkz. get_paper_max_positions()/CLAUDE.md,
+       2026-11-06) kadar aciksa HICBIR yeni alim yapilmaz. Pozisyon
+       buyuklugu SABIT bir deger DEGIL - her alimda o anki GUNCEL toplam
+       deger (nakit + acik pozisyonlarin o anki degeri) max_positions'a
+       bolunerek hesaplanir (2026-11-02'de kullanici istegiyle
+       degistirildi, bkz. CLAUDE.md).
     3) Her dongude bir equity (nakit + acik pozisyon degeri) satiri
        loglar - bir pozisyonun fiyati bu dongude gelmediyse (rate limit/veri
        sorunu) o pozisyon SIFIR degil kendi allocation'i (K/Z degisimi NOTR)
@@ -1637,11 +1654,15 @@ def run_paper_trading_cycle(rows) -> None:
     with _DB_LOCK:
         conn = get_db_connection()
         try:
-            cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
-            # Hem source='auto' HEM source='manual' acik pozisyonlar burada
-            # kontrol edilir ve ARTIK AYNI tek kuralla kapatiliyor - SADECE
-            # SAT/GUCLU_SAT/MUTLAK_SAT sinyaline donus (2026-11-02'de
-            # kullanici istegiyle stop/hedef/sure kurallari kaldirildi).
+            account_row = conn.execute("SELECT cash, max_positions FROM paper_account WHERE id = 1").fetchone()
+            cash = account_row["cash"]
+            max_positions = account_row["max_positions"]
+            # 'auto' pozisyonlar icin stop/hedef/sure asimi/sinyal tersi
+            # (4 kural, oncelik sirasi: stop > hedef > sure asimi > sinyal) -
+            # 2026-11-02'de kaldirilip 2026-11-06'da kullanici istegiyle GERI
+            # eklendi (bkz. CLAUDE.md). 'manual' pozisyonlarda stop_price/
+            # target_price hep NULL oldugu icin (manual_buy()) bu ikisi
+            # onlari hic etkilemez, sadece sinyal tersi kurali gecerli kalir.
             # Kullanici "Sat" butonuyla manuel pozisyonu HER ZAMAN elle de
             # kapatabilir (manual_sell()), bu degismedi.
             open_positions = [
@@ -1659,7 +1680,13 @@ def run_paper_trading_cycle(rows) -> None:
 
                 price = row["price"]
                 exit_reason = None
-                if row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
+                if pos["stop_price"] is not None and price <= pos["stop_price"]:
+                    exit_reason = "stop"
+                elif pos["target_price"] is not None and price >= pos["target_price"]:
+                    exit_reason = "target"
+                elif pos["source"] == "auto" and now_str >= pos["max_hold_until"]:
+                    exit_reason = "time_stop"
+                elif row["score"] in ("SAT", "GUCLU_SAT", "MUTLAK_SAT"):
                     exit_reason = "signal_reversal" if pos["source"] == "auto" else "manual_sat_signal"
 
                 if exit_reason is not None:
@@ -1737,7 +1764,7 @@ def run_paper_trading_cycle(rows) -> None:
                     price_data_issue = True
                     still_open_value += p["allocation"]
             current_equity = cash + still_open_value
-            per_slot_amount = current_equity / PAPER_MAX_POSITIONS
+            per_slot_amount = current_equity / max_positions
 
             # YENI GUCLU_AL/MUTLAK_AL gecislerini tespit et - ikisi TEK bir
             # "guclu alim bolgesi" sayilir (frontend'deki markerZone() ile
@@ -1763,7 +1790,7 @@ def run_paper_trading_cycle(rows) -> None:
                     candidates.append(row)
                 _paper_last_score[ticker] = row["score"]
 
-            free_slots = PAPER_MAX_POSITIONS - open_count
+            free_slots = max_positions - open_count
             for row in candidates:
                 if free_slots <= 0:
                     break
@@ -1848,6 +1875,42 @@ def run_paper_trading_cycle(rows) -> None:
             _paper_price_issue_alert_sent = True
     else:
         _paper_price_issue_alert_sent = False
+
+
+PAPER_MAX_POSITIONS_MIN = 1
+PAPER_MAX_POSITIONS_MAX = 50
+
+
+def get_paper_max_positions() -> int:
+    """Kullanicinin elle ayarladigi maksimum acik pozisyon slotunu DB'den
+    okur (2026-11-06'da eklendi, bkz. CLAUDE.md) - eskiden sabit
+    PAPER_MAX_POSITIONS=5 idi, artik Sanal Al-Sat panelinden degistirilebilir.
+    run_paper_trading_cycle()/manual_buy() her cagrida bunu tazeler (tek
+    satirlik sorgu, pahali degil) - deger degisse de ayri bir restart/cache
+    temizligi GEREKMEZ."""
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT max_positions FROM paper_account WHERE id = 1").fetchone()
+        return row["max_positions"] if row else PAPER_MAX_POSITIONS
+    finally:
+        conn.close()
+
+
+def set_paper_max_positions(n: int) -> None:
+    """Maksimum acik pozisyon slotunu elle degistirir - 1..50 araliginda
+    (cagiran taraf/API bu araligi ayrica dogrulamali, burada da guvenlik
+    icin tekrar sinirlanir). Mevcut ACIK pozisyonlara DOKUNULMAZ - slot
+    sayisi dusurulurse (ornegin 5'ten 3'e) zaten acik olan pozisyonlar
+    ZORLA KAPATILMAZ, sadece yeni alim/otomatik alim bu yeni sinira gore
+    calisir (open_count >= yeni_max oldugunda dogal olarak durur)."""
+    n = max(PAPER_MAX_POSITIONS_MIN, min(PAPER_MAX_POSITIONS_MAX, int(n)))
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute("UPDATE paper_account SET max_positions = ? WHERE id = 1", (n,))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def set_paper_cash(amount: float) -> None:
@@ -1946,7 +2009,8 @@ def manual_buy(ticker: str, allocation: float, price: float):
     with _DB_LOCK:
         conn = get_db_connection()
         try:
-            cash = conn.execute("SELECT cash FROM paper_account WHERE id = 1").fetchone()["cash"]
+            account_row = conn.execute("SELECT cash, max_positions FROM paper_account WHERE id = 1").fetchone()
+            cash = account_row["cash"]
             if allocation > cash:
                 return None
             already_open = conn.execute(
@@ -1954,7 +2018,7 @@ def manual_buy(ticker: str, allocation: float, price: float):
             ).fetchone()
             if already_open is not None:
                 return None
-            # 5-slot limiti artik kaynak farki OLMADAN TUM acik pozisyonlari
+            # Slot limiti artik kaynak farki OLMADAN TUM acik pozisyonlari
             # sayar (2026-11-03'te degistirildi - eskiden SADECE source='auto'
             # sayiliyordu, manuel alimlar limite HIC dahil degildi, bkz.
             # run_paper_trading_cycle()'daki AYNI degisiklik). Kok sebep:
@@ -1965,20 +2029,24 @@ def manual_buy(ticker: str, allocation: float, price: float):
             # aciliyordu - cunku o anda zaten 4 auto + birden fazla manuel
             # pozisyon nakti bitirmisti ama sayim SADECE auto'ya bakiyordu.
             # Simdi hem bu fonksiyon hem run_paper_trading_cycle() "toplam
-            # 5 pozisyon aciksa (auto+manual farketmez) HICBIR yeni alim
-            # yapilmaz" kuralini PAYLASIYOR.
+            # max_positions kadar pozisyon aciksa (auto+manual farketmez)
+            # HICBIR yeni alim yapilmaz" kuralini PAYLASIYOR. max_positions
+            # artik sabit 5 DEGIL, kullanici tarafindan degistirilebilen bir
+            # DB degeri (bkz. set_paper_max_positions(), 2026-11-06).
             open_count = conn.execute(
                 "SELECT COUNT(*) AS n FROM paper_trades WHERE status = 'open'"
             ).fetchone()["n"]
-            if open_count >= PAPER_MAX_POSITIONS:
+            if open_count >= account_row["max_positions"]:
                 return None
             shares = allocation / price
-            # Manuel pozisyonlarda stop_price/target_price hic YOK (NULL) -
-            # zaten run_paper_trading_cycle() artik (auto'da da) bunlari
-            # cikis kararinda KULLANMIYOR, sadece bilgi/gosterim icin auto
-            # pozisyonlarda saklaniyor. max_hold_until de artik bir cikis
-            # kurali tetiklemiyor (2026-11-02'de kaldirildi), sadece
-            # referans icin hesaplanip saklaniyor.
+            # Manuel pozisyonlarda stop_price/target_price BILINCLI olarak
+            # NULL - run_paper_trading_cycle() 2026-11-06'dan itibaren
+            # bunlari auto pozisyonlarda GERCEK bir cikis tetikleyicisi
+            # olarak kullaniyor (bkz. CLAUDE.md), manuel pozisyonlar bu
+            # yuzden stop/hedefe hic tabi degil - sadece sinyal tersiyle ya
+            # da kullanicinin elle "Sat" demesiyle kapanir. max_hold_until
+            # manuel pozisyonlar icin hala SADECE bilgi amacli (auto'da
+            # oldugu gibi bir cikis tetiklemez, bkz. yukarida "auto" sart).
             max_hold_until = (datetime.now() + timedelta(days=PAPER_MAX_HOLD_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
             cur = conn.execute(
                 """INSERT INTO paper_trades
@@ -2119,7 +2187,7 @@ def get_paper_summary():
     run_paper_trading_cycle her dongude bunu zaten gunceller)."""
     conn = get_db_connection()
     try:
-        account = conn.execute("SELECT cash, starting_balance FROM paper_account WHERE id = 1").fetchone()
+        account = conn.execute("SELECT cash, starting_balance, max_positions FROM paper_account WHERE id = 1").fetchone()
         last_equity = conn.execute(
             "SELECT equity, positions_value FROM paper_equity_history ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -2147,6 +2215,7 @@ def get_paper_summary():
             "open_positions": open_count,
             "closed_trades": len(closed),
             "win_rate": (wins / len(closed) * 100.0) if closed else None,
+            "max_positions": account["max_positions"],
         }
     finally:
         conn.close()
