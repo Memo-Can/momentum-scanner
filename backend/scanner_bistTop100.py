@@ -1236,6 +1236,46 @@ def _telegram_send(text: str) -> None:
         print("Telegram bildirimi gonderilemedi:", e)
 
 
+# Saatlik K/Z raporundaki her pozisyonun YANINA "GÜÇLÜ AL (3 gün önce)" gibi
+# bir baglam eklemek icin (2026-11-06'da eklendi, kullanici istegi: "projeye
+# ne eklenebilir" sorusuna yanit olarak secilen madde) - 7 skorun TAMAMI icin
+# okunabilir TR etiket. _SIGNAL_NOTIFY_LABELS'tan FARKLI/AYRI tutuldu cunku o
+# SADECE guclu 4 etiketi kapsiyor (sinyal bildirimi baglaminda yeterliydi),
+# burada AL/NOTR/SAT de gerekiyor.
+_SCORE_TEXT_LABELS = {
+    "MUTLAK_AL": "MUTLAK AL",
+    "GUCLU_AL": "GÜÇLÜ AL",
+    "AL": "AL",
+    "NOTR": "NÖTR",
+    "SAT": "SAT",
+    "GUCLU_SAT": "GÜÇLÜ SAT",
+    "MUTLAK_SAT": "MUTLAK SAT",
+}
+
+
+def _format_relative_tr(since) -> str:
+    """frontend/templates/index.html: fmtRelativeTime()'in Python karsiligi -
+    Telegram DUZ METIN raporu icin ayni "3 gün önce"/"2 saat önce"/
+    "5 dakika önce"/"az önce" bicimini uretir. since None/parse edilemezse
+    '-' doner (score_since henuz hesaplanmamis - orn. iskelet satirlar)."""
+    if not since:
+        return "-"
+    try:
+        then = datetime.strptime(since, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return "-"
+    diff_min = int((datetime.now() - then).total_seconds() // 60)
+    if diff_min < 1:
+        return "az önce"
+    if diff_min < 60:
+        return f"{diff_min} dakika önce"
+    diff_hour = diff_min // 60
+    if diff_hour < 24:
+        return f"{diff_hour} saat önce"
+    diff_day = diff_hour // 24
+    return f"{diff_day} gün önce"
+
+
 def build_paper_hourly_report(rows) -> str:
     """Su an acik olan TUM sanal pozisyonlari (kaynak farki YOK, auto+manual)
     rows icindeki (zaten taranmis, EKSTRA Yahoo istegi YOK) canli fiyatla
@@ -1243,8 +1283,15 @@ def build_paper_hourly_report(rows) -> str:
     web_bistTop100.py: _maybe_send_hourly_paper_report() (gercek saatlik
     tetikleyici, bkz. orada) HEM DE /api/paper/report-test (anlik test
     tetikleyicisi) tarafindan cagirilir - ikisi de AYNI formati gorsun diye
-    rapor metni ve gonderimi (send_paper_hourly_report) ayri tutuldu."""
+    rapor metni ve gonderimi (send_paper_hourly_report) ayri tutuldu.
+
+    Her pozisyonun yanina GUNCEL skoru ve bu skorun NE ZAMANDAN BERI aktif
+    oldugunu (rows zaten log_score_history()'den GECTIGI icin her satirda
+    row["score"]/row["score_since"] hazir - EK bir Yahoo/DB sorgusu
+    GEREKMEZ) ekler - 2026-11-06'da eklendi."""
     price_by_ticker = {r["ticker"]: r["price"] for r in rows}
+    score_by_ticker = {r["ticker"]: r.get("score") for r in rows}
+    score_since_by_ticker = {r["ticker"]: r.get("score_since") for r in rows}
     positions = sorted(get_paper_positions(), key=lambda p: p["entry_time"])
     summary = get_paper_summary()
 
@@ -1256,13 +1303,17 @@ def build_paper_hourly_report(rows) -> str:
         for p in positions:
             source_label = "Otomatik" if p["source"] == "auto" else "Manuel"
             price = price_by_ticker.get(p["ticker"])
+            score = score_by_ticker.get(p["ticker"])
+            score_label = _SCORE_TEXT_LABELS.get(score, score)
+            since_text = _format_relative_tr(score_since_by_ticker.get(p["ticker"]))
+            signal_info = f" - {score_label} ({since_text})" if score else ""
             if price is not None and price == price:  # NaN degilse
                 pnl = (price - p["entry_price"]) * p["shares"]
                 pnl_pct = (price / p["entry_price"] - 1.0) * 100.0
                 symbol = "📈" if pnl >= 0 else "📉"
                 lines.append(
                     f"{symbol} {p['ticker']} ({source_label}): {pnl:+.0f} TL ({pnl_pct:+.2f}%) "
-                    f"[{p['entry_price']:.2f} -> {price:.2f} TL]"
+                    f"[{p['entry_price']:.2f} -> {price:.2f} TL]{signal_info}"
                 )
             else:
                 lines.append(f"⚪ {p['ticker']} ({source_label}): güncel fiyat yok")

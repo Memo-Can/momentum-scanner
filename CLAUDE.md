@@ -564,6 +564,15 @@ Kullanıcı önerilen 4 maddeden ("equity performans metrikleri", "DB yedek geri
 - **`_view_stocks.html`:** Hücrenin GÖRÜNEN metni artık `fmtRelativeTime(r.score_since)`, ama hücrenin `title` özniteliğinde (tarayıcının kendi hover tooltip'i, `escapeHtml(fmtScoreSince(...))` ile) TAM tarih/saat hâlâ duruyor — kullanıcı üzerine gelince kesin anı görebiliyor. Sıralama ETKİLENMEDİ — `sortValue()` hâlâ HAM ISO değeri (`row.score_since`) üzerinden karşılaştırıyor, sadece GÖRÜNÜM değişti.
 - **Doğrulama:** `node -e` ile 7 sınır senaryosu (30sn/5dk/59dk/2sa/23sa/3gün/49gün/null önce) test edildi, hepsi beklenen metni döndürdü. `node --check` ile hem login hem guest render edilen `<script>` içerikleri sözdizimi doğrulandı, mevcut 25 birim test regresyonsuz geçti.
 
+### Telegram saatlik raporuna "ne kadar süredir bu durumda" bilgisi (2026-11-06'da eklendi)
+
+Kullanıcı "projeye ne eklenebilir" sorusuna önerilen 6 maddeden ("equity performans metrikleri", "kapanan işlemleri CSV dışa aktar", "DB yedek geri yükleme testi", "mobil push kalıntı temizliği", "Telegram saatlik raporuna süre bilgisi") sonuncusunu seçti.
+
+- **`scanner_bistTop100.py: _format_relative_tr(since)`** — `index.html: fmtRelativeTime()`'in Python/düz-metin karşılığı, AYNI mantık ("3 gün önce"/"2 saat önce"/"5 dakika önce"/"az önce"), Telegram mesajı için.
+- **`_SCORE_TEXT_LABELS`** — `_SIGNAL_NOTIFY_LABELS`'tan BİLEREK AYRI tutuldu: o sadece 4 güçlü etiketi (sinyal bildirimi bağlamında yeterliydi) kapsıyor, burada açık pozisyonun HERHANGİ bir skorda (AL/NÖTR/SAT dahil) olabilmesi nedeniyle 7 skorun TAMAMI için okunabilir TR karşılık gerekiyordu.
+- **`build_paper_hourly_report(rows)`** artık her pozisyon satırının sonuna ` - GÜÇLÜ AL (3 gün önce)` gibi bir ek ekliyor — `rows` zaten `log_score_history()`'den GEÇMİŞ olduğu için (`_run_scan()`'daki çağrı sırası: `log_score_history` → `run_paper_trading_cycle` → `_maybe_send_hourly_paper_report`) her satırda `score`/`score_since` ZATEN hazır, EK bir Yahoo isteği/DB sorgusu GEREKMEDİ. Fiyatı gelmeyen pozisyonlar (⚪ "güncel fiyat yok" dalı) bu ekten ETKİLENMEDİ — sadece normal (fiyatlı) dal için ekleniyor.
+- **Doğrulama:** İzole bir test DB'siyle 2 açık pozisyon (biri GUCLU_AL/3 gün önce, diğeri fiyatı NaN) simüle edildi — rapor metninde doğru skor/süre göründü, fiyatı eksik pozisyon etkilenmeden eski formatını korudu. `_format_relative_tr()`'nin 6 sınır senaryosu (`30sn/5dk/2sa/3gün/None/geçersiz-string`) ayrıca doğrulandı. `python3 -m py_compile` ve mevcut 25 birim test regresyonsuz geçti.
+
 ## Bilinen tuzaklar / dersler (tekrar düşmemek için)
 
 - **Yahoo rate-limit:** Tam piyasa (~628 hisse × 3 istek/hisse) taraması art arda/sık yapılınca `YFRateLimitError` ve "Invalid Crumb" hatalarına yol açıyor. Hem yerel sandbox hem VPS bunu yaşadı. Büyük hacimli canlı test yapmadan önce düşün; gerçekten gerekliyse VPS'in kendi (genelde daha "temiz") IP'sinden doğal 5 dakikalık döngülerle gözlemle, art arda patlamalar yapma.
