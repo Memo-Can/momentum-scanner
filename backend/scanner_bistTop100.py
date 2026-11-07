@@ -2321,6 +2321,50 @@ def _compute_paper_performance_metrics(conn, closed_pnls):
     }
 
 
+_paper_benchmark_cache = {}  # "data" -> (fetched_at, since_date, pct)
+
+
+def get_paper_benchmark_return(since_timestamp):
+    """paper_equity_history'nin EN ESKI (ilk) satirinin tarihinden (since_timestamp,
+    "YYYY-MM-DD HH:MM:SS") BUGUNE kadar BENCHMARK_TICKER'in (XU100.IS, RS
+    karsilastirmasinda da kullanilan AYNI BIST100 endeksi) toplam yuzde
+    degisimini dondurur - Sanal Al-Sat performansini "sadece al-ve-tut
+    yapsaydim ne olurdu" ile kiyaslamak icin (2026-11-07'de eklendi, bkz.
+    CLAUDE.md "BIST100 benchmark karsilastirmasi"). since_timestamp None ise
+    (hic equity kaydi yoksa - orn. taze/sifirlanmis hesap) karsilastirilacak
+    bir donem olmadigi icin None doner.
+    `_benchmark_cache`/`get_benchmark_daily_pct()` SADECE bugunku gunluk %
+    degisimi onbelleklerken, bu fonksiyon BASLANGIC gununden BUGUNE kadarki
+    TOPLAM degisimi tutar - ayri bir onbellek GEREKTI. `_chart_cache`/
+    `/api/history`'nin lazy-fetch-with-TTL deseniyle AYNI felsefe: Flask
+    route'undan (get_paper_summary() uzerinden) DOGRUDAN, senkron cagrilir
+    (arka plan tarama donguusune TASINMADI - /api/indicators de zaten
+    ayni sekilde route icinde canli Yahoo cekiyor) ama TTL = BIST_REFRESH_
+    SECONDS-5 oldugu icin ayni 5 dakikalik pencerede gelen TUM istekler
+    (kac sekme/kullanici olursa olsun) PAYLASILAN tek bir Yahoo cagrisini
+    kullanir."""
+    if not since_timestamp:
+        return None
+    since_date = since_timestamp[:10]
+    cached = _paper_benchmark_cache.get("data")
+    if cached and cached[1] == since_date and time.time() - cached[0] < BIST_REFRESH_SECONDS - 5:
+        return cached[2]
+    pct = None
+    try:
+        tk = yf.Ticker(BENCHMARK_TICKER)
+        hist = tk.history(start=since_date, interval="1d", auto_adjust=False)
+        if len(hist) >= 1:
+            start_price = float(hist["Close"].iloc[0])
+            current_price = float(hist["Close"].iloc[-1])
+            pct = pct_change(current_price, start_price)
+            if pct != pct:  # NaN - pct_change gecersiz girdide NaN dondurur, JSON'da temsil edilemez
+                pct = None
+    except Exception:
+        pct = None
+    _paper_benchmark_cache["data"] = (time.time(), since_date, pct)
+    return pct
+
+
 def get_paper_summary():
     """Sanal hesabin o anki ozetini dondurur: nakit, acik pozisyon degeri,
     toplam equity, gerceklesmis/gerceklesmemis K-Z, kazanma orani. Acik
@@ -2365,6 +2409,27 @@ def get_paper_summary():
             "max_positions": account["max_positions"],
         }
         summary.update(_compute_paper_performance_metrics(conn, closed_pnls))
+
+        # BIST100 benchmark karsilastirmasi (2026-11-07'de eklendi) - hesabin
+        # TAKIP EDILDIGI tum sure boyunca (equity_history'nin en eski satiri)
+        # "sadece BIST100'u al-ve-tut yapsaydim ne olurdu" sorusunun cevabi +
+        # alfa (hesabin kendi getirisi EKSI bu getiri). starting_balance 0/None
+        # olamaz (reset_paper_trading() her zaman pozitif bir deger yazar) ama
+        # savunmacı kontrol yine de eklendi.
+        first_equity = conn.execute(
+            "SELECT timestamp FROM paper_equity_history ORDER BY id ASC LIMIT 1"
+        ).fetchone()
+        benchmark_return_pct = get_paper_benchmark_return(first_equity["timestamp"] if first_equity else None)
+        account_return_pct = (
+            (equity - account["starting_balance"]) / account["starting_balance"] * 100.0
+            if account["starting_balance"] else None
+        )
+        summary["benchmark_return_pct"] = benchmark_return_pct
+        summary["alpha_pct"] = (
+            account_return_pct - benchmark_return_pct
+            if (account_return_pct is not None and benchmark_return_pct is not None)
+            else None
+        )
         return summary
     finally:
         conn.close()

@@ -321,6 +321,10 @@ function renderPaperSummary(s) {
       >Profit Factor<b>${fmtRatio(s.profit_factor)}</b></div>
     <div class="stat">Ort. Kazanç / Ort. Kayıp<b>${fmtPaperMoney(s.avg_win)} / ${fmtPaperMoney(s.avg_loss)}</b></div>
     <div class="stat">En İyi / En Kötü İşlem<b>${fmtPaperMoney(s.best_trade)} / ${fmtPaperMoney(s.worst_trade)}</b></div>
+    <div class="stat" title="Hesabin takip edildigi sureden ayni gunden bugune, sadece BIST100'u al-ve-tut yapsaydik ne olurdu."
+      >BIST100 (Aynı Dönem)<b class="${pctClass(s.benchmark_return_pct)}">${fmtPct(s.benchmark_return_pct)}</b></div>
+    <div class="stat" title="Hesabin kendi getirisi EKSI BIST100'un ayni donemdeki getirisi - pozitifse Confluence Score BIST100'u yeniyor demektir."
+      >Alfa (BIST100'e Göre)<b class="${pctClass(s.alpha_pct)}">${fmtPct(s.alpha_pct)}</b></div>
   `;
   // Kullanici o anki degeri bilsin diye input'un placeholder'ina yaziliyor -
   // input'un value'su DOKUNULMAZ ki kullanici yazarken her refreshPaperTrading()
