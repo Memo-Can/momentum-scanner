@@ -2250,11 +2250,85 @@ def get_paper_equity_history(since_timestamp: str):
         conn.close()
 
 
+def _compute_paper_performance_metrics(conn, closed_pnls):
+    """get_paper_summary()'nin ACIK connection'ini paylasir (ekstra baglanti
+    acmaz). Sharpe orani/max drawdown TUM equity gecmisinden (reset'lerle
+    equity_history silinse de - bkz. reset_paper_trading - bu fonksiyon o
+    anda ne kadar veri varsa onu kullanir, ozel bir pencere/cutoff YOK, ayni
+    get_paper_summary'nin kendisi gibi "simdiye kadarki tum surec" sorusuna
+    cevap veriyor). Kapanan islem sayisi azsa (ornegin yeni sifirlama sonrasi)
+    None'lar donuyor - 0'a bolme/istatistiksel anlamsizlik riski olmadan."""
+    equity_rows = conn.execute(
+        "SELECT timestamp, equity FROM paper_equity_history ORDER BY id ASC"
+    ).fetchall()
+
+    # Maksimum drawdown: simdiye kadarki en yuksek tepe noktasindan sonraki
+    # en buyuk dusus (tepe her yeni zirveyle guncellenir, dusus o anki
+    # tepeye gore olculur - standart "peak-to-trough" tanimi).
+    max_drawdown = 0.0
+    max_drawdown_pct = 0.0
+    peak = None
+    for r in equity_rows:
+        eq = r["equity"]
+        if eq is None:
+            continue
+        if peak is None or eq > peak:
+            peak = eq
+        if peak:
+            dd = peak - eq
+            if dd > max_drawdown:
+                max_drawdown = dd
+                max_drawdown_pct = (dd / peak * 100.0) if peak else 0.0
+
+    # Sharpe orani: GUNLUK equity degisiminden (her gunun SON kaydi - ayni
+    # gun icindeki tarama-dongusu dalgalanmalari gurultu sayilip atlanir),
+    # yillik 252 islem gunu varsayimiyla annualize edilir. En az 3 farkli
+    # gun (2 getiri) olmadan anlamli bir std sapma hesaplanamaz - None doner.
+    daily_last_equity = {}
+    for r in equity_rows:
+        if r["equity"] is None:
+            continue
+        daily_last_equity[r["timestamp"][:10]] = r["equity"]
+    daily_values = [daily_last_equity[d] for d in sorted(daily_last_equity.keys())]
+    daily_returns = []
+    for i in range(1, len(daily_values)):
+        prev = daily_values[i - 1]
+        if prev:
+            daily_returns.append((daily_values[i] - prev) / prev)
+    sharpe_ratio = None
+    if len(daily_returns) >= 2:
+        mean_r = sum(daily_returns) / len(daily_returns)
+        variance = sum((x - mean_r) ** 2 for x in daily_returns) / (len(daily_returns) - 1)
+        std_r = variance ** 0.5
+        if std_r > 0:
+            sharpe_ratio = (mean_r / std_r) * (252 ** 0.5)
+
+    wins = [p for p in closed_pnls if p > 0]
+    losses = [p for p in closed_pnls if p < 0]
+    gross_profit = sum(wins)
+    gross_loss = -sum(losses)
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
+
+    return {
+        "max_drawdown": max_drawdown,
+        "max_drawdown_pct": max_drawdown_pct,
+        "sharpe_ratio": sharpe_ratio,
+        "profit_factor": profit_factor,
+        "avg_win": (sum(wins) / len(wins)) if wins else None,
+        "avg_loss": (sum(losses) / len(losses)) if losses else None,
+        "best_trade": max(closed_pnls) if closed_pnls else None,
+        "worst_trade": min(closed_pnls) if closed_pnls else None,
+    }
+
+
 def get_paper_summary():
     """Sanal hesabin o anki ozetini dondurur: nakit, acik pozisyon degeri,
     toplam equity, gerceklesmis/gerceklesmemis K-Z, kazanma orani. Acik
     pozisyonlarin guncel degeri icin en son equity satirini kullanir (
-    run_paper_trading_cycle her dongude bunu zaten gunceller)."""
+    run_paper_trading_cycle her dongude bunu zaten gunceller).
+    2026-11-07'de Sharpe orani/max drawdown/profit factor/ort. kazanc-kayip/
+    en iyi-en kotu islem (performans metrikleri) eklendi - bkz. CLAUDE.md
+    "Equity performans metrikleri"."""
     conn = get_db_connection()
     try:
         account = conn.execute(
@@ -2266,17 +2340,18 @@ def get_paper_summary():
         closed = conn.execute("SELECT pnl FROM paper_trades WHERE status = 'closed'").fetchall()
         open_count = conn.execute("SELECT COUNT(*) AS c FROM paper_trades WHERE status = 'open'").fetchone()["c"]
 
-        realized_pnl = sum(r["pnl"] for r in closed if r["pnl"] is not None)
+        closed_pnls = [r["pnl"] for r in closed if r["pnl"] is not None]
+        realized_pnl = sum(closed_pnls)
         equity = last_equity["equity"] if last_equity else account["cash"]
         positions_value = last_equity["positions_value"] if last_equity else 0.0
-        wins = sum(1 for r in closed if r["pnl"] is not None and r["pnl"] > 0)
+        wins = sum(1 for p in closed_pnls if p > 0)
 
         open_allocation = conn.execute(
             "SELECT COALESCE(SUM(allocation), 0) AS total FROM paper_trades WHERE status = 'open'"
         ).fetchone()["total"]
         unrealized_pnl = positions_value - open_allocation
 
-        return {
+        summary = {
             "cash": account["cash"],
             "positions_value": positions_value,
             "equity": equity,
@@ -2285,10 +2360,12 @@ def get_paper_summary():
             "realized_pnl": realized_pnl,
             "unrealized_pnl": unrealized_pnl,
             "open_positions": open_count,
-            "closed_trades": len(closed),
-            "win_rate": (wins / len(closed) * 100.0) if closed else None,
+            "closed_trades": len(closed_pnls),
+            "win_rate": (wins / len(closed_pnls) * 100.0) if closed_pnls else None,
             "max_positions": account["max_positions"],
         }
+        summary.update(_compute_paper_performance_metrics(conn, closed_pnls))
+        return summary
     finally:
         conn.close()
 

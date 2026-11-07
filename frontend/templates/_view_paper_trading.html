@@ -297,6 +297,10 @@ function renderPaperEquityChart(history) {
   paperEquityChart.timeScale().fitContent();
 }
 
+// Sharpe orani duz bir sayi (carpan degil, fmtRatio'nun "x" soneki burada
+// yaniltici olurdu) - yetersiz veri (ilk gunler/az kapanan islem) icin '-'.
+function fmtSharpe(v) { return (v === null || v === undefined) ? '-' : v.toFixed(2); }
+
 function renderPaperSummary(s) {
   const wrap = document.getElementById('paper-summary');
   if (!s) { wrap.innerHTML = ''; return; }
@@ -309,6 +313,14 @@ function renderPaperSummary(s) {
     <div class="stat">Açık Pozisyon<b>${s.open_positions} / ${s.max_positions}</b></div>
     <div class="stat">Kapanan İşlem<b>${s.closed_trades}</b></div>
     <div class="stat">Kazanma Oranı<b>${s.win_rate === null || s.win_rate === undefined ? '-' : s.win_rate.toFixed(0) + '%'}</b></div>
+    <div class="stat" title="Simdiye kadarki en yuksek tepeden sonraki en buyuk dusus."
+      >Maks. Drawdown<b class="neg">${fmtPaperMoney(s.max_drawdown)} (${fmtPct(s.max_drawdown_pct)})</b></div>
+    <div class="stat" title="Gunluk equity getirilerinden, 252 islem gunu uzerinden yillandirilmis risk-ayarli getiri. En az 2-3 gunluk veri gerekir."
+      >Sharpe Oranı<b>${fmtSharpe(s.sharpe_ratio)}</b></div>
+    <div class="stat" title="Toplam kazanc / toplam kayip. 1'in ustu kazandirici, altindaki kaybettiriciyi gosterir."
+      >Profit Factor<b>${fmtRatio(s.profit_factor)}</b></div>
+    <div class="stat">Ort. Kazanç / Ort. Kayıp<b>${fmtPaperMoney(s.avg_win)} / ${fmtPaperMoney(s.avg_loss)}</b></div>
+    <div class="stat">En İyi / En Kötü İşlem<b>${fmtPaperMoney(s.best_trade)} / ${fmtPaperMoney(s.worst_trade)}</b></div>
   `;
   // Kullanici o anki degeri bilsin diye input'un placeholder'ina yaziliyor -
   // input'un value'su DOKUNULMAZ ki kullanici yazarken her refreshPaperTrading()
