@@ -513,6 +513,15 @@
     #paper-trades-pager { padding: 8px 10px; }
     #paper-trades-pager-controls .market-tab-btn { flex: 0 0 auto; padding: 5px 9px; font-size: 11px; }
     #paper-trades-pager-page-indicator { font-size: 11px; width: 100%; }
+
+    /* Ayarlar ekrani kriter checkbox'lari (2026-11-07'de duzeltildi) -
+       masaustunde etiket (min-width:150px) ile checkbox'lar AYNI satirda
+       sigiyordu, mobilde sigmayinca checkbox'lar duzensiz/kademeli satirlara
+       bolunuyordu (etiketin genisligi her grupta FARKLI oldugu icin ikinci
+       satirdan itibaren checkbox'lar hizasiz baslıyordu). Etiketi KENDI
+       satirina zorlayip (flex-basis:100%) checkbox'larin HER ZAMAN bir
+       sonraki satirdan, sol kenardan baslamasini sagliyoruz. */
+    .criteria-label { flex: 1 1 100%; min-width: 0; }
   }
 
   @media (max-width: 420px) {
