@@ -44,6 +44,29 @@
   </div>
 </div>
 
+{% if logged_in %}
+<!-- Hisse isareti/not duzenleme paneli (2026-11-09'da eklendi, bkz. CLAUDE.md
+     "Hisse isaretleri") - BIST tablosundaki Isaret hucresine (bkz.
+     _view_stocks.html: renderRows()) tiklayinca #modal-overlay'da (zaten
+     var olan buyutme mekanizmasi, openInModal()/closeModal()) popup olarak
+     acilir - admin-panel/view-settings ile AYNI `.modal-panel` ORTAK
+     tasarimini kullanir. -->
+<div id="ticker-flag-panel" class="modal-panel" hidden>
+  <h3 id="ticker-flag-title">Hisse İşareti</h3>
+  <div class="criteria-group">
+    <label><input type="radio" name="ticker-flag-choice" value=""> İşaretsiz</label>
+    <label><input type="radio" name="ticker-flag-choice" value="GUVENILIR"> Güvenilir</label>
+    <label><input type="radio" name="ticker-flag-choice" value="SIKINTILI"> Sıkıntılı</label>
+  </div>
+  <textarea id="ticker-flag-note" maxlength="250" placeholder="Not (opsiyonel, en fazla 250 karakter)"></textarea>
+  <div class="criteria-group">
+    <button class="paper-action-btn" id="ticker-flag-save" type="button">Kaydet</button>
+    <span id="ticker-flag-msg"></span>
+  </div>
+  <div class="sub">Not: "Sıkıntılı" işaretli bir hisse Sanal Al-Sat'ta otomatik alımdan hariç tutulur (elinle yine alabilirsin) - bu işaret/not sadece sana görünür.</div>
+</div>
+{% endif %}
+
 <script>
 // YAN PANEL (GRAFIK + SKOR GECMISI) GORUNUMUNE OZEL JS - sadece grafik/
 // crosshair/legend, Skor Gecmisi, grafik isaretleri, modal (buyutme) ve
@@ -380,6 +403,54 @@ async function openScoreHistoryPopup(ticker) {
   document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== 'tab-daily'; });
   openInModal(document.getElementById('score-history'), 'modal-score-history');
 }
+
+// Hisse isareti/not duzenleme paneli (2026-11-09'da eklendi, bkz. CLAUDE.md
+// "Hisse isaretleri") - _view_stocks.html'deki Isaret hucresine tiklayinca
+// cagrilir, openScoreHistoryPopup() ile AYNI openInModal() mekanizmasini
+// kullanir. tickerFlagTarget hangi hisse icin acildigini hatirlar - Kaydet
+// butonunun hangi ticker'a POST atacagini bilmesi icin.
+// openTickerFlagPanel() BILEREK if(LOGGED_IN) blogunun DISINDA (top-level) -
+// _view_stocks.html (BASKA bir script, bu dosyadan ONCE parse ediliyor)
+// bunu cagiriyor, cross-script erisim icin fonksiyonun TOP-LEVEL global bir
+// binding olmasi GEREKIR (openSettingsPanel() ile AYNI gerekce/desen, bkz.
+// CLAUDE.md "Frontend dosya bolunmesi" script-sirasi dersi) - block-ici bir
+// function declaration'in (Annex B hoisting) TUM tarayicilarda guvenilir
+// sekilde global'e tasindigina GUVENILMEDI.
+let tickerFlagTarget = null;
+
+function openTickerFlagPanel(ticker, flag, note) {
+  tickerFlagTarget = ticker;
+  document.getElementById('ticker-flag-title').textContent = `Hisse İşareti — ${ticker}`;
+  document.querySelectorAll('input[name="ticker-flag-choice"]').forEach(r => {
+    r.checked = (r.value || null) === (flag || null);
+  });
+  document.getElementById('ticker-flag-note').value = note || '';
+  document.getElementById('ticker-flag-msg').textContent = '';
+  openInModal(document.getElementById('ticker-flag-panel'), 'modal-ticker-flag-panel');
+}
+
+if (LOGGED_IN) {
+  document.getElementById('ticker-flag-save').addEventListener('click', async () => {
+    if (!tickerFlagTarget) return;
+    const msg = document.getElementById('ticker-flag-msg');
+    const checked = document.querySelector('input[name="ticker-flag-choice"]:checked');
+    const flag = checked ? (checked.value || null) : null;
+    const note = document.getElementById('ticker-flag-note').value.trim();
+    try {
+      const res = await fetch(`/api/ticker-flag/${encodeURIComponent(tickerFlagTarget)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flag, note }),
+      });
+      if (!res.ok) { msg.textContent = 'Kaydedilemedi.'; return; }
+      msg.textContent = 'Kaydedildi.';
+      refreshRows(); // guncel isareti ana tabloda hemen gormek icin (bir sonraki dongunun beklenmesine gerek yok)
+    } catch (e) {
+      msg.textContent = 'Kaydedilemedi.';
+    }
+  });
+}
+
 // #modal-close/#modal-overlay index.html'de (bu partial'in DISINDA, .layout'tan
 // SONRA) duruyor - bu script o elemanlardan ONCE basildigi icin DOMContentLoaded'a
 // kadar beklenir (tum sayfa parse edildikten sonra elemanlar kesin var olur).

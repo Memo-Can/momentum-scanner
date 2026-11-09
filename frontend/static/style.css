@@ -188,6 +188,40 @@
     border-radius: 3px;
   }
   .score-cell:hover { background: rgba(255, 255, 255, 0.12); }
+  /* Isaret hucresi (2026-11-09'da eklendi, AYNI gun rozet tasarimi
+     revize edildi) - score-cell ile AYNI hover vurgusu, ama alt cizgi
+     YOK (icerigi metin degil rozet/emoji, alt cizgi gorsel olarak
+     anlamsiz/cirkin dururdu). */
+  .flag-cell { cursor: pointer; border-radius: 3px; }
+  .flag-cell:hover { background: rgba(255, 255, 255, 0.12); }
+  /* Isaretsiz durumda SADECE "-" gostermek "buraya veri girilebilir"
+     izlenimi VERMIYORDU (kullanici bildirdi, 2026-11-09 - "içeri veri
+     girilebilen bir şey izlenimi vermiyor") - KESIKLI cerceveli, "+" iceren
+     bir "rozet" ile evrensel "buraya bir sey EKLENEBILIR" gorsel dili
+     (GitHub'daki "+ Label ekle" butonlariyla AYNI fikir) taklit edildi.
+     Isaretlenmis durumda (Guvenilir/Sikintili) DOLU/renkli kenarlikli bir
+     rozet kullanilir - boylece ikisi de ayni "rozet" bicimini paylasirken
+     bos/dolu durumu aciklikla ayirt edilir. */
+  .flag-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 18px; padding: 0 5px; border-radius: 9px;
+    font-size: 11px; line-height: 1; box-sizing: border-box;
+  }
+  .flag-badge-empty { border: 1px dashed var(--muted); color: var(--muted); }
+  .flag-cell:hover .flag-badge-empty { border-color: var(--yellow); color: var(--yellow); }
+  .flag-badge-reliable { border: 1px solid var(--green); background: rgba(80, 200, 120, 0.12); }
+  .flag-badge-unreliable { border: 1px solid var(--red); background: rgba(255, 92, 92, 0.12); }
+
+  /* Hisse isareti/not duzenleme paneli (2026-11-09'da eklendi) - #ticker-flag-panel
+     icindeki not kutusu, #paper-cash-input/.paper-amount-input ile AYNI
+     renk/border deseni, SADECE coklu satir (textarea) icin boyutlandirildi. */
+  #ticker-flag-note {
+    width: 100%; box-sizing: border-box; min-height: 60px; resize: vertical;
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 8px; font-size: 12px; font-family: inherit;
+    margin: 8px 0; outline: none;
+  }
+  #ticker-flag-note:focus { border-color: var(--yellow); }
 
   /* #table-wrap'in ICINDE, hisse tablosunun YERINE gecen bir goruntu (bkz.
      index.html #view-stocks / #view-paper-trading, showView()) - 2026-10-30'da

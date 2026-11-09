@@ -112,6 +112,22 @@ const SCORE_SYMBOLS = {
   GUCLU_SAT: "▼▼", MUTLAK_SAT: "▼▼▼",
 };
 const SIGNAL_SYMBOLS = {AL: "▲", SAT: "▼", NOTR: "–"};
+// Hisse isaretleri (2026-11-09'da eklendi, bkz. CLAUDE.md "Hisse isaretleri") -
+// _view_stocks.html (Isaret sutunu) ve duzenleme paneli (_view_graphic.html)
+// kullaniyor, bu yuzden PAYLASILAN bu ortak script'te.
+const TICKER_FLAG_LABELS = {GUVENILIR: "Güvenilir", SIKINTILI: "Sıkıntılı"};
+// Isaretsiz durumda SADECE "-" gostermek "buraya veri girilebilir" izlenimi
+// VERMIYORDU (kullanici bildirdi, 2026-11-09) - "-" yerine "+" ve KESIKLI
+// cerceveli bir "rozet" (.flag-badge-empty, bkz. style.css) kullanilarak
+// evrensel "buraya bir sey eklenebilir" (ornegin GitHub'daki "+ Label ekle"
+// butonlari) gorsel dili taklit edildi. Isaretlenmis durumda (Guvenilir/
+// Sikintili) DOLU kenarlikli bir rozet (farkli renk) kullanilir - ikisi de
+// AYNI .flag-cell tiklama/hover davranisini (bkz. style.css) paylasir.
+function tickerFlagBadgeHtml(flag) {
+  if (flag === 'GUVENILIR') return '<span class="flag-badge flag-badge-reliable">✅</span>';
+  if (flag === 'SIKINTILI') return '<span class="flag-badge flag-badge-unreliable">⚠️</span>';
+  return '<span class="flag-badge flag-badge-empty">+</span>';
+}
 
 // Genel bicimlendirme yardimcilari - tablo, Sanal Al-Sat ve Skor Gecmisi
 // ayni fonksiyonlari kullanir.

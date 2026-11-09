@@ -168,11 +168,14 @@ def _row_to_json(row: dict) -> dict:
 # seviyeleri Skor'un yonunu (AL/SAT) dolayli olarak aciga cikardigi icin
 # (stop fiyatin ALTINDAYSA AL, USTUNDEYSE SAT yonu demektir) bu da dogrudan
 # sinyal bilgisi sayilir - bu sutunlar zaten eskiden (2026-11-02'de
-# kaldirilmadan once) de login-only idi.
+# kaldirilmadan once) de login-only idi. ticker_flag/ticker_note (2026-11-09'da
+# eklendi, bkz. CLAUDE.md "Hisse isaretleri") - kullanicinin kendi arastirma
+# notu, SADECE login olana gorunmesi gerektigini acikca belirtti.
 _SIGNAL_ONLY_ROW_FIELDS = (
     "score", "score_since", "signal_macd", "volume_ratio", "day_range_pos",
     "rsi", "bb_percent", "rel_strength",
     "day_stop", "day_target", "swing_stop", "swing_target",
+    "ticker_flag", "ticker_note",
 )
 _SIGNAL_ONLY_INDICATOR_FIELDS = ("rsi", "macd", "macd_signal", "macd_hist")
 
@@ -293,10 +296,19 @@ def _run_scan():
         daily_sort = -daily if daily == daily else float("inf")
         return (scanner.SCORE_ORDER.get(row["score"], 3), daily_sort)
 
+    # Hisse isaretleri (guvenilir/sikintili + not, bkz. CLAUDE.md "Hisse
+    # isaretleri") - TEK bir bellek-ici cache okumasi, DB'ye GITMEZ. Hem
+    # top_rows hem skeleton_rows icin kullanilir, run_paper_trading_cycle()
+    # BUNDAN SONRA cagrildigi icin (asagida) "SIKINTILI" isaretli bir
+    # hissenin otomatik alim disinda tutulmasi icin gereken veri satirlarda
+    # ZATEN hazir olacak.
+    ticker_flags = scanner.get_all_ticker_flags()
+
     top_rows = sorted(rows_by_ticker.values(), key=_sort_key)
     for row in top_rows:
         row["bist30"] = row["ticker"] in bist30_symbols
         row["bist100"] = row["ticker"] in bist100_symbols
+        row["ticker_flag"], row["ticker_note"] = ticker_flags.get(row["ticker"], (None, None))
 
     if top_rows:
         scanner.log_signal_changes(top_rows)
@@ -325,6 +337,7 @@ def _run_scan():
         for row in skeleton_rows:
             row["bist30"] = row["ticker"] in bist30_symbols
             row["bist100"] = row["ticker"] in bist100_symbols
+            row["ticker_flag"], row["ticker_note"] = ticker_flags.get(row["ticker"], (None, None))
     except Exception as e:
         print("Tam piyasa listesi (iskelet satirlar) hatasi:", e)
         skeleton_rows = []
@@ -603,6 +616,42 @@ def api_rows():
         rows = [_strip_signal_fields_from_row(r) for r in rows]
     state_copy["rows"] = rows
     return jsonify(state_copy)
+
+
+@app.route("/api/ticker-flag/<ticker>", methods=["POST"])
+@_login_required
+def api_set_ticker_flag(ticker: str):
+    """Bir hisseyi "Güvenilir"/"Sıkıntılı" olarak işaretler + istege bagli
+    bir not ekler (2026-11-09'da eklendi, bkz. CLAUDE.md "Hisse işaretleri") -
+    kullanıcının "bazı hisselerde sıkıntılar var, listede sıkıntılı ya da
+    güvenilir olan hisseleri bilmem gerekiyor" isteği. body: {flag, note}.
+    flag gecersizse (TICKER_FLAG_OPTIONS disinda) 400 - scanner.set_ticker_flag()'in
+    sessiz elemesinden FARKLI olarak burada sıkı doğrulama var (kullanıcı
+    yazım/entegrasyon hatasını fark etsin diye, settings.py'deki AYNI
+    desen). note 250 karakteri asarsa 400. "Sıkıntılı" işareti
+    run_paper_trading_cycle()'ın otomatik alımını DOĞRUDAN etkiler (bkz.
+    orada) - bu endpoint'in KENDİSİ paper trading'e dokunmaz, sadece veriyi
+    yazar."""
+    ticker = ticker.strip().upper()
+    data = request.get_json(silent=True) or {}
+    flag = data.get("flag") or None
+    note = (data.get("note") or "").strip() or None
+    if flag is not None and flag not in scanner.TICKER_FLAG_OPTIONS:
+        return jsonify({"error": f"flag için geçerli değerler: {', '.join(scanner.TICKER_FLAG_OPTIONS)} ya da boş"}), 400
+    if note is not None and len(note) > scanner.TICKER_NOTE_MAX_LEN:
+        return jsonify({"error": f"not en fazla {scanner.TICKER_NOTE_MAX_LEN} karakter olabilir"}), 400
+    scanner.set_ticker_flag(ticker, flag, note)
+    # _state["rows"]'daki ilgili satiri da DOGRUDAN guncelliyoruz - degisiklik
+    # bir sonraki tarama dongusunu (en fazla 5 dakika) beklemeden, HEMEN
+    # bir sonraki /api/rows isteginde yansisin diye (scanner.set_ticker_flag()
+    # SADECE kendi cache'ini/DB'yi gunceller, _state web_bistTop100.py'de).
+    with _state_lock:
+        for r in _state["rows"]:
+            if r["ticker"] == ticker:
+                r["ticker_flag"] = flag
+                r["ticker_note"] = note
+                break
+    return jsonify({"status": "ok", "flag": flag, "note": note})
 
 
 @app.route("/api/market-indicators")

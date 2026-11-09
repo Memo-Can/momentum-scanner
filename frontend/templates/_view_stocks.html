@@ -4,6 +4,9 @@
     <tr id="head-row">
       <th class="left" data-key="_default" data-type="default" data-tip="Sıralamadaki yeri: önce Skor gücü (GÜÇLÜ AL en üstte, GÜÇLÜ SAT en altta), aynı skor grubu içinde günlük % değişime göre büyükten küçüğe.">#<span class="arrow"></span></th>
       <th class="left" data-key="ticker" data-type="text" data-tip="Hisse sembolü (ticker).">Hisse<span class="arrow"></span></th>
+      {% if logged_in %}
+      <th class="left" data-key="ticker_flag" data-type="text" data-tip="Kendi işaretin (Güvenilir/Sıkıntılı) ve isteğe bağlı bir not - sadece sen görürsün. 'Sıkıntılı' işaretli bir hisse otomatik alım-satımda (Sanal Al-Sat) hariç tutulur.">İşaret<span class="arrow"></span></th>
+      {% endif %}
       <th class="left" data-key="_index" data-type="index" data-tip="Resmi BIST30/BIST100 endeks üyeliği - BIST30, BIST100'ün bir alt kümesidir (BIST30'da olan bir hisse otomatik olarak BIST100'de de vardır).">Endeks<span class="arrow"></span></th>
       <th class="left" data-key="sector" data-type="text" data-tip="Hissenin kısa sektör kodu - Yahoo Finance'in canlı 'sector' alanından türetilir.">Sektör<span class="arrow"></span></th>
       {% if logged_in %}
@@ -121,6 +124,7 @@ function renderRows(rows) {
     tr.innerHTML = `
       <td class="left">${i + 1}</td>
       <td class="left">${escapeHtml(r.ticker)}</td>
+      ${LOGGED_IN ? `<td class="left flag-cell" title="İşaretle / not ekle">${tickerFlagBadgeHtml(r.ticker_flag)}</td>` : ''}
       <td class="left">${indexDisplayLabel(r)}</td>
       <td class="left">${escapeHtml(r.sector || '-')}</td>
       ${LOGGED_IN ? `<td class="sym-${r.score} score-cell" title="Günlük Skor Geçmişi'ni büyütülmüş görüntüde aç">${SCORE_SYMBOLS[r.score] || r.score}</td><td class="left" title="${escapeHtml(fmtScoreSince(r.score_since))}">${fmtRelativeTime(r.score_since)}</td>` : ''}
@@ -159,6 +163,18 @@ function renderRows(rows) {
       scoreCell.onclick = (e) => {
         e.stopPropagation();
         openScoreHistoryPopup(r.ticker);
+      };
+    }
+    // Isaret hucresi (2026-11-09'da eklendi, kullanici istegi: "manuel
+    // takibe alinanlara da skor koy" sonrasi "listede sikintili ya da
+    // guvenilir olan hisseleri bilmem gerekiyor") - score-cell ile AYNI
+    // DOM-property atama + stopPropagation deseni (satirin kendi tiklamasi
+    // - selectTicker - AYRICA tetiklenmesin diye).
+    const flagCell = tr.querySelector('.flag-cell');
+    if (flagCell) {
+      flagCell.onclick = (e) => {
+        e.stopPropagation();
+        openTickerFlagPanel(r.ticker, r.ticker_flag, r.ticker_note);
       };
     }
     tbody.appendChild(tr);

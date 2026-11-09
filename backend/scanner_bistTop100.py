@@ -311,6 +311,13 @@ def _init_db() -> None:
                     ticker TEXT PRIMARY KEY,
                     added_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS ticker_flags (
+                    ticker TEXT PRIMARY KEY,
+                    flag TEXT,
+                    note TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             conn.commit()
@@ -1184,6 +1191,72 @@ def _seed_score_since() -> None:
 _seed_score_since()
 
 
+# Hisse isaretleri (guvenilir/sikintili + serbest metin not, 2026-11-09'da
+# eklendi) - kullanici istegi: "bazi hisselerde sikintilar var, listede
+# sikintili ya da guvenilir olan hisseleri bilmem gerekiyor." last_known_score/
+# score_since ile AYNI "ticker basina tek satir, bellek-ici cache + DB" deseni.
+# DB'ye DEGIL, sadece _ticker_flags_cache'e YAZMAK/OKUMAK bilerek ayrildi -
+# bu veri DB'den BAGIMSIZ sik okunuyor (_run_scan() her dongude TUM hisseler
+# icin okur), DB'ye her seferinde gitmek gereksiz.
+TICKER_FLAG_OPTIONS = ("GUVENILIR", "SIKINTILI")
+TICKER_NOTE_MAX_LEN = 250
+_ticker_flags_cache = {}  # ticker -> (flag, note)
+
+
+def _seed_ticker_flags() -> None:
+    """Process (re)basladiginda _ticker_flags_cache'i ticker_flags
+    tablosundan doldurur - _seed_score_since() ile AYNI O(1) desen."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute("SELECT ticker, flag, note FROM ticker_flags").fetchall()
+        for row in rows:
+            _ticker_flags_cache[row["ticker"]] = (row["flag"], row["note"])
+    finally:
+        conn.close()
+
+
+_seed_ticker_flags()
+
+
+def get_all_ticker_flags() -> dict:
+    """web_bistTop100.py: _run_scan()'in HER satira isaret/not eklemek icin
+    kullandigi toplu okuma - DB'ye GITMEZ, bellek-ici cache'in bir KOPYASINI
+    doner (cagiran taraf yanlislikla mutasyona ugratmasin diye)."""
+    return dict(_ticker_flags_cache)
+
+
+def set_ticker_flag(ticker: str, flag, note) -> None:
+    """Bir ticker'in isaretini/notunu DB'ye yazar VE ayni anda bellek-ici
+    cache'i gunceller - web_bistTop100.py'nin API route'u bu cagridan SONRA
+    _state['rows']'daki ilgili satiri da DOGRUDAN mutasyona ugratip (bkz.
+    orada) degisikligin bir sonraki tarama donguusunu (en fazla 5 dakika)
+    beklemeden ANINDA yansimasini sagliyor.
+    flag TICKER_FLAG_OPTIONS'ta degilse (bos string/None dahil) SESSIZCE
+    None'a ("isaretsiz") dusurulur - API tarafinda ZATEN sikisi dogrulama
+    var, bu fonksiyon DOGRUDAN cagrilsa bile guvenli kalsin diye settings.py'deki
+    _clean_criteria_labels() ile AYNI savunmaci yaklasim. note cok uzunsa
+    (TICKER_NOTE_MAX_LEN) ValueError firlatir - set_paper_trade_note() ile
+    AYNI desen."""
+    if flag not in TICKER_FLAG_OPTIONS:
+        flag = None
+    if note is not None and len(note) > TICKER_NOTE_MAX_LEN:
+        raise ValueError(f"Not en fazla {TICKER_NOTE_MAX_LEN} karakter olabilir.")
+    note = note or None
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _DB_LOCK:
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                "INSERT INTO ticker_flags (ticker, flag, note, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(ticker) DO UPDATE SET flag=excluded.flag, note=excluded.note, updated_at=excluded.updated_at",
+                (ticker, flag, note, now_str),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    _ticker_flags_cache[ticker] = (flag, note)
+
+
 def backfill_score_since() -> dict:
     """TEK SEFERLIK (idempotent, tekrar calistirilabilir) backfill -
     score_since ozelligi 2026-11-05'te EKLENDIGINDE tablo BOMBOS basladigi
@@ -1920,6 +1993,11 @@ def run_paper_trading_cycle(rows) -> None:
                 ticker = row["ticker"]
                 if ticker in held_tickers or ticker in closed_this_cycle:
                     continue  # bu hisse ZATEN acik (kaynagi auto ya da manual farketmez) - tekrar alinmaz
+                if row.get("ticker_flag") == "SIKINTILI":
+                    continue  # kullanici bu hisseyi elle "Sikintili" isaretlemis - GUCLU_AL/MUTLAK_AL
+                    # gelse bile otomatik alim YAPILMAZ (2026-11-09'da eklendi, bkz. CLAUDE.md
+                    # "Hisse isaretleri" - kullanicinin acik istegi). Manuel alim bundan ETKILENMEZ -
+                    # kullanici isterse "Sikintili" isaretli bir hisseyi yine de elle alabilir.
                 if row.get("swing_stop") is None or row.get("swing_target") is None:
                     continue  # ATR verisi yetersiz - guvenli bir stop/hedef yok
                 vol20 = row.get("vol20")
