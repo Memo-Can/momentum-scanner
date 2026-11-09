@@ -20,9 +20,55 @@ DOGRUDAN erismesi) DAIRESEL IMPORT olurdu. web_bistTop100.py bu modulu
 import edip GET /api/admin/status route'unu build_admin_status()'a delege
 eder (kendi state'ini toplayip parametre olarak gecirir)."""
 
+import subprocess
 import time
 
 import scanner_bistTop100 as scanner
+
+# web-bist.service - SABIT, kullanici girdisinden BAGIMSIZ bir deger. Asla
+# string birlestirme/f-string ile OLUSTURULMAZ, subprocess'e HER ZAMAN bir
+# LISTE olarak (shell=True KULLANILMADAN) geciliyor - komut enjeksiyonu
+# riski YOK (bkz. get_recent_error_logs()).
+_SYSTEMD_UNIT = "web-bist.service"
+# Proje logging modulu/seviye ayrimi KULLANMIYOR - TUM print() cagrilari
+# journal'a AYNI ("info") seviyede dusuyor, bu yuzden journalctl'in kendi
+# -p (priority) filtresi burada ISE YARAMAZ. Bunun yerine metin bazli bir
+# filtre kullanilir - kod tabanindaki TUM print() hata/uyari mesajlari
+# (grep ile tek tek tarandi: "Tarama hatasi:", "Sanal al-sat (paper trading)
+# hatasi:", "Telegram bildirimi gonderilemedi:", "[UYARI] BIST30/100_TICKERS
+# listeleri ... dogrulanmadi" vb.) bu anahtar kelimelerden EN AZ birini
+# iceriyor - "hata"/"exception"/"traceback" TEK BASINA "gonderilemedi"
+# (basarisiz bir gonderim) ve "[UYARI]" (index listesi tazelik hatirlaticisi)
+# gibi mesajlari KACIRIRDI, bu yuzden onlar da eklendi.
+_ERROR_KEYWORDS = ("hata", "exception", "traceback", "error", "uyari", "warning", "gonderilemedi", "basarisiz")
+
+
+def get_recent_error_logs(max_lines: int = 200) -> dict:
+    """web-bist.service'in (SADECE bu servis, sistem geneli DEGIL) son
+    journalctl kayitlarindan "hata" iceren satirlari filtreler - Yonetici
+    Paneli popup'inda SSH+journalctl'e girmeden gosterilir (2026-11-09'da
+    eklendi, kullanici istegi: "journalctl'de olusan hata loglarini
+    yonetim panelinde gostermek mumkun mu").
+
+    Lokal gelistirme ortaminda (systemd servisi DEGIL, dogrudan
+    "python3 web_bistTop100.py" ile calistiriliyor) journalctl/systemctl
+    YOK - bu durumda subprocess FileNotFoundError/CalledProcessError
+    firlatir, GRACEFUL bir sekilde yakalanip {"available": False, ...}
+    doner, panel COKMEZ."""
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", _SYSTEMD_UNIT, "-n", "1000", "-r", "--no-pager", "-o", "short-iso"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+        return {"available": False, "lines": [], "error": str(e)}
+    if result.returncode != 0:
+        return {"available": False, "lines": [], "error": (result.stderr or "journalctl başarısız oldu").strip()}
+    error_lines = [
+        line for line in result.stdout.splitlines()
+        if any(k in line.lower() for k in _ERROR_KEYWORDS)
+    ]
+    return {"available": True, "lines": error_lines[:max_lines]}
 
 
 def format_uptime_tr(seconds: float) -> str:

@@ -641,6 +641,28 @@
      diye TEK bir class'tan besleniyor. */
   .modal-panel h3 { margin: 0 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   .modal-panel .sub { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
+  /* #admin-panel'deki IKINCI h3 ("Hata Loglari", 2026-11-09'da eklendi) -
+     ilk h3 KURALININ (modal-box'in capraz butonuyla hizalanmasi icin
+     margin-top:0 ZORUNLU) tersine, bu BASLIKTAN SONRA gelen bir alt
+     bolum - #paper-trading h3 (panel icindeki ikinci-seviye baslik) ile
+     AYNI "ustten biraz bosluk birak" deseni. */
+  .modal-panel h3:not(:first-child) { margin-top: 16px; }
+
+  /* Hata loglari kutusu (2026-11-09'da eklendi, bkz. CLAUDE.md "journalctl
+     hata loglarini Yonetici Paneli'nde gosterme") - sabit yukseklikte,
+     kendi icinde kaydiran, monospace bir "terminal ciktisi" gorunumu -
+     #paper-cash-input/.criteria-edit'in rengini paylasirken (koyu arka plan)
+     journalctl ciktisinin dogal "log" hissini korur. */
+  #admin-logs {
+    max-height: 220px; overflow-y: auto; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+    font-family: "SF Mono", Consolas, Monaco, monospace; font-size: 11px;
+  }
+  .log-line {
+    padding: 3px 0; border-bottom: 1px solid #1d2029; color: var(--muted);
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .log-line:last-child { border-bottom: none; }
 
   /* --- Giris sayfasi (login.html) --- */
   #login-wrap {

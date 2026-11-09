@@ -606,6 +606,18 @@ def api_admin_status():
     ))
 
 
+@app.route("/api/admin/logs")
+@_login_required
+def api_admin_logs():
+    """Yonetici Paneli'ndeki "Hata Logları" bolumunun tek veri kaynagi -
+    gercek mantik admin.py: get_recent_error_logs()'ta (journalctl'e
+    SSH'lamadan son hata satirlarini gorebilmek icin, bkz. CLAUDE.md "Hisse
+    isaretleri"nden SONRAKI bolum). Lokal gelistirmede (systemd servisi
+    DEGIL) journalctl olmadigi icin {"available": false, ...} donebilir -
+    bu NORMAL, 500 hatasi DEGIL."""
+    return jsonify(admin.get_recent_error_logs())
+
+
 @app.route("/api/rows")
 def api_rows():
     _ensure_scanned_once()

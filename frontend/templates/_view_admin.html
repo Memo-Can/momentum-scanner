@@ -2,6 +2,9 @@
   <h3>Yönetici Paneli</h3>
   <div class="sub">Oturum açan kullanıcı: <b>{{ admin_username }}</b></div>
   <div id="admin-status">Yükleniyor...</div>
+  <h3 id="admin-logs-title">Hata Logları</h3>
+  <div class="sub">journalctl'deki son kayıtlardan "hata"/"uyarı" içeren satırlar - en yeni üstte. Sadece VPS'te (systemd servisi olarak çalışırken) kullanılabilir.</div>
+  <div id="admin-logs">Yükleniyor...</div>
 </div>
 
 <script>
@@ -54,8 +57,40 @@ async function refreshAdminStatus() {
   }
 }
 
+// Hata loglari (2026-11-09'da eklendi, kullanici istegi: "journalctl'deki
+// hata loglarini yonetim panelinde gostermek mumkun mu") - gercek mantik
+// admin.py: get_recent_error_logs()'ta (journalctl'e subprocess ile
+// SABIT/kullanici-girdisinden-BAGIMSIZ bir komutla erisir, bkz. orada).
+// Lokal gelistirmede (systemd servisi DEGIL) `available: false` donebilir -
+// bu bir HATA DEGIL, sadece "burada kullanilamaz" demek, panel COKMEZ.
+function renderAdminLogs(data) {
+  const wrap = document.getElementById('admin-logs');
+  if (!wrap) return;
+  if (!data.available) {
+    wrap.innerHTML = `<span class="sig-empty">Loglara buradan erişilemiyor (sadece VPS'te, systemd servisi olarak çalışırken kullanılabilir).</span>`;
+    return;
+  }
+  if (!data.lines || data.lines.length === 0) {
+    wrap.innerHTML = `<span class="sig-empty">Son kayıtlarda hata/uyarı bulunamadı.</span>`;
+    return;
+  }
+  wrap.innerHTML = data.lines.map(l => `<div class="log-line">${escapeHtml(l)}</div>`).join('');
+}
+
+async function refreshAdminLogs() {
+  const wrap = document.getElementById('admin-logs');
+  try {
+    const res = await fetch('/api/admin/logs');
+    if (!res.ok) { if (wrap) wrap.textContent = 'Loglar alınamadı.'; return; }
+    renderAdminLogs(await res.json());
+  } catch (e) {
+    if (wrap) wrap.textContent = 'Loglar alınamadı.';
+  }
+}
+
 function openAdminPanel() {
   refreshAdminStatus();
+  refreshAdminLogs();
   openInModal(document.getElementById('admin-panel'), 'modal-admin-panel');
 }
 
