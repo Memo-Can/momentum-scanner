@@ -1,8 +1,5 @@
-<div id="view-settings" hidden>
-  <section id="settings-panel">
-    <div id="settings-header">
-      <h2>Ayarlar</h2>
-    </div>
+<div id="view-settings" class="modal-panel" hidden>
+    <h3>Ayarlar</h3>
     <div class="sub">Sanal Al-Sat'ın otomatik alım/satım kararlarını ve Telegram sinyal bildirimlerini buradan kontrol edebilirsin.</div>
     <div id="criteria-edit">
       <div class="criteria-group">
@@ -33,7 +30,6 @@
       </div>
       <div class="sub" id="criteria-current"></div>
     </div>
-  </section>
 </div>
 
 <script>
@@ -88,6 +84,18 @@ async function refreshSettings() {
   }
 }
 
+// Ayarlar artik #view-settings'i tablo-wrap icinde bir "goruntu" olarak
+// DEGIL, Yonetici Paneli ile AYNI sekilde bir POPUP olarak aciyor
+// (2026-11-09'da degisti, bkz. CLAUDE.md "Ayarlar popup oldu") - header'daki
+// acilir menunun "Ayarlar" ogesi (_view_admin.html) bu fonksiyonu cagirir.
+// openInModal()/closeModal() (_view_graphic.html) zaten `hidden` tasiyan
+// elemanlari (admin-panel'de oldugu gibi) DOGRU ac/kapa yapiyor - #view-settings
+// de AYNI SEKILDE `hidden` basliyor, ek bir degisiklik gerekmedi.
+function openSettingsPanel() {
+  refreshSettings();
+  openInModal(document.getElementById('view-settings'), 'modal-settings-panel');
+}
+
 if (LOGGED_IN) {
   document.querySelectorAll('.criteria-buy, .criteria-sell, .criteria-notify').forEach(cb => {
     cb.addEventListener('change', () => { criteriaDirty = true; });
@@ -113,23 +121,5 @@ if (LOGGED_IN) {
     }
   });
 
-  // #settings-view-toggle butonu index.html'deki #market-tabs icinde, bu
-  // script'ten ONCE basildigi icin (sayfa yukaridan asagi parse edildigi
-  // icin) burada top-level (DOMContentLoaded'a SARILMAMIS) erisim guvenli -
-  // #paper-view-toggle'in KENDI dinleyicisiyle (_view_paper_trading.html)
-  // AYNI desen.
-  document.getElementById('settings-view-toggle').addEventListener('click', () => {
-    const isSettings = !document.getElementById('view-settings').hidden;
-    showView(isSettings ? 'stocks' : 'settings');
-  });
-
-  // showView()/REFRESH_SECONDS gibi ORTAK fonksiyon/sabitlere guvenen
-  // bootstrap cagrisi - DOMContentLoaded'a sarili (diger goruntulerin KENDI
-  // bootstrap'larinda oldugu gibi, bkz. CLAUDE.md "Frontend dosya bolunmesi"
-  // script-sirasi dersi).
-  document.addEventListener('DOMContentLoaded', () => {
-    refreshSettings();
-    setInterval(refreshSettings, REFRESH_SECONDS * 1000);
-  });
 }
 </script>

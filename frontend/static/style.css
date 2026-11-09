@@ -79,11 +79,16 @@
     -webkit-overflow-scrolling: touch;
   }
   table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+  /* Sutun genislikleri (2026-11-09'da biraz daha daraltildi, kullanici
+     istegi - tabloya zaman icinde cok sayida sutun eklendigi icin: Endeks/
+     1Y/Sinyal Zamani/GunStop-Hedef/SwStop-Hedef vb.) - yatay padding 10px'ten
+     7px'e, hucre metni 14px'ten (body'nin varsayilani) 13px'e dusuruldu. Dikey
+     padding/baslik font-size'i (okunabilirlik icin) DOKUNULMADI. */
   thead th {
     position: sticky; top: 0;
     background: var(--panel);
     text-align: right;
-    padding: 8px 10px;
+    padding: 8px 7px;
     font-size: 11px;
     color: var(--muted);
     border-bottom: 1px solid var(--border);
@@ -137,7 +142,7 @@
   thead th.left { text-align: left; }
   thead th.sorted { color: var(--text); }
   thead th .arrow { display: inline-block; width: 10px; font-size: 9px; color: var(--yellow); }
-  tbody td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #1d2029; }
+  tbody td { padding: 7px 7px; font-size: 13px; text-align: right; border-bottom: 1px solid #1d2029; }
   tbody td.left { text-align: left; font-weight: 600; }
   tbody tr { cursor: pointer; }
   /* (hover: hover) olmayan (dokunmatik) cihazlarda tiklama/secim sonrasi
@@ -195,9 +200,9 @@
   #paper-trading-header { margin-bottom: 4px; }
   #paper-trading h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   #paper-trading .sub { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
-  #paper-summary { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
-  #paper-summary .stat { font-size: 12px; color: var(--muted); }
-  #paper-summary .stat b { display: block; font-size: 16px; color: var(--text); margin-top: 2px; }
+  #paper-summary, #admin-status { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
+  #paper-summary .stat, #admin-status .stat { font-size: 12px; color: var(--muted); }
+  #paper-summary .stat b, #admin-status .stat b { display: block; font-size: 16px; color: var(--text); margin-top: 2px; }
   #paper-trading h3 { font-size: 13px; color: var(--muted); margin: 16px 0 8px; font-weight: 600; }
   /* Equity egrisi grafigi (2026-11-04'te eklendi) - #chart ile AYNI yukseklik
      mantigi (container'in GERCEK yuksekligi ResizeObserver ile grafige
@@ -231,16 +236,14 @@
   #paper-cash-msg { font-size: 12px; color: var(--muted); }
 
   /* --- Ayarlar ekrani (otomatik al/sat + Telegram kriterleri, 2026-11-06'da
-     ayri bir goruntuye/dosyaya tasindi, bkz. CLAUDE.md) - #paper-trading
-     panel goruntusuyle (yukarida) AYNI kutu/baslik stili, #indicator-toggles
-     (_view_graphic.html) ile AYNI checkbox deseni. */
-  #settings-panel {
-    margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: 16px 20px;
-  }
-  #settings-header { margin-bottom: 4px; }
-  #settings-panel h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
-  #settings-panel .sub { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
+     ayri bir goruntuye/dosyaya tasindi, 2026-11-09'da Yonetici Paneli gibi
+     bir POPUP oldu, bkz. CLAUDE.md "Ayarlar popup oldu") - baslik/alt-metin
+     stili artik kendi ID'siyle DEGIL, Yonetici Paneli ile PAYLASILAN
+     `.modal-panel` class'i uzerinden geliyor (asagida, "Popup panelleri
+     ORTAK baslik/alt-metin deseni" bolumunde) - ikisi arasinda CSS
+     farkliligi/capraz butonla hizasizlik OLMASIN diye (kullanici bildirdi,
+     2026-11-09). #indicator-toggles (_view_graphic.html) ile AYNI checkbox
+     deseni DEGISMEDI. */
   #criteria-edit { display: flex; flex-direction: column; gap: 6px; }
   .criteria-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
   .criteria-label { color: var(--muted); min-width: 150px; }
@@ -486,8 +489,8 @@
       max-height: 55vh;
       -webkit-overflow-scrolling: touch;
     }
-    thead th { padding: 7px 8px; font-size: 10px; }
-    tbody td { padding: 6px 8px; font-size: 12px; }
+    thead th { padding: 7px 6px; font-size: 10px; }
+    tbody td { padding: 6px 6px; font-size: 12px; }
     #side {
       width: 100%;
       flex: none;
@@ -525,7 +528,7 @@
   }
 
   @media (max-width: 420px) {
-    thead th, tbody td { padding: 5px 6px; }
+    thead th, tbody td { padding: 5px 5px; }
     #chart { height: 190px; }
     #pager-controls { gap: 4px; }
     #pager-controls .market-tab-btn { padding: 5px 7px; font-size: 10px; }
@@ -534,7 +537,12 @@
     .paper-note-input { width: 110px; }
   }
 
-  /* --- Giris/Cikis linki (header) --- */
+  /* --- Giris linki / kullanici adi butonu + acilir menu (header) --- */
+  /* Login olmayana <a href="/login">, login olana (2026-11-09'dan itibaren)
+     <button> - ikisi de AYNI gorsel "chip" stilini paylasiyor, SADECE buton
+     olani tiklaninca #auth-menu'yu ac/kapa yapiyor (bkz. _view_admin.html).
+     font-family/cursor, varsayilan <button> stillerinin <a>'dan FARKLI
+     gorunmesini (bazi tarayicilarda sistem fontu/ok imleci) onlemek icin. */
   #auth-link {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -542,9 +550,63 @@
     border-radius: 6px;
     padding: 7px 10px;
     font-size: 12px;
+    font-family: inherit;
     text-decoration: none;
+    cursor: pointer;
   }
   #auth-link:hover { color: var(--text); border-color: var(--yellow); }
+  /* Menu acikken buton "basili" gorunur - .market-tab-btn.active ile AYNI
+     renk konvansiyonu (diger toggle butonlarla gorsel dil tutarliligi). */
+  #auth-link.active { color: var(--text); border-color: var(--yellow); background: #1f2330; }
+
+  /* #auth-link'in actigi acilir menu (2026-11-09'da eklendi) - "Yonetici
+     Paneli"/"Ayarlar"/"Cikis Yap" secenekleri. #auth-menu-wrap'in
+     position:relative'i, #auth-menu'nun position:absolute ile DOGRUDAN
+     butonun altina (sag kenara hizali) oturmasini sagliyor - modal-overlay
+     gibi ayri bir koyu arka plan katmani YOK, disariya tiklaninca JS ile
+     kapatiliyor (bkz. _view_admin.html). */
+  #auth-menu-wrap { position: relative; }
+  #auth-menu {
+    position: absolute; top: calc(100% + 4px); right: 0; z-index: 70;
+    display: flex; flex-direction: column; min-width: 160px;
+    background: #1c2029; border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.45); overflow: hidden;
+  }
+  /* "display: flex" yukarida, yazar stil sayfasi olarak tarayicinin
+     varsayilan "[hidden] { display: none }" kuralini her zaman ezer -
+     .chart-status[hidden] ile AYNI gercek hata (bkz. yukarida o kural) -
+     JS'in menu.hidden=true yapmasinin GORSEL hicbir etkisi olmuyordu, menu
+     HER ZAMAN acik kaliyordu. Bu kural ozgulukle kazanip hidden iken
+     gercekten gizler (kullanici "menu hep acik, tiklayinca kapanmiyor"
+     diye bildirdi, 2026-11-09). */
+  #auth-menu[hidden] { display: none; }
+  #auth-menu button, #auth-menu a {
+    display: block; width: 100%; box-sizing: border-box;
+    background: none; border: none; color: var(--text);
+    font-family: inherit; font-size: 13px; text-decoration: none;
+    text-align: left; padding: 10px 14px; cursor: pointer;
+  }
+  #auth-menu button:hover, #auth-menu a:hover { background: #262b38; }
+  #auth-menu-logout { color: var(--red); border-top: 1px solid var(--border); }
+
+  /* --- Popup panelleri ORTAK baslik/alt-metin deseni (2026-11-09'da eklendi) ---
+     Yonetici Paneli (#admin-panel) VE Ayarlar (#view-settings) - ikisi de
+     SADECE #modal-overlay icinde popup olarak acilan panelller (bkz.
+     openInModal()) - `.modal-panel` class'ini PAYLASIYOR. Kullanici "css
+     farkliliklari var, ortak tasarimlari olmali, basliklar capraz (X)
+     butonuna paralel olmali" diye bildirdi (2026-11-09) - kok sebep: Ayarlar
+     bir ara kendi ID'li ic kutusunu (#settings-panel/#settings-header)
+     kaybetmisti ama CSS'teki o ID'lere bagli kurallar GUNCELLENMEMISTI,
+     bu yuzden Ayarlar'in basligi stilsiz (tarayici varsayilan h3 - buyuk
+     font + kendi margin-top'u) kaliyor, Yonetici Paneli'nden (kucuk/ozel
+     stilli h3) FARKLI goruniyor VE modal-box'in SABIT top:16px'teki
+     capraz butonuyla hizasiz kaliyordu (varsayilan h3 margin'i basligi
+     asagi itiyordu). `margin:0` ile baslik, modal-box'in padding-top'unun
+     (24px) HEMEN altinda baslar - capraz butonla (`top:16px`) ayni
+     yukseklige YAKIN/paralel kalir, ikisi arasinda BIR DAHA fark cikmasin
+     diye TEK bir class'tan besleniyor. */
+  .modal-panel h3 { margin: 0 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .modal-panel .sub { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
 
   /* --- Giris sayfasi (login.html) --- */
   #login-wrap {

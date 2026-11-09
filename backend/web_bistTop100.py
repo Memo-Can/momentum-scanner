@@ -27,6 +27,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+import admin
 import scanner_bistTop100 as scanner
 import settings
 import yfinance as yf
@@ -110,7 +111,14 @@ _state = {
     "rows": [],
     "missing_count": 0,
     "updated_at": None,
+    "last_scan_duration_seconds": None,
+    "last_scan_ticker_count": None,
 }
+
+# Admin paneli (bkz. /api/admin/status) icin servis calisma suresi - modul
+# import edildigi (= process (re)basladigi) anda sabitlenir. gunicorn TEK
+# worker (-w 1) ile calistigi icin bu, process uptime'iyla BIREBIR aynidir.
+_PROCESS_START_TIME = time.time()
 
 # Gercek taramayi (Yahoo'ya giden tum istekler) hem _scan_loop() hem
 # _ensure_scanned_once() cagirabilir - bu ikisinin AYNI ANDA, PARALEL
@@ -256,6 +264,7 @@ def _run_scan():
     GONDERILMEZ (skoru olmayan bir satir uzerinde islem/log mantigi
     calistirmanin anlami yok, ayrica score_history'yi gereksiz buyutmemek
     icin bilincli bir ayrim)."""
+    scan_started_at = time.time()
     bist30_symbols = {t.removesuffix(".IS") for t in scanner.BIST30_TICKERS}
     bist100_symbols = {t.removesuffix(".IS") for t in scanner.BIST100_TICKERS}
 
@@ -299,6 +308,7 @@ def _run_scan():
             # akisini ASLA bozmamali - kendi try/except'i icinde izole.
             print("Sanal al-sat (paper trading) hatasi:", e)
         _maybe_send_hourly_paper_report(top_rows)
+        _maybe_send_weekly_paper_report()
 
     # Birlesik havuzun DISINDAKI hisseler - sadece GORUNUR olmalari icin
     # ucuz bir toplu fiyat taramasiyla (~3 istek) iskelet satirlar
@@ -325,6 +335,8 @@ def _run_scan():
         _state["rows"] = [_row_to_json(r) for r in display_rows]
         _state["missing_count"] = missing_count
         _state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _state["last_scan_duration_seconds"] = time.time() - scan_started_at
+        _state["last_scan_ticker_count"] = len(all_tickers)
 
 
 def _scan_once():
@@ -362,6 +374,33 @@ def _maybe_send_hourly_paper_report(rows) -> None:
         scanner.send_paper_hourly_report(rows)
     except Exception as e:
         print("Saatlik Sanal Al-Sat raporu hatasi:", e)
+
+
+# Haftalik performans raporu (Sharpe/max drawdown/profit factor/BIST100
+# alfasi - bkz. CLAUDE.md "Equity performans metrikleri"/"BIST100 benchmark
+# karsilastirmasi") - saatlik raporla AYNI "hafta basina BIR KEZ" deseni,
+# SADECE "saat" yerine ISO hafta anahtari (%G-%V) kullaniyor. Restart'ta
+# None'a doner - bu yuzden her restart sonrasi (piyasa aciksa) ILK tarama
+# hemen bir rapor gonderir, saatlik raporla AYNI BEKLENEN/zararsiz yan etki.
+_last_paper_weekly_report_week_key = None
+
+
+def _maybe_send_weekly_paper_report() -> None:
+    """Haftanin ILK tarama dongusunde (piyasa aciksa) scanner.send_paper_weekly_report()
+    cagirir - equity performans metrikleri rows'tan BAGIMSIZ (get_paper_summary()
+    kendi icinde hesapliyor) oldugu icin, saatlik rapordan farkli olarak
+    parametre ALMAZ."""
+    global _last_paper_weekly_report_week_key
+    if not scanner.is_market_open():
+        return
+    week_key = datetime.now().strftime("%G-%V")
+    if week_key == _last_paper_weekly_report_week_key:
+        return
+    _last_paper_weekly_report_week_key = week_key
+    try:
+        scanner.send_paper_weekly_report()
+    except Exception as e:
+        print("Haftalik Sanal Al-Sat performans raporu hatasi:", e)
 
 
 # Ardisik kac basarisiz _scan_once() denemesinden sonra Telegram'a bir
@@ -455,6 +494,7 @@ def index():
         refresh_seconds=scanner.BIST_REFRESH_SECONDS,
         title="BIST Momentum Scanner",
         logged_in=_is_logged_in(),
+        admin_username=ADMIN_USERNAME,
     )
 
 
@@ -532,6 +572,25 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("index"))
+
+
+@app.route("/api/admin/status")
+@_login_required
+def api_admin_status():
+    """Yonetici Paneli popup'inin (bkz. _view_admin.html) tek veri kaynagi -
+    gercek hesaplama/bicimlendirme mantigi admin.py'de (bkz. o dosyanin modul
+    docstring'i - web_bistTop100.py'den BILINCLI AYRI, projenin okunurlugu
+    icin). Burada SADECE kendi bellek-ici state'imizi (_state/_scan_failure_count/
+    _scan_health_alert_sent/_PROCESS_START_TIME) toplayip admin.build_admin_status()'a
+    PARAMETRE olarak geciriyoruz - hicbir yeni Yahoo istegi/DB sorgusu YOK."""
+    with _state_lock:
+        state_snapshot = dict(_state)
+    return jsonify(admin.build_admin_status(
+        process_start_time=_PROCESS_START_TIME,
+        scan_state=state_snapshot,
+        scan_failure_count=_scan_failure_count,
+        scan_health_alert_active=_scan_health_alert_sent,
+    ))
 
 
 @app.route("/api/rows")
@@ -776,10 +835,21 @@ def api_paper_summary():
 @_login_required
 def api_paper_positions():
     """Su an acik olan sanal pozisyonlar - guncel fiyat/K-Z, son taramanin
-    _state['rows']'u ile (ekstra Yahoo istegi olmadan) zenginlestirilir."""
+    _state['rows']'u ile (ekstra Yahoo istegi olmadan) zenginlestirilir.
+    Skor/Skor Zamani da (2026-11-09'da eklendi, kullanici istegi: "sanal al
+    sat kisminda alinmis olan hisselerin yaninda skorlar da gorunsun") AYNI
+    _state['rows']'tan - rows zaten log_score_history()'den GECTIGI icin her
+    satirda row["score"]/row["score_since"] hazir, EK bir Yahoo/DB sorgusu
+    GEREKMEZ. Bu endpoint zaten @_login_required oldugu icin (sadece login
+    olan - tek admin hesabi - gorebilir) ayrica bir sinyal-bilgisi gizleme
+    katmani GEREKMIYOR (bkz. CLAUDE.md "Sinyal bilgisi artik login olmayan
+    kullaniciya gosterilmiyor" - o politika zaten login-only endpoint'leri
+    kapsamiyor)."""
     positions = scanner.get_paper_positions()
     with _state_lock:
         price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
+        score_by_ticker = {r["ticker"]: r.get("score") for r in _state["rows"]}
+        score_since_by_ticker = {r["ticker"]: r.get("score_since") for r in _state["rows"]}
 
     enriched = []
     for pos in positions:
@@ -790,9 +860,14 @@ def api_paper_positions():
             pnl = (current_price - pos["entry_price"]) * pos["shares"]
             if pos["allocation"]:
                 pnl_pct = pnl / pos["allocation"] * 100.0
-        enriched.append(
-            {**pos, "current_price": current_price, "unrealized_pnl": pnl, "unrealized_pnl_pct": pnl_pct}
-        )
+        enriched.append({
+            **pos,
+            "current_price": current_price,
+            "unrealized_pnl": pnl,
+            "unrealized_pnl_pct": pnl_pct,
+            "score": score_by_ticker.get(pos["ticker"]),
+            "score_since": score_since_by_ticker.get(pos["ticker"]),
+        })
     return jsonify(enriched)
 
 
@@ -974,6 +1049,8 @@ def api_paper_watchlist():
     watchlist = scanner.get_paper_watchlist()
     with _state_lock:
         price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
+        score_by_ticker = {r["ticker"]: r.get("score") for r in _state["rows"]}
+        score_since_by_ticker = {r["ticker"]: r.get("score_since") for r in _state["rows"]}
     # Kaynak farki YOK (auto ya da manual) - bir hisse ZATEN acik bir
     # pozisyondaysa (hangi yoldan acilmis olursa olsun) takip listesinde
     # "Al" butonu yerine "Pozisyon acik" gosterilmeli (2026-11-02'de
@@ -981,11 +1058,17 @@ def api_paper_watchlist():
     # tarafindan zaten alinmis bir hisse icin hala "Al" butonu gorunup
     # tekrar manuel alim yapilabiliyordu, bkz. CLAUDE.md).
     open_tickers = {p["ticker"] for p in scanner.get_paper_positions()}
+    # Skor/Skor Zamani (2026-11-09'da eklendi, kullanici istegi: "manuel
+    # takibe alinanlara da skor koy" - Acik Pozisyonlar'a eklenen AYNI
+    # alanlar, bkz. CLAUDE.md "Sanal Al-Sat acik pozisyonlarina Skor sutunu
+    # eklendi") - _state["rows"]'tan, EK bir Yahoo/DB sorgusu GEREKMEZ.
     enriched = [
         {
             **w,
             "current_price": price_by_ticker.get(w["ticker"]),
             "has_open_position": w["ticker"] in open_tickers,
+            "score": score_by_ticker.get(w["ticker"]),
+            "score_since": score_since_by_ticker.get(w["ticker"]),
         }
         for w in watchlist
     ]
@@ -1079,6 +1162,19 @@ def api_paper_report_test():
     })
 
 
+@app.route("/api/paper/weekly-report-test", methods=["GET", "POST"])
+@_login_required
+def api_paper_weekly_report_test():
+    """Haftalik performans raporunu (_maybe_send_weekly_paper_report()'un
+    hafta basina bir kez gonderdigi AYNI rapor) hafta sayacini BEKLEMEDEN
+    aninda gonderir - /api/paper/report-test ile AYNI gerekce/desen."""
+    text = scanner.send_paper_weekly_report()
+    return jsonify({
+        "telegram_configured": bool(scanner.TELEGRAM_BOT_TOKEN and scanner.TELEGRAM_CHAT_ID),
+        "text": text,
+    })
+
+
 # scanner_bistTop100 import edilirken DB/tablolar zaten hazirlandi (bkz.
 # scanner._init_db()). Arka plan tarama thread'leri modul SEVIYESINDE
 # baslatiliyor (fonksiyon/if __name__ icinde DEGIL) - boylece hem
@@ -1103,4 +1199,21 @@ if __name__ == "__main__":
     # 127.0.0.1: bu gelistirme sunucusu dogrudan disariya acik degil.
     # threaded=True: bir hisseye tiklandiginda ayni anda atilan 3 istek
     # (history/score-history/indicators) birbirini bloklamasin diye.
+    # TEMPLATES_AUTO_RELOAD: HTML/Jinja sablonlari (bu projede TUM JS de -
+    # ayri static/js/*.js dosyasi yok, bkz. CLAUDE.md "Frontend dosya bolunmesi" -
+    # buralarda, inline <script> olarak) her istekte DISKTEN TAZE okunsun diye
+    # (2026-11-09'da eklendi, kullanici istegi: "kod yazarken degisikligi
+    # aninda webde gorebilmek"). debug=True/use_reloader DEGIL - SADECE bu
+    # config acilarak, reloader'in getirdigi "her .py kaydinda TAM process
+    # restart + arka plan tarama thread'lerinin yeniden baslamasi (Yahoo'ya
+    # ekstra tarama)" maliyeti/riski ALINMADAN sablon/JS/HTML degisiklikleri
+    # aninda yansitiliyor. style.css (statik dosya) zaten her istekte diskten
+    # okunuyor, bu config'e ihtiyaci YOK - sadece TARAYICI onbellege alirsa
+    # (DevTools'ta "Disable cache" acikken bu olmaz) sert yenileme gerekebilir.
+    # Backend .py dosyalarindaki (scanner_bistTop100.py/web_bistTop100.py/
+    # settings.py/admin.py) degisiklikler ICIN HALA process'i manuel yeniden
+    # baslatmak gerekiyor - Python modulleri bir kez yuklenir, bunu otomatiklestirmek
+    # istersen app.run(..., debug=True) / use_reloader=True'yu dene, ama o
+    # her .py kaydinda TAM restart (+ ilk istekte yeniden tarama) tetikler.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

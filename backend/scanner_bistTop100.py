@@ -1405,6 +1405,59 @@ def send_paper_hourly_report(rows) -> str:
     return text
 
 
+def _format_pct_tr(v) -> str:
+    """fmtPct()'in (frontend) DUZ METIN karsiligi - Telegram raporu icin.
+    None/NaN icin '-' doner."""
+    if v is None or v != v:
+        return "-"
+    return f"{v:+.2f}%"
+
+
+def build_paper_weekly_report() -> str:
+    """Haftada bir (ilk tarama gunu) gonderilen, Sanal Al-Sat equity
+    performans metriklerini (bkz. CLAUDE.md "Equity performans metrikleri")
+    VE BIST100 benchmark karsilastirmasini (bkz. "BIST100 benchmark
+    karsilastirmasi") ozetleyen bir TELEGRAM mesaji - saatlik K/Z raporunun
+    (ANLIK acik pozisyon durumu) AKSINE, bu rapor get_paper_summary()'nin
+    dondurdugu "simdiye kadarki TUM surec" penceresindeki performansi bir
+    bakista gosterir - haftaya OZEL bir pencere hesaplanmiyor (Sharpe/
+    drawdown gibi metrikler zaten tum sureci kapsiyor, haftalik olan SADECE
+    bu raporun GONDERIM SIKLIGI)."""
+    s = get_paper_summary()
+    total_pct = (s["total_pnl"] / s["starting_balance"] * 100.0) if s["starting_balance"] else None
+    win_rate_text = "-" if s["win_rate"] is None else f"%{s['win_rate']:.0f}"
+    drawdown_pct_text = _format_pct_tr(-s["max_drawdown_pct"]) if s["max_drawdown_pct"] else _format_pct_tr(0.0)
+    sharpe_text = "-" if s["sharpe_ratio"] is None else f"{s['sharpe_ratio']:.2f}"
+    profit_factor_text = "-" if s["profit_factor"] is None else f"{s['profit_factor']:.2f}x"
+    avg_win_text = "-" if s["avg_win"] is None else f"{s['avg_win']:+,.0f} TL"
+    avg_loss_text = "-" if s["avg_loss"] is None else f"{s['avg_loss']:+,.0f} TL"
+    lines = [
+        f"📈 Haftalık Performans Raporu ({datetime.now().strftime('%Y-%m-%d')})",
+        "",
+        f"Toplam Değer: {s['equity']:,.0f} TL",
+        f"Toplam K/Z: {s['total_pnl']:+,.0f} TL ({_format_pct_tr(total_pct)})",
+        f"Açık Pozisyon: {s['open_positions']} / {s['max_positions']} | Kapanan İşlem: {s['closed_trades']} | Kazanma Oranı: {win_rate_text}",
+        "",
+        f"Maks. Drawdown: {s['max_drawdown']:,.0f} TL ({drawdown_pct_text})",
+        f"Sharpe Oranı: {sharpe_text}",
+        f"Profit Factor: {profit_factor_text}",
+        f"Ort. Kazanç/Kayıp: {avg_win_text} / {avg_loss_text}",
+        "",
+        f"BIST100 (Aynı Dönem): {_format_pct_tr(s['benchmark_return_pct'])}",
+        f"Alfa (BIST100'e Göre): {_format_pct_tr(s['alpha_pct'])}",
+    ]
+    return "\n".join(lines)
+
+
+def send_paper_weekly_report() -> str:
+    """build_paper_weekly_report()'u olusturup Telegram'a gonderir, metni
+    de geri dondurur - send_paper_hourly_report() ile AYNI desen (test
+    endpoint'i Telegram kurulu olmasa da metni gorebilsin diye)."""
+    text = build_paper_weekly_report()
+    _telegram_send(text)
+    return text
+
+
 def send_health_alert(text: str) -> None:
     """Tarama dongusunun kendi kendini izleyen basit saglik uyarisi -
     web_bistTop100.py: _scan_loop() ardisik birkac basarisiz _scan_once()

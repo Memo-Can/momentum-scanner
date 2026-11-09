@@ -322,10 +322,19 @@ function refitCharts() {
   });
 }
 
+// chart-group/score-history gibi elemanlar normal sayfa akisinda ZATEN
+// gorunur oldugu icin `hidden` hic tasimiyorlardi - ama admin-panel
+// (bkz. _view_admin.html) SADECE bu modal icinde gorunmesi gerektigi icin
+// normalde `hidden` ile baslar. `el.hidden`'i acip modalWasHidden'da
+// saklamak (2026-11-09'da eklendi), closeModal()'da GERI `hidden=true`
+// yapmamizi sagliyor - aksi halde eleman modal'dan cikince orijinal
+// (gizli olmasi gereken) yerine GORUNUR donerdi.
 function openInModal(el, extraClass) {
   if (modalActiveEl) closeModal();
   modalPlaceholder = document.createComment('modal-placeholder');
   el.replaceWith(modalPlaceholder);
+  el.dataset.modalWasHidden = el.hidden ? '1' : '';
+  el.hidden = false;
   const modalBody = document.getElementById('modal-body');
   modalBody.className = extraClass || '';
   modalBody.appendChild(el);
@@ -336,6 +345,10 @@ function openInModal(el, extraClass) {
 
 function closeModal() {
   if (!modalActiveEl || !modalPlaceholder) return;
+  if (modalActiveEl.dataset.modalWasHidden === '1') {
+    modalActiveEl.hidden = true;
+  }
+  delete modalActiveEl.dataset.modalWasHidden;
   modalPlaceholder.replaceWith(modalActiveEl);
   modalActiveEl = null;
   modalPlaceholder = null;

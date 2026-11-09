@@ -1,0 +1,104 @@
+<div id="admin-panel" class="modal-panel" hidden>
+  <h3>Yönetici Paneli</h3>
+  <div class="sub">Oturum açan kullanıcı: <b>{{ admin_username }}</b></div>
+  <div id="admin-status">Yükleniyor...</div>
+</div>
+
+<script>
+// Yonetici paneli + header'daki acilir menu (2026-11-09'da eklendi, aynı gun
+// bir revizyon gecirdi - bkz. CLAUDE.md "Admin dropdown menusu"). Kullanici
+// adi butonuna (#auth-link, index.html header'inda) tiklayinca #auth-menu
+// acilir/kapanir - menude 3 secenek: "Yonetici Paneli" (bu dosyadaki
+// #admin-panel'i #modal-overlay'da - zaten var olan buyutme mekanizmasi,
+// bkz. _view_graphic.html: openInModal()/closeModal() - acar), "Ayarlar"
+// (_view_settings.html: openSettingsPanel() cagirir - o da AYNI openInModal()
+// mekanizmasiyla #view-settings'i popup olarak acar, bkz. CLAUDE.md "Ayarlar
+// popup oldu") ve "Cikis Yap" (duz bir <a href="/logout">, index.html'de
+// zaten confirm() ile korunuyor).
+// Backend tarafi (Yonetici Paneli icerigi): GET /api/admin/status
+// (web_bistTop100.py, gercek mantik admin.py'de) - son tarama suresi/hisse
+// sayisi/ardisik hata/piyasa durumu gibi operasyonel bilgileri journalctl'e
+// SSH ile girmeden gorunur kilar.
+// Bu partial'in TAMAMI (HTML+script) yukarida Jinja kosulu ile zaten SADECE
+// login olana gonderiliyor - diger partial'lerle (_view_paper_trading.html/
+// _view_settings.html) AYNI desenle, asagidaki "if (LOGGED_IN)" sarmalamasi
+// bilerek EKSTRA bir savunma katmani, script sirasindan bagimsiz guvenli.
+if (LOGGED_IN) {
+
+function renderAdminStatus(data) {
+  const wrap = document.getElementById('admin-status');
+  if (!wrap) return;
+  const scanDurationText = (data.last_scan_duration_seconds === null || data.last_scan_duration_seconds === undefined)
+    ? '-' : `${data.last_scan_duration_seconds.toFixed(1)} sn`;
+  const failureCount = data.consecutive_scan_failures || 0;
+  wrap.innerHTML = `
+    <div class="stat">Piyasa Durumu<b class="${data.market_open ? 'pos' : 'neg'}">${data.market_open ? 'Açık' : 'Kapalı'}</b></div>
+    <div class="stat">Servis Çalışma Süresi<b>${escapeHtml(data.uptime_text || '-')}</b></div>
+    <div class="stat">Son Tarama<b title="${escapeHtml(data.last_scan_at || '')}">${fmtRelativeTime(data.last_scan_at)}</b></div>
+    <div class="stat">Tarama Süresi<b>${scanDurationText}</b></div>
+    <div class="stat">Taranan / Eksik Hisse<b>${data.last_scan_ticker_count ?? '-'} / ${data.last_scan_missing_count ?? '-'}</b></div>
+    <div class="stat">Ardışık Tarama Hatası<b class="${failureCount > 0 ? 'neg' : 'pos'}">${failureCount}</b></div>
+    <div class="stat">Sağlık Uyarısı<b class="${data.scan_health_alert_active ? 'neg' : 'pos'}">${data.scan_health_alert_active ? 'Aktif' : 'Yok'}</b></div>
+    <div class="stat">Telegram<b class="${data.telegram_configured ? 'pos' : 'neg'}">${data.telegram_configured ? 'Kurulu' : 'Kurulu Değil'}</b></div>
+  `;
+}
+
+async function refreshAdminStatus() {
+  const wrap = document.getElementById('admin-status');
+  try {
+    const res = await fetch('/api/admin/status');
+    if (!res.ok) { if (wrap) wrap.textContent = 'Durum bilgisi alınamadı.'; return; }
+    renderAdminStatus(await res.json());
+  } catch (e) {
+    if (wrap) wrap.textContent = 'Durum bilgisi alınamadı.';
+  }
+}
+
+function openAdminPanel() {
+  refreshAdminStatus();
+  openInModal(document.getElementById('admin-panel'), 'modal-admin-panel');
+}
+
+// #auth-link bir TOGGLE buton - acik/kapali durumu #auth-menu'nun hidden'i
+// KADAR DEGIL, butonun kendi gorsel "active" (basili) haliyle de belli
+// olmali (diger toggle butonlarin - #paper-view-toggle vb. - active class'i
+// ile AYNI konvansiyon, bkz. style.css .market-tab-btn.active).
+function closeAuthMenu() {
+  const menu = document.getElementById('auth-menu');
+  if (menu) menu.hidden = true;
+  const link = document.getElementById('auth-link');
+  if (link) link.classList.remove('active');
+}
+
+// #auth-link/#auth-menu HTML'i bu script'ten ONCE basildigi icin (header,
+// sayfanin en ustunde) burada top-level erisim guvenli - #paper-view-toggle'in
+// KENDI dinleyicisiyle AYNI gerekce.
+document.getElementById('auth-link').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById('auth-menu');
+  if (!menu) return;
+  const willOpen = menu.hidden;
+  menu.hidden = !willOpen;
+  e.currentTarget.classList.toggle('active', willOpen);
+});
+document.getElementById('auth-menu-admin').addEventListener('click', () => {
+  closeAuthMenu();
+  openAdminPanel();
+});
+document.getElementById('auth-menu-settings').addEventListener('click', () => {
+  closeAuthMenu();
+  openSettingsPanel();
+});
+// Menu disarisina (koyu arka plana tiklaninca modal'in kapanmasiyla AYNI
+// fikir) tiklaninca kapat - "Cikis Yap" linki kendi normal <a> davranisiyla
+// (confirm() + sayfa degisimi) zaten calisiyor, ayrica bir dinleyici GEREKMEZ.
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('auth-menu-wrap');
+  if (wrap && !wrap.contains(e.target)) closeAuthMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeAuthMenu();
+});
+
+}
+</script>

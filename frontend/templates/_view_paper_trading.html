@@ -31,6 +31,7 @@
           <thead>
             <tr>
               <th class="left">Hisse</th>
+              <th>Skor</th>
               <th>Güncel Fiyat</th>
               <th>Tutar (TL)</th>
               <th class="left">İşlem</th>
@@ -47,6 +48,7 @@
             <tr>
               <th class="left">Hisse</th>
               <th class="left">Kaynak</th>
+              <th>Skor</th>
               <th>Giriş Fiyatı</th>
               <th>Güncel Fiyat</th>
               <th>K/Z</th>
@@ -357,6 +359,7 @@ function renderPaperPositions(positions) {
     tr.innerHTML = `
       <td class="left">${escapeHtml(p.ticker)}</td>
       <td class="left">${PAPER_SOURCE_LABELS[p.source] || p.source}</td>
+      <td class="sym-${p.score}" title="${escapeHtml(fmtScoreSince(p.score_since))}">${SCORE_SYMBOLS[p.score] || p.score || '-'}</td>
       <td>${fmtPaperPrice(p.entry_price)}</td>
       <td>${fmtPaperPrice(p.current_price)}</td>
       <td class="${pctClass(p.unrealized_pnl)}">${fmtPaperMoney(p.unrealized_pnl)} (${fmtPct(p.unrealized_pnl_pct)})</td>
@@ -506,13 +509,14 @@ function renderPaperWatchlist(items) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="left" style="cursor:pointer">${escapeHtml(w.ticker)}</td>
+      <td class="sym-${w.score}" title="${escapeHtml(fmtScoreSince(w.score_since))}">${SCORE_SYMBOLS[w.score] || w.score || '-'}</td>
       <td>${fmtPaperPrice(w.current_price)}</td>
       <td></td>
       <td class="left"></td>
     `;
     tr.children[0].onclick = () => openTickerFromPaper(w.ticker);
-    const amountTd = tr.children[2];
-    const actionTd = tr.children[3];
+    const amountTd = tr.children[3];
+    const actionTd = tr.children[4];
 
     if (w.has_open_position) {
       amountTd.textContent = '-';
