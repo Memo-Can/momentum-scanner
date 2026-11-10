@@ -19,14 +19,19 @@ AYNI mimari ilke, SADECE Ayarlar ekranina ozel/daha kucuk olceginde)."""
 
 import scanner_bist as scanner
 
-# Kullanicinin secebilecegi TEK gecerli etiket kumeleri - AL tarafinda NOTR/SAT
-# etiketlerinin, SAT tarafinda NOTR/AL etiketlerinin secilmesi anlamsiz
-# oldugu icin (otomatik alim/satim SADECE bu yonlere ozgu bir strateji)
-# kasitli olarak sinirlandirildi. "STOP"/"TARGET" GERCEK skor etiketleri
-# DEGIL - fiyat-bazli stop-loss/hedef kontrolunu (scanner.run_paper_trading_cycle())
-# ac/kapa yapan birer SAHTE ("pseudo") etiket.
+# Kullanicinin secebilecegi TEK gecerli etiket kumeleri - AL tarafinda SAT
+# etiketlerinin secilmesi anlamsiz oldugu icin (otomatik alim SADECE bu yone
+# ozgu bir strateji) kasitli olarak sinirlandirildi. "STOP"/"TARGET" GERCEK
+# skor etiketleri DEGIL - fiyat-bazli stop-loss/hedef kontrolunu
+# (scanner.run_paper_trading_cycle()) ac/kapa yapan birer SAHTE ("pseudo")
+# etiket. "NOTR" SAT tarafina 2026-11-10'da eklendi (kullanici istegi:
+# "ayarlarda otomatik sat kriterine notr kriterini de ekleyelim") - secilirse
+# skoru NOTR'e DONEN (GUCLU_AL/AL'dan dusen) bir pozisyon da otomatik
+# satilir. VARSAYILAN olarak (_DEFAULT_SELL_ZONE, scanner_bist.py)
+# SECILI DEGIL - bu DAVRANIS DEGISIKLIGI mevcut hesaplari ETKILEMEZ, kullanici
+# Ayarlar'dan ELLE isaretlerse devreye girer.
 PAPER_BUY_CRITERIA_OPTIONS = ("AL", "GUCLU_AL", "MUTLAK_AL")
-PAPER_SELL_CRITERIA_OPTIONS = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "STOP", "TARGET")
+PAPER_SELL_CRITERIA_OPTIONS = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "NOTR", "STOP", "TARGET")
 # Genel SKOR sinyali Telegram bildirimini (scanner._send_push_notifications,
 # 🟢/🔴 ile gelen "X hissesi GUCLU AL'a gecti" mesajlari) tetikleyen etiketler -
 # otomatik alim/satim kriterinden (PAPER_BUY_CRITERIA_OPTIONS/PAPER_SELL_CRITERIA_OPTIONS)

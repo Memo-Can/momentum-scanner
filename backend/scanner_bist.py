@@ -1877,12 +1877,23 @@ def run_paper_trading_cycle(rows) -> None:
 
                 price = row["price"]
                 exit_reason = None
+                # "Sorunlu" (SIKINTILI) isaretli bir hissede OTOMATIK satim da
+                # tamamen durur (2026-11-10'da eklendi, kullanici istegi:
+                # "hisse sorunlu olarak isaretlendiyse otomatik alim satim
+                # yapmasin" - AskUserQuestion ile netlestirildi: kaynak
+                # (auto/manual) farki YOK, ikisi de kapsanir). Otomatik alim
+                # zaten candidate dongusunde ayriyeten engelleniyor (bkz.
+                # yukarida). Kullanici "Sat" butonuyla (manual_sell()) HER
+                # ZAMAN elle kapatabilir - bu kontrolden GECMEZ, bu yuzden
+                # etkilenmez.
+                if row.get("ticker_flag") == "SIKINTILI":
+                    pass
                 # "STOP"/"TARGET" kullanicinin sell_criteria'dan kaldirabildigi
                 # SAHTE etiketler (2026-11-06'da eklendi) - kapatilirsa o
                 # mekanizma TAMAMEN devre disi kalir (auto/manual farki yok -
                 # manual_buy() 2026-11-10'dan itibaren ATR verisi varsa GERCEK
                 # bir stop_price/target_price yaziyor, yoksa hala NULL).
-                if "STOP" in sell_zone and pos["stop_price"] is not None and price <= pos["stop_price"]:
+                elif "STOP" in sell_zone and pos["stop_price"] is not None and price <= pos["stop_price"]:
                     exit_reason = "stop"
                 elif "TARGET" in sell_zone and pos["target_price"] is not None and price >= pos["target_price"]:
                     exit_reason = "target"

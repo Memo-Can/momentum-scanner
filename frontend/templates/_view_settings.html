@@ -10,6 +10,7 @@
       </div>
       <div class="criteria-group">
         <span class="criteria-label">Otomatik Satış Kriteri:</span>
+        <label title="Skor, GÜÇLÜ AL/AL gibi bir alım bölgesinden NÖTR'e dönerse de satar."><input type="checkbox" class="criteria-sell" value="NOTR"> NÖTR</label>
         <label><input type="checkbox" class="criteria-sell" value="SAT"> SAT</label>
         <label><input type="checkbox" class="criteria-sell" value="GUCLU_SAT"> GÜÇLÜ SAT</label>
         <label><input type="checkbox" class="criteria-sell" value="MUTLAK_SAT"> MUTLAK SAT</label>
@@ -44,7 +45,7 @@
 // script-sirasi dersi).
 const CRITERIA_LABELS = {
   AL: 'AL', GUCLU_AL: 'GÜÇLÜ AL', MUTLAK_AL: 'MUTLAK AL',
-  SAT: 'SAT', GUCLU_SAT: 'GÜÇLÜ SAT', MUTLAK_SAT: 'MUTLAK SAT',
+  NOTR: 'NÖTR', SAT: 'SAT', GUCLU_SAT: 'GÜÇLÜ SAT', MUTLAK_SAT: 'MUTLAK SAT',
   STOP: 'Stop', TARGET: 'Hedef',
 };
 let criteriaDirty = false;
