@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""scanner_bistTop100.py'nin urettigi veriyi terminalde renkli bir tablo
+"""scanner_bist.py'nin urettigi veriyi terminalde renkli bir tablo
 olarak gosterir - is katmani (veri cekme/indikator/skorlama) OLDUGU GIBI
 kullanilir, bu dosya sadece terminale ozel sunum (render/renk/ses/dongu)
-katmanidir. web_bistTop100.py'nin ayni is katmanini web icin nasil
+katmanidir. web_bist.py'nin ayni is katmanini web icin nasil
 sundugunun terminal karsiligidir.
 
 Calistirmak icin (proje kok dizininden):
-    python3 terminal_bistTop100.py
+    python3 terminal_bist.py
 
 Her BIST_REFRESH_SECONDS (300sn / 5dk) saniyede bir hem tarayici listesi hem de
 getiriler Yahoo Finance'ten yeniden cekilip terminal yenilenir.
@@ -65,7 +65,7 @@ import sys
 import time
 from datetime import datetime
 
-import scanner_bistTop100 as scanner
+import scanner_bist as scanner
 
 SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 BEEP_SOUND = os.path.join(SOUND_DIR, "al_beep.wav")
@@ -207,7 +207,7 @@ def render(rows, missing_count: int = 0):
 
 def main():
     """Web arayuzundeki BIST 30/100/300 sekmelerinin ayni ortak havuzunu
-    kullanir (bkz. scanner_bistTop100.py modul aciklamasi) - sinyal/skor
+    kullanir (bkz. scanner_bist.py modul aciklamasi) - sinyal/skor
     gecmisi loglari boylece web ile tutarli kalir. Terminalde sekme olmadigi
     icin varsayilan gorunum olarak sadece BIST 100 gosterilir."""
     bist100_symbols = {t.removesuffix(".IS") for t in scanner.BIST100_TICKERS}

@@ -3,7 +3,7 @@
 SELECT sonuclarini tablo olarak yazdirir, INSERT/UPDATE/DELETE'i commit edip
 kac satirin etkilendigini yazdirir. VS Code SQLite eklentisi calismadiginda
 (ya da VPS'te SSH uzerinden rapor/duzeltme gerektiginde) sqlite3 CLI'a
-alternatif olarak kullanilir - scanner_bistTop100.get_db_connection() ile
+alternatif olarak kullanilir - scanner_bist.get_db_connection() ile
 AYNI DB/WAL ayarlarini kullanir, elle bir DB yolu tanimlamaz.
 
 Kullanim:
@@ -16,7 +16,7 @@ bir degisiklikten once ilgili satirlari SELECT ile once gorup onaylayin.
 
 import sys
 
-import scanner_bistTop100 as scanner
+import scanner_bist as scanner
 
 
 def main():

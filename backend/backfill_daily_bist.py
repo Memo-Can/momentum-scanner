@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """BIST evrenindeki (region=tr, filtresiz) TUM hisseler icin GUNLUK bazda
 GECMISE DONUK Skor gecmisi olusturan TEK SEFERLIK bir backfill script'i.
-Canli tarama dongusunun (web_bistTop100.py/terminal_bistTop100.py) bir
-parcasi degildir, elle calistirilir - scanner_bistTop100.py'deki mevcut
+Canli tarama dongusunun (web_bist.py/terminal_bist.py) bir
+parcasi degildir, elle calistirilir - scanner_bist.py'deki mevcut
 indikator/skor fonksiyonlarini (OLDUGU GIBI) yeniden kullanir.
 
 NOT (2026-10-31): Confluence skoru artik 5 bilesenden olusuyor (signal_5m
@@ -22,7 +22,7 @@ bir calistirma yapilmissa, sonra 365 gunle calistirinca SADECE aradaki eksik
 ~100 gun (+ varsa yeni islem gunleri) eklenir, 265 gunluk kisim YENIDEN
 hesaplanip YAZILMAZ.
 
-Yazilan hedef (backend/data/momentum_scanner.db, scanner_bistTop100.py'nin
+Yazilan hedef (backend/data/momentum_scanner.db, scanner_bist.py'nin
 SQLite veritabani - eskiden iki ayri backfill CSV'si idi):
   score_history tablosu, source='backfill'  - eksik olan her (tarih, ticker) icin bir skor satiri
   signal_log tablosu, source='backfill'     - yeni eklenen gunler icindeki GUCLU_AL/SAT/MUTLAK
@@ -39,7 +39,7 @@ from datetime import datetime, timedelta
 
 import yfinance as yf
 
-import scanner_bistTop100 as scanner
+import scanner_bist as scanner
 
 BACKFILL_DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 365
 BACKFILL_START = (datetime.now() - timedelta(days=BACKFILL_DAYS)).strftime("%Y-%m-%d")

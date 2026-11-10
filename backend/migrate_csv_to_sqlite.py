@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """TEK SEFERLIK migrasyon script'i: backend/data/ altindaki eski CSV
 dosyalarini (score_history_bist[_backfill].csv, signal_log_bist[_backfill].csv)
-scanner_bistTop100.py'nin SQLite veritabanina (backend/data/momentum_scanner.db)
+scanner_bist.py'nin SQLite veritabanina (backend/data/momentum_scanner.db)
 aktarir. Her iki ortamda (yerel + VPS) BIR KEZ calistirilir.
 
 Ne yapar:
-  1. scanner_bistTop100 import edilir (DB/tablolar otomatik olusur).
+  1. scanner_bist import edilir (DB/tablolar otomatik olusur).
   2. Hedef tablolarda zaten satir varsa DURUR (--force verilmeden tekrar
      calistirip veri cakismasini/duplikasyonunu onlemek icin).
   3. 4 CSV dosyasini okur, source='live'/'backfill' etiketiyle DB'ye yazar.
@@ -22,7 +22,7 @@ import csv
 import os
 import sys
 
-import scanner_bistTop100 as scanner
+import scanner_bist as scanner
 
 FORCE = "--force" in sys.argv
 

@@ -2,22 +2,22 @@
 kullanicinin elle sectigi otomatik al/sat kriterleri VE Telegram SKOR
 sinyali bildirim kriterini okur/yazar. Dogrudan calistirilmaz.
 
-Bu dosya BILINCLI olarak scanner_bistTop100.py'den AYRI - kullanici "otomatik
+Bu dosya BILINCLI olarak scanner_bist.py'den AYRI - kullanici "otomatik
 alim satim kriterleriyle telegram mesaj kriterlerini birbirinden ayiralim,
-bu akisi isleyen backend dosyasi settings.py olmali" dedi. scanner_bistTop100.py'nin
+bu akisi isleyen backend dosyasi settings.py olmali" dedi. scanner_bist.py'nin
 get_db_connection()/_DB_LOCK'unu kullanmak icin BU dosyayi import eder - ters
-yonde bir import (scanner_bistTop100.py'nin bunu import etmesi) DAIRESEL
-olurdu, bu yuzden scanner_bistTop100.py bu dosyayi HIC import ETMEZ (kriter
+yonde bir import (scanner_bist.py'nin bunu import etmesi) DAIRESEL
+olurdu, bu yuzden scanner_bist.py bu dosyayi HIC import ETMEZ (kriter
 okuyan 3 yer - run_paper_trading_cycle()/_send_push_notifications()/
 get_paper_summary() - paper_account sutunlarini DOGRUDAN SQL ile okur,
 buradaki fonksiyonlari CAGIRMAZ).
 
-web_bistTop100.py bu modulu import edip /api/settings/criteria route'unu
-buradaki fonksiyonlara delege eder (web_bistTop100.py "WEB sunum katmani",
-bu dosya "is katmani" - scanner_bistTop100.py/web_bistTop100.py ayrimiyla
+web_bist.py bu modulu import edip /api/settings/criteria route'unu
+buradaki fonksiyonlara delege eder (web_bist.py "WEB sunum katmani",
+bu dosya "is katmani" - scanner_bist.py/web_bist.py ayrimiyla
 AYNI mimari ilke, SADECE Ayarlar ekranina ozel/daha kucuk olceginde)."""
 
-import scanner_bistTop100 as scanner
+import scanner_bist as scanner
 
 # Kullanicinin secebilecegi TEK gecerli etiket kumeleri - AL tarafinda NOTR/SAT
 # etiketlerinin, SAT tarafinda NOTR/AL etiketlerinin secilmesi anlamsiz

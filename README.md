@@ -21,12 +21,12 @@ Her 5 dakikada bir Yahoo Finance'ten BIST hisse verisi çekilip; EMA(9/21), MACD
 
 ```
 backend/                 → Flask API + tarama/indikator/skor mantığı + terminal arayüzü
-  scanner_bistTop100.py     veri çekme, indikatör/skor hesaplama, CSV loglama (iş katmanı)
-  web_bistTop100.py         Flask web sunucusu (aktif deploy edilen)
-  terminal_bistTop100.py    terminal arayüzü
-  backfill_daily_bist.py    geçmişe dönük günlük skor backfill (elle, tek seferlik)
-  data/                     momentum_scanner.db (SQLite, git'e dahil değil)
-  diger-piyasalar/          kapsam dışı (US/Crypto scanner denemeleri)
+  scanner_bist.py        veri çekme, indikatör/skor hesaplama, CSV loglama (iş katmanı)
+  web_bist.py            Flask web sunucusu (aktif deploy edilen)
+  terminal_bist.py       terminal arayüzü
+  backfill_daily_bist.py geçmişe dönük günlük skor backfill (elle, tek seferlik)
+  data/                  momentum_scanner.db (SQLite, git'e dahil değil)
+  diger-piyasalar/       kapsam dışı (US/Crypto scanner denemeleri)
 frontend/
   templates/index.html     tek sayfalık web UI
   static/                  favicon + bildirim sesleri
@@ -41,7 +41,7 @@ cd momentum-scanner
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
-python backend/web_bistTop100.py
+python backend/web_bist.py
 ```
 
 Tarayıcıda `http://127.0.0.1:5000` adresini aç.

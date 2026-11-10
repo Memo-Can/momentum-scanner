@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""scanner_bistTop100.py'nin canli verisini yerel bir web arayuzunde gosterir.
+"""scanner_bist.py'nin canli verisini yerel bir web arayuzunde gosterir.
 
-Mevcut scanner_bistTop100 modulunun tum tarama/indikator mantigini (fetch_row,
+Mevcut scanner_bist modulunun tum tarama/indikator mantigini (fetch_row,
 fetch_with_retry, confluence_label vb.) OLDUGU GIBI yeniden kullanir - burada
 sadece bu veriyi bir arka plan thread'inde BIST_REFRESH_SECONDS'ta bir tazeleyip
 basit bir JSON API + HTML sayfasi uzerinden sunuyoruz. Tarama mantigi
 degismedi, sadece terminal yerine tarayicida gosteriliyor.
 
 Lokal gelistirme icin calistirmak:
-    python3 web_bistTop100.py
+    python3 web_bist.py
 Sonra tarayicida: http://127.0.0.1:5000
 
 Production'da (VPS) artik gunicorn kullaniliyor (bkz. CLAUDE.md "Deploy
 sureci" - TEK worker VE yuksek timeout ZORUNLU, nedeni orada aciklaniyor):
-    gunicorn -w 1 --worker-class gthread --threads 4 --timeout 180 -b 127.0.0.1:5000 web_bistTop100:app
+    gunicorn -w 1 --worker-class gthread --threads 4 --timeout 180 -b 127.0.0.1:5000 web_bist:app
 
 Sayfa acikken tablo BIST_REFRESH_SECONDS'a yakin bir surede kendiliginden
 yenilenir (JS polling ile /api/rows'a istek atar). Bir hisseye tiklayinca
@@ -28,7 +28,7 @@ import time
 from datetime import datetime, timedelta
 
 import admin
-import scanner_bistTop100 as scanner
+import scanner_bist as scanner
 import settings
 import yfinance as yf
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -192,7 +192,7 @@ def _strip_signal_fields_from_indicators(data: dict) -> dict:
     return {k: v for k, v in data.items() if k not in _SIGNAL_ONLY_INDICATOR_FIELDS}
 
 
-# Grafik/indikator/skor-gecmisi endpoint'leri icin onbellek - scanner_bistTop100.py'deki
+# Grafik/indikator/skor-gecmisi endpoint'leri icin onbellek - scanner_bist.py'deki
 # _benchmark_cache ile AYNI desen (TTL = BIST_REFRESH_SECONDS-5). Bir hisse zaten
 # secilip verisi cekildiyse, ayni hisseye kisa surede tekrar tiklandiginda
 # (ya da farkli bir tarayicidan ayni hisseye bakildiginda) Yahoo'ya tekrar
@@ -253,7 +253,7 @@ def _run_scan():
     acquire() etmek kilitlenir/deadlock olur).
 
     BIST 30/100/300 sekmelerinin ortak veri havuzunu hazirlar - bkz.
-    scanner_bistTop100.py modul aciklamasi: BIST100 (BIST30'u da kapsar) +
+    scanner_bist.py modul aciklamasi: BIST100 (BIST30'u da kapsar) +
     gunluk % degisime gore ilk TOP300_SIZE hisse, cakisanlar tekrar
     cekilmez. Her satir bist30/bist100 uyelik bayraklariyla etiketlenir -
     BIST 300 sekmesi ayrica bir bayrak gerektirmez, tum havuz zaten odur.
@@ -592,7 +592,7 @@ def logout():
 def api_admin_status():
     """Yonetici Paneli popup'inin (bkz. _view_admin.html) tek veri kaynagi -
     gercek hesaplama/bicimlendirme mantigi admin.py'de (bkz. o dosyanin modul
-    docstring'i - web_bistTop100.py'den BILINCLI AYRI, projenin okunurlugu
+    docstring'i - web_bist.py'den BILINCLI AYRI, projenin okunurlugu
     icin). Burada SADECE kendi bellek-ici state'imizi (_state/_scan_failure_count/
     _scan_health_alert_sent/_PROCESS_START_TIME) toplayip admin.build_admin_status()'a
     PARAMETRE olarak geciriyoruz - hicbir yeni Yahoo istegi/DB sorgusu YOK."""
@@ -656,7 +656,7 @@ def api_set_ticker_flag(ticker: str):
     # _state["rows"]'daki ilgili satiri da DOGRUDAN guncelliyoruz - degisiklik
     # bir sonraki tarama dongusunu (en fazla 5 dakika) beklemeden, HEMEN
     # bir sonraki /api/rows isteginde yansisin diye (scanner.set_ticker_flag()
-    # SADECE kendi cache'ini/DB'yi gunceller, _state web_bistTop100.py'de).
+    # SADECE kendi cache'ini/DB'yi gunceller, _state web_bist.py'de).
     with _state_lock:
         for r in _state["rows"]:
             if r["ticker"] == ticker:
@@ -708,7 +708,7 @@ def _get_raw_history(ticker: str):
 # COZUNURLUGU hep gunluk kalir, SADECE gorunen pencere genisler/daralir
 # (TradingView/Yahoo'nun standart "1A 3A 6A 1Y" butonlari gibi - gercek
 # aylik/ceyreklik RESAMPLE edilmis mum DEGIL, kullaniciyla konusulup
-# netlestirildi). Islem gunu sayilari scanner_bistTop100.py'deki
+# netlestirildi). Islem gunu sayilari scanner_bist.py'deki
 # MONTHLY_LOOKBACK_DAYS/YEARLY_LOOKBACK_DAYS'ten ("~1 ay = 21 islem gunu"
 # kurali) turetildi - ayri bir sabit uydurulmadi, tutarlilik icin oradaki
 # tanimlar carpilarak kullanildi. _get_raw_history() artik HER ZAMAN 1
@@ -1040,7 +1040,7 @@ def api_settings_criteria():
     """Ayarlar ekraninin (frontend/templates/_view_settings.html) backend
     ucu - otomatik alim/satimi VE (BAGIMSIZ, bkz. CLAUDE.md) Telegram SKOR
     sinyali bildirimini tetikleyen kriter kumelerini okur/yazar. Is mantigi
-    settings.py'de (bkz. o dosyanin modul docstring'i - scanner_bistTop100.py'den
+    settings.py'de (bkz. o dosyanin modul docstring'i - scanner_bist.py'den
     BILEREK AYRI).
 
     GET: settings.get_paper_criteria()'yi dondurur.
@@ -1252,11 +1252,11 @@ def api_paper_weekly_report_test():
     })
 
 
-# scanner_bistTop100 import edilirken DB/tablolar zaten hazirlandi (bkz.
+# scanner_bist import edilirken DB/tablolar zaten hazirlandi (bkz.
 # scanner._init_db()). Arka plan tarama thread'leri modul SEVIYESINDE
 # baslatiliyor (fonksiyon/if __name__ icinde DEGIL) - boylece hem
-# "python3 web_bistTop100.py" ile dogrudan calistirmada (asagidaki
-# __main__ bloğu) HEM DE "gunicorn web_bistTop100:app" ile (2026-11-02'de
+# "python3 web_bist.py" ile dogrudan calistirmada (asagidaki
+# __main__ bloğu) HEM DE "gunicorn web_bist:app" ile (2026-11-02'de
 # Flask'in gelistirme sunucusu yerine gecildi, bkz. CLAUDE.md "Deploy
 # sureci" - Werkzeug dev sunucusu production icin tasarlanmamis) import
 # edildiginde thread'ler calismaya baslar - gunicorn __main__ bloğunu HIC
@@ -1264,14 +1264,14 @@ def api_paper_weekly_report_test():
 # (-w 1) ile calistirilmali: birden fazla worker, her biri kendi
 # _scan_loop/_market_scan_loop kopyasini baslatip Yahoo'ya KAT KAT istek
 # atar VE her worker'in kendi bellek-ici _state/_chart_cache/_paper_last_score
-# kopyasi birbirinden habersiz kalir (bkz. scanner_bistTop100.py'deki
+# kopyasi birbirinden habersiz kalir (bkz. scanner_bist.py'deki
 # modul-seviyesi state'ler) - bu TEK process/TEK worker varsayimiyla
 # tasarlandi, degistirilmemeli.
 threading.Thread(target=_scan_loop, daemon=True).start()
 threading.Thread(target=_market_scan_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    # Sadece LOKAL gelistirme icin (python3 web_bistTop100.py) - production'da
+    # Sadece LOKAL gelistirme icin (python3 web_bist.py) - production'da
     # (VPS) artik gunicorn kullaniliyor, bu satir hic calismaz (bkz. yukarida).
     # 127.0.0.1: bu gelistirme sunucusu dogrudan disariya acik degil.
     # threaded=True: bir hisseye tiklandiginda ayni anda atilan 3 istek
@@ -1287,7 +1287,7 @@ if __name__ == "__main__":
     # aninda yansitiliyor. style.css (statik dosya) zaten her istekte diskten
     # okunuyor, bu config'e ihtiyaci YOK - sadece TARAYICI onbellege alirsa
     # (DevTools'ta "Disable cache" acikken bu olmaz) sert yenileme gerekebilir.
-    # Backend .py dosyalarindaki (scanner_bistTop100.py/web_bistTop100.py/
+    # Backend .py dosyalarindaki (scanner_bist.py/web_bist.py/
     # settings.py/admin.py) degisiklikler ICIN HALA process'i manuel yeniden
     # baslatmak gerekiyor - Python modulleri bir kez yuklenir, bunu otomatiklestirmek
     # istersen app.run(..., debug=True) / use_reloader=True'yu dene, ama o

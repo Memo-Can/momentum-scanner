@@ -1,4 +1,4 @@
-"""scanner_bistTop100.py'deki saf (yan etkisiz) fonksiyonlar icin birim
+"""scanner_bist.py'deki saf (yan etkisiz) fonksiyonlar icin birim
 testler - Yahoo/ag/DB erismesi gerektirmeyen mantik (skor esikleri, yuzde
 degisim, piyasa saati) hedeflenir. Amac: confluence_label/SCORE_ORDER gibi
 CLAUDE.md'de "tutarlilik kontrolu yapilan TUM yerler" diye tek tek elle
@@ -15,7 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-import scanner_bistTop100 as scanner  # noqa: E402
+import scanner_bist as scanner  # noqa: E402
 
 
 class ConfluenceLabelBoundaryTests(unittest.TestCase):

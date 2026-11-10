@@ -11,9 +11,9 @@ TEKRAR CEKILMEZ) - boylece TUM piyasayi (~600+ hisse) taramak yerine en
 fazla ~100+300=400 farklı hisse cekilir, Yahoo'nun resmi olmayan API'sinin
 rate-limit riskini azaltir. Her hisse icin EMA/MACD/RSI/Bollinger/ADX/ATR
 indikatorleri hesaplanip tek bir Skor'a (-5..+5, MUTLAK_AL..MUTLAK_SAT - bkz.
-confluence_label) birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bistTop100.py
-(terminal arayuzu) ve web_bistTop100.py (web arayuzu) bu modulu
-`import scanner_bistTop100 as scanner` ile kullanip kendi sunumlarini yapar.
+confluence_label) birlestirilir. Bu modul dogrudan calistirilmaz - terminal_bist.py
+(terminal arayuzu) ve web_bist.py (web arayuzu) bu modulu
+`import scanner_bist as scanner` ile kullanip kendi sunumlarini yapar.
 
 Her BIST_REFRESH_SECONDS (300sn / 5dk) saniyede bir veri Yahoo Finance'ten
 yeniden cekilir.
@@ -74,11 +74,11 @@ TOP300_SIZE = 300  # BIST 300 sekmesi: gunluk % degisime gore ilk N (dinamik, en
 
 
 def is_market_open(now=None) -> bool:
-    """BIST hisse tarama dongusunun (web_bistTop100.py: _scan_loop(), bkz.
+    """BIST hisse tarama dongusunun (web_bist.py: _scan_loop(), bkz.
     oradaki cagri) Yahoo'ya istek atmasi icin "piyasa acik" sayilan an mi -
     hafta ici (Pazartesi-Cuma) VE app_settings.json'daki BIST_MARKET_OPEN_*/
     BIST_MARKET_CLOSE_* penceresi icindeyse True. Market seridi (doviz/emtia/
-    kripto, web_bistTop100.py: _market_scan_loop()) buna BAKMAZ - o
+    kripto, web_bist.py: _market_scan_loop()) buna BAKMAZ - o
     enstrumanlar BIST disi saatlerde de islem goruyor.
 
     Resmi BIST tatilleri (bayram vb.) BILINCLI olarak HESABA KATILMAZ -
@@ -190,7 +190,7 @@ PAPER_MIN_VOL20 = 0.0213
 # gecerli-deger kumeleri (PAPER_*_CRITERIA_OPTIONS) VE kullanicinin gercek
 # okuma/yazma fonksiyonlari (get_paper_criteria()/set_paper_*_criteria())
 # backend/settings.py'ye TASINDI (2026-11-06'da "Ayarlar" diye ayri bir
-# ekrana/dosyaya ayrildi, bkz. CLAUDE.md). scanner_bistTop100.py bu dosyayi
+# ekrana/dosyaya ayrildi, bkz. CLAUDE.md). scanner_bist.py bu dosyayi
 # HIC import ETMIYOR (settings.py'nin get_db_connection()/_DB_LOCK icin BU
 # dosyaya baglanmasi yeterli - tersten bir import DAIRESEL olurdu). Gercek
 # calisma zamani degeri icin her zaman DB'ye bak - run_paper_trading_cycle()/
@@ -410,7 +410,7 @@ _paper_last_score = {}
 
 # Rate-limit/veri-eksikligi (Yahoo'dan bir veya daha fazla acik pozisyonun
 # fiyatinin bu dongude gelmemesi) durumunda TEK bir Telegram uyarisi
-# gonderilsin - _scan_health_alert_sent (web_bistTop100.py) ile AYNI desen,
+# gonderilsin - _scan_health_alert_sent (web_bist.py) ile AYNI desen,
 # sorun surerken her dongude (5dk'da bir) tekrar tekrar SPAM edilmesin, sorun
 # duzelince (bir sonraki temiz dongude) tekrar False'a donup gelecekte
 # yeniden tetiklenebilsin diye. bkz. run_paper_trading_cycle().
@@ -859,7 +859,7 @@ SCREEN_PAGE_SIZE = 250  # Yahoo'nun yf.screen() tek istekte donduregi maksimum s
 def fetch_all_bist_tickers():
     """Yahoo'nun region=tr taramasindaki TUM hisseleri sayfalama ile (tek
     istek max SCREEN_PAGE_SIZE donduruyor) toplar - hem canli tarama
-    (terminal_bistTop100.py/web_bistTop100.py) hem de backfill_daily_bist.py
+    (terminal_bist.py/web_bist.py) hem de backfill_daily_bist.py
     tarafindan kullanilir."""
     query = build_bist_query()
     symbols = []
@@ -886,7 +886,7 @@ def fetch_all_bist_quotes():
     pahali per-hisse indikator hesaplamasi (EMA/RSI/MACD/ADX/Confluence
     Score icin 1y gunluk OHLC gerektiriyor) burada YOK - bu yuzden skor/
     indikator sutunlari bu veriyle DOLDURULAMAZ, sadece ticker/fiyat/gunluk%
-    icin kullanilir. web_bistTop100.py: _scan_once() bunu, birlesik havuzun
+    icin kullanilir. web_bist.py: _scan_once() bunu, birlesik havuzun
     (BIST100+ilk 300 kazandiran) DISINDA kalan hisseleri de tabloda (skor
     sutunu bos/"BEKLIYOR" olarak) GORUNUR kilmak icin cagirir - 2026-11-03'te
     kullanici istegiyle eklendi: "tum hisseler gorunsun, skoru eksik
@@ -1219,7 +1219,7 @@ _seed_ticker_flags()
 
 
 def get_all_ticker_flags() -> dict:
-    """web_bistTop100.py: _run_scan()'in HER satira isaret/not eklemek icin
+    """web_bist.py: _run_scan()'in HER satira isaret/not eklemek icin
     kullandigi toplu okuma - DB'ye GITMEZ, bellek-ici cache'in bir KOPYASINI
     doner (cagiran taraf yanlislikla mutasyona ugratmasin diye)."""
     return dict(_ticker_flags_cache)
@@ -1227,7 +1227,7 @@ def get_all_ticker_flags() -> dict:
 
 def set_ticker_flag(ticker: str, flag, note) -> None:
     """Bir ticker'in isaretini/notunu DB'ye yazar VE ayni anda bellek-ici
-    cache'i gunceller - web_bistTop100.py'nin API route'u bu cagridan SONRA
+    cache'i gunceller - web_bist.py'nin API route'u bu cagridan SONRA
     _state['rows']'daki ilgili satiri da DOGRUDAN mutasyona ugratip (bkz.
     orada) degisikligin bir sonraki tarama donguusunu (en fazla 5 dakika)
     beklemeden ANINDA yansimasini sagliyor.
@@ -1408,7 +1408,7 @@ def build_paper_hourly_report(rows) -> str:
     """Su an acik olan TUM sanal pozisyonlari (kaynak farki YOK, auto+manual)
     rows icindeki (zaten taranmis, EKSTRA Yahoo istegi YOK) canli fiyatla
     birlestirip saat basi bir K/Z rapor metni olusturur. Hem
-    web_bistTop100.py: _maybe_send_hourly_paper_report() (gercek saatlik
+    web_bist.py: _maybe_send_hourly_paper_report() (gercek saatlik
     tetikleyici, bkz. orada) HEM DE /api/paper/report-test (anlik test
     tetikleyicisi) tarafindan cagirilir - ikisi de AYNI formati gorsun diye
     rapor metni ve gonderimi (send_paper_hourly_report) ayri tutuldu.
@@ -1533,7 +1533,7 @@ def send_paper_weekly_report() -> str:
 
 def send_health_alert(text: str) -> None:
     """Tarama dongusunun kendi kendini izleyen basit saglik uyarisi -
-    web_bistTop100.py: _scan_loop() ardisik birkac basarisiz _scan_once()
+    web_bist.py: _scan_loop() ardisik birkac basarisiz _scan_once()
     denemesinden sonra bunu cagirir (bkz. oradaki _SCAN_FAILURE_ALERT_THRESHOLD).
     _telegram_send ile AYNI alt yapiyi kullanir (token/chat_id tanimli
     degilse sessizce atlar) - amac sadece "servis sessizce veri cekmeyi
@@ -1572,7 +1572,7 @@ def _send_push_notifications(entries) -> None:
     # Bu kontrol log_signal_changes()'in signal_log'a YAZMASINI etkilemez -
     # sadece push gonderimi atlanir, tarihsel kayit kesintisiz devam eder.
     # Not: run_paper_trading_cycle() bu fonksiyondan SONRA cagrildigi icin
-    # (bkz. web_bistTop100.py: _scan_once()) burada okunan pozisyon listesi
+    # (bkz. web_bist.py: _scan_once()) burada okunan pozisyon listesi
     # bu dongude YENI acilan bir alimi henuz icermez - yani bir hisse GUCLU_AL/
     # MUTLAK_AL'a ILK girdigi dongude (tam alim tetiklendigi an) bildirim HALA
     # gonderilir, SADECE zaten ONCEKI bir dongude acilmis pozisyonlar icin
@@ -1580,7 +1580,7 @@ def _send_push_notifications(entries) -> None:
     held_tickers = {p["ticker"] for p in get_paper_positions()}
     # notify_criteria DOGRUDAN SQL ile okunuyor - get_paper_criteria()
     # backend/settings.py'ye TASINDI (2026-11-06, Ayarlar ekrani ayrilmasi,
-    # bkz. CLAUDE.md), scanner_bistTop100.py bu modulu DAIRESEL IMPORT
+    # bkz. CLAUDE.md), scanner_bist.py bu modulu DAIRESEL IMPORT
     # olusturmamak icin HIC import etmiyor (settings.py bu dosyadaki
     # get_db_connection()/_DB_LOCK'u kullaniyor, yani bagimlilik TEK yonlu).
     conn = get_db_connection()
@@ -1713,7 +1713,7 @@ def log_score_history(rows):
     satirin KENDISINE row["score_since"] ("YYYY-MM-DD HH:MM:SS") olarak
     ekler - rows zaten _run_scan()'daki top_rows ile AYNI liste/dict
     nesneleri oldugu icin burada yapilan mutasyon _state["rows"]'a dogrudan
-    yansir, web_bistTop100.py'de EK bir degisiklik gerekmez. Skor
+    yansir, web_bist.py'de EK bir degisiklik gerekmez. Skor
     DEGISMEDIYSE onceki "since" korunur, DEGISTIYSE bu dongunun zamanina
     sifirlanir VE SADECE degisen ticker'lar icin score_since tablosuna
     yazilir (degismeyenler icin gereksiz yazim yapilmaz, last_known_score'un
@@ -1774,7 +1774,7 @@ def get_score_history(ticker: str, since_timestamp: str):
     """Verilen ticker icin since_timestamp'ten (dahil, 'YYYY-MM-DD HH:MM:SS')
     itibaren TUM skor gecmisi satirlarini (hem canli hem backfill kaynakli,
     'source' sutunuyla ayristirilir) zaman sirasiyla dondurur. Eskiden iki
-    ayri bellek-ici index'ten (bkz. gecmis web_bistTop100.py) okunurdu; artik
+    ayri bellek-ici index'ten (bkz. gecmis web_bist.py) okunurdu; artik
     (ticker, timestamp) uzerinde indeksli tek bir SQLite sorgusu."""
     conn = get_db_connection()
     try:
@@ -1792,7 +1792,7 @@ def get_score_history(ticker: str, since_timestamp: str):
 
 def run_paper_trading_cycle(rows) -> None:
     """Sanal para (paper trading) simulasyonunun ana dongusu -
-    web_bistTop100.py: _scan_once() tarafindan HER tarama dongusunde
+    web_bist.py: _scan_once() tarafindan HER tarama dongusunde
     (BIST_REFRESH_SECONDS) cagrilir, ayni rows (zaten taranmis, Yahoo'ya
     tekrar gidilmez) kullanilir. Cagiran taraf bunu kendi try/except'i
     icinde sarmali - burada beklenmeyen bir hata ana tarama/skor
@@ -1983,7 +1983,7 @@ def run_paper_trading_cycle(rows) -> None:
             # adayi sayilmali - eskiden boyle bir hisse ZATEN GUCLU_AL/
             # MUTLAK_AL olarak havuza girdiginde SONSUZA KADAR atlaniyordu
             # (bkz. CLAUDE.md). rows zaten skor gucu + gunluk % sirali (bkz.
-            # web_bistTop100.py: _scan_once()'taki _sort_key), bu yuzden
+            # web_bist.py: _scan_once()'taki _sort_key), bu yuzden
             # candidate_tickers de dogal olarak o oncelik sirasinda.
             candidates = []
             for row in rows:
@@ -2168,7 +2168,7 @@ def reset_paper_trading(starting_balance: float) -> None:
 
 def get_paper_watchlist():
     """Kullanicinin elle ekledigi, otomatik sistemden BAGIMSIZ manuel takip
-    listesini dondurur - web_bistTop100.py: _scan_once() bu ticker'lari da
+    listesini dondurur - web_bist.py: _scan_once() bu ticker'lari da
     (acik pozisyonlar gibi) tarama havuzuna ekler, boylece fiyatsiz kalmaz."""
     conn = get_db_connection()
     try:
@@ -2216,7 +2216,7 @@ def manual_buy(ticker: str, allocation: float, price: float, swing_stop=None, sw
     acik pozisyonlarda hedef al sat neden yok" -> "otomatik hesapla (auto ile
     ayni mantik)") - auto pozisyonlarin ayni alanlarla (bkz. run_paper_trading_
     cycle()'daki candidate dongusu) BESLENDIGI AYNI ATR tabanli swing stop/
-    hedef degerleri, cagiran (web_bistTop100.py) tarafindan _state["rows"]'tan
+    hedef degerleri, cagiran (web_bist.py) tarafindan _state["rows"]'tan
     okunup buraya gecirilir - bu fonksiyon Yahoo'ya kendisi HIC ISTEK ATMAZ.
     None/NaN gecilirse (ATR verisi yetersiz - yeni listelenen bir hisse ya da
     veri sorunu) stop_price/target_price eskisi gibi NULL yazilir, alim
@@ -2328,7 +2328,7 @@ def manual_sell(trade_id: int, price: float):
 
 def get_paper_positions():
     """Su an acik olan sanal pozisyonlari dondurur (giris bilgileriyle -
-    guncel fiyat/K-Z hesaplamasi web_bistTop100.py'de canli rows ile
+    guncel fiyat/K-Z hesaplamasi web_bist.py'de canli rows ile
     birlestirilerek yapilir)."""
     conn = get_db_connection()
     try:
