@@ -911,6 +911,7 @@ def api_paper_positions():
         price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
         score_by_ticker = {r["ticker"]: r.get("score") for r in _state["rows"]}
         score_since_by_ticker = {r["ticker"]: r.get("score_since") for r in _state["rows"]}
+        daily_pct_by_ticker = {r["ticker"]: r.get("daily") for r in _state["rows"]}
 
     enriched = []
     for pos in positions:
@@ -928,6 +929,11 @@ def api_paper_positions():
             "unrealized_pnl_pct": pnl_pct,
             "score": score_by_ticker.get(pos["ticker"]),
             "score_since": score_since_by_ticker.get(pos["ticker"]),
+            # BIST'teki gunluk % degisim (ana tablonun "Gunluk" sutunuyla AYNI
+            # alan, row["daily"]) - 2026-11-10'da eklendi, kullanici istegi:
+            # "manuel takip ve acik pozisyonda bistteki gunluk kazandirma
+            # oranini da ekle". _state["rows"]'tan, EK bir Yahoo/DB sorgusu YOK.
+            "daily_pct": daily_pct_by_ticker.get(pos["ticker"]),
         })
     return jsonify(enriched)
 
@@ -1112,6 +1118,7 @@ def api_paper_watchlist():
         price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
         score_by_ticker = {r["ticker"]: r.get("score") for r in _state["rows"]}
         score_since_by_ticker = {r["ticker"]: r.get("score_since") for r in _state["rows"]}
+        daily_pct_by_ticker = {r["ticker"]: r.get("daily") for r in _state["rows"]}
     # Kaynak farki YOK (auto ya da manual) - bir hisse ZATEN acik bir
     # pozisyondaysa (hangi yoldan acilmis olursa olsun) takip listesinde
     # "Al" butonu yerine "Pozisyon acik" gosterilmeli (2026-11-02'de
@@ -1123,6 +1130,8 @@ def api_paper_watchlist():
     # takibe alinanlara da skor koy" - Acik Pozisyonlar'a eklenen AYNI
     # alanlar, bkz. CLAUDE.md "Sanal Al-Sat acik pozisyonlarina Skor sutunu
     # eklendi") - _state["rows"]'tan, EK bir Yahoo/DB sorgusu GEREKMEZ.
+    # daily_pct (2026-11-10'da eklendi, AYNI gerekce/kaynak) - bkz. yukaridaki
+    # api_paper_positions()'daki AYNI alan.
     enriched = [
         {
             **w,
@@ -1130,6 +1139,7 @@ def api_paper_watchlist():
             "has_open_position": w["ticker"] in open_tickers,
             "score": score_by_ticker.get(w["ticker"]),
             "score_since": score_since_by_ticker.get(w["ticker"]),
+            "daily_pct": daily_pct_by_ticker.get(w["ticker"]),
         }
         for w in watchlist
     ]
@@ -1148,7 +1158,12 @@ def api_paper_watchlist_remove(ticker: str):
 def api_paper_manual_buy():
     """Kullanicinin elle, istedigi an, istedigi tutarla alim yapmasi -
     5-slot limitine artik auto/manual farki olmadan DAHIL (2026-11-03'te
-    degistirildi, bkz. scanner.manual_buy)."""
+    degistirildi, bkz. scanner.manual_buy). swing_stop/swing_target
+    (2026-11-10'da eklendi) - zaten taranmis _state["rows"]'tan (EK bir
+    Yahoo/DB istegi YOK, price ile AYNI lookup) okunup scanner.manual_buy()'a
+    gecirilir - auto pozisyonlarin ayni alanlardan beslendigi ATR tabanli
+    stop/hedef, artik manuel alimlarda da otomatik hesaplaniyor (kullanici
+    istegi: "manuel acik pozisyonlarda hedef al sat neden yok")."""
     data = request.get_json(silent=True) or {}
     ticker = (data.get("ticker") or "").strip().upper()
     try:
@@ -1159,12 +1174,13 @@ def api_paper_manual_buy():
         return jsonify({"error": "ticker gerekli"}), 400
 
     with _state_lock:
-        price_by_ticker = {r["ticker"]: r["price"] for r in _state["rows"]}
-    price = price_by_ticker.get(ticker)
+        row_by_ticker = {r["ticker"]: r for r in _state["rows"]}
+    row = row_by_ticker.get(ticker)
+    price = row["price"] if row else None
     if price is None or price != price:
         return jsonify({"error": f"{ticker} için güncel fiyat yok"}), 400
 
-    result = scanner.manual_buy(ticker, allocation, price)
+    result = scanner.manual_buy(ticker, allocation, price, row.get("swing_stop"), row.get("swing_target"))
     if result is None:
         return jsonify({"error": "alım başarısız - tutar geçersiz, nakit yetersiz, bu hissede zaten açık pozisyon var ya da 5 pozisyon limiti dolu"}), 400
     return jsonify(result)

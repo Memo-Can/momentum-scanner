@@ -1851,11 +1851,17 @@ def run_paper_trading_cycle(rows) -> None:
             # 'auto' pozisyonlar icin stop/hedef/sure asimi/sinyal tersi
             # (4 kural, oncelik sirasi: stop > hedef > sure asimi > sinyal) -
             # 2026-11-02'de kaldirilip 2026-11-06'da kullanici istegiyle GERI
-            # eklendi (bkz. CLAUDE.md). 'manual' pozisyonlarda stop_price/
-            # target_price hep NULL oldugu icin (manual_buy()) bu ikisi
-            # onlari hic etkilemez, sadece sinyal tersi kurali gecerli kalir.
-            # Kullanici "Sat" butonuyla manuel pozisyonu HER ZAMAN elle de
-            # kapatabilir (manual_sell()), bu degismedi.
+            # eklendi (bkz. CLAUDE.md). 'manual' pozisyonlar da 2026-11-10'dan
+            # itibaren (kullanici istegi: "manuel acik pozisyonlarda hedef al
+            # sat neden yok" -> "otomatik hesapla") manual_buy()'dan GERCEK
+            # stop_price/target_price alabiliyor - asagidaki stop/hedef
+            # kontrolleri source'tan BAGIMSIZ (sadece "is not None" sartiyla)
+            # oldugu icin burada HICBIR degisiklik gerekmedi, sadece ATR
+            # verisi yetersizse (eski davranis gibi) NULL kalip bu ikisi
+            # etkisiz olur. Sure asimi (time_stop) ise HALA SADECE 'auto' -
+            # kullanici sadece stop/hedefi geri istedi. Kullanici "Sat"
+            # butonuyla manuel pozisyonu HER ZAMAN elle de kapatabilir
+            # (manual_sell()), bu degismedi.
             open_positions = [
                 dict(r)
                 for r in conn.execute(
@@ -1873,8 +1879,9 @@ def run_paper_trading_cycle(rows) -> None:
                 exit_reason = None
                 # "STOP"/"TARGET" kullanicinin sell_criteria'dan kaldirabildigi
                 # SAHTE etiketler (2026-11-06'da eklendi) - kapatilirsa o
-                # mekanizma TAMAMEN devre disi kalir (auto/manual farki yok,
-                # zaten stop_price/target_price manual'de hep NULL).
+                # mekanizma TAMAMEN devre disi kalir (auto/manual farki yok -
+                # manual_buy() 2026-11-10'dan itibaren ATR verisi varsa GERCEK
+                # bir stop_price/target_price yaziyor, yoksa hala NULL).
                 if "STOP" in sell_zone and pos["stop_price"] is not None and price <= pos["stop_price"]:
                     exit_reason = "stop"
                 elif "TARGET" in sell_zone and pos["target_price"] is not None and price >= pos["target_price"]:
@@ -2197,13 +2204,25 @@ def remove_from_paper_watchlist(ticker: str) -> None:
             conn.close()
 
 
-def manual_buy(ticker: str, allocation: float, price: float):
+def manual_buy(ticker: str, allocation: float, price: float, swing_stop=None, swing_target=None):
     """Kullanicinin elle, istedigi an, istedigi tutarla satin almasi.
     Basarisizsa (tutar<=0, fiyat gecersiz, nakit yetersiz, bu ticker'da
     ZATEN acik bir pozisyon varsa - kaynagi auto ya da manual farketmez,
     2026-11-02'de eklendi - VEYA toplam acik pozisyon sayisi (kaynak
     farksiz) PAPER_MAX_POSITIONS'a ULASMISSA - 2026-11-03'te eklendi, bkz.
-    asagidaki yorum) None doner."""
+    asagidaki yorum) None doner.
+
+    swing_stop/swing_target (2026-11-10'da eklendi, kullanici istegi: "manuel
+    acik pozisyonlarda hedef al sat neden yok" -> "otomatik hesapla (auto ile
+    ayni mantik)") - auto pozisyonlarin ayni alanlarla (bkz. run_paper_trading_
+    cycle()'daki candidate dongusu) BESLENDIGI AYNI ATR tabanli swing stop/
+    hedef degerleri, cagiran (web_bistTop100.py) tarafindan _state["rows"]'tan
+    okunup buraya gecirilir - bu fonksiyon Yahoo'ya kendisi HIC ISTEK ATMAZ.
+    None/NaN gecilirse (ATR verisi yetersiz - yeni listelenen bir hisse ya da
+    veri sorunu) stop_price/target_price eskisi gibi NULL yazilir, alim
+    REDDEDILMEZ - kullanici BILEREK elle aliyor, auto'nun aksine (orada
+    swing_stop/target yoksa aday TAMAMEN atlanir) burada bu EKSIKLIK alimi
+    bloke etmemeli."""
     if allocation <= 0 or price != price or price <= 0:
         return None
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2240,21 +2259,32 @@ def manual_buy(ticker: str, allocation: float, price: float):
             if open_count >= account_row["max_positions"]:
                 return None
             shares = allocation / price
-            # Manuel pozisyonlarda stop_price/target_price BILINCLI olarak
-            # NULL - run_paper_trading_cycle() 2026-11-06'dan itibaren
-            # bunlari auto pozisyonlarda GERCEK bir cikis tetikleyicisi
-            # olarak kullaniyor (bkz. CLAUDE.md), manuel pozisyonlar bu
-            # yuzden stop/hedefe hic tabi degil - sadece sinyal tersiyle ya
-            # da kullanicinin elle "Sat" demesiyle kapanir. max_hold_until
-            # manuel pozisyonlar icin hala SADECE bilgi amacli (auto'da
-            # oldugu gibi bir cikis tetiklemez, bkz. yukarida "auto" sart).
+            # Manuel pozisyonlar da artik (2026-11-10'dan itibaren, kullanici
+            # istegiyle - bkz. yukaridaki docstring) auto ile AYNI ATR tabanli
+            # stop_price/target_price'i aliyor - run_paper_trading_cycle()'daki
+            # cikis kontrolu BUNLARI zaten source'tan BAGIMSIZ okuyordu (sadece
+            # "is not None" sartiyla), bu yuzden o fonksiyonda HICBIR degisiklik
+            # GEREKMEDI - sadece buraya GERCEK deger yazilmasi yeterli. Deger
+            # yoksa (ATR verisi yetersiz) NULL kalir, alim REDDEDILMEZ.
+            if swing_stop is not None and swing_stop == swing_stop:
+                stop_price = swing_stop
+            else:
+                stop_price = None
+            if swing_target is not None and swing_target == swing_target:
+                target_price = swing_target
+            else:
+                target_price = None
+            # max_hold_until manuel pozisyonlar icin hala SADECE bilgi amacli
+            # (time_stop kontrolu run_paper_trading_cycle()'da acikca
+            # source=='auto' sartina bagli, bu DEGISMEDI - kullanici sadece
+            # stop/hedefi geri istedi, sure asimini degil).
             max_hold_until = (datetime.now() + timedelta(days=PAPER_MAX_HOLD_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
             cur = conn.execute(
                 """INSERT INTO paper_trades
                        (ticker, status, entry_time, entry_price, shares, allocation,
                         stop_price, target_price, max_hold_until, source)
-                   VALUES (?, 'open', ?, ?, ?, ?, NULL, NULL, ?, 'manual')""",
-                (ticker, now_str, price, shares, allocation, max_hold_until),
+                   VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?, 'manual')""",
+                (ticker, now_str, price, shares, allocation, stop_price, target_price, max_hold_until),
             )
             conn.execute("UPDATE paper_account SET cash = ? WHERE id = 1", (cash - allocation,))
             conn.commit()
