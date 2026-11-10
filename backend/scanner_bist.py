@@ -2001,10 +2001,10 @@ def run_paper_trading_cycle(rows) -> None:
                 if ticker in held_tickers or ticker in closed_this_cycle:
                     continue  # bu hisse ZATEN acik (kaynagi auto ya da manual farketmez) - tekrar alinmaz
                 if row.get("ticker_flag") == "SIKINTILI":
-                    continue  # kullanici bu hisseyi elle "Sikintili" isaretlemis - GUCLU_AL/MUTLAK_AL
+                    continue  # kullanici bu hisseyi elle "Sorunlu" isaretlemis - GUCLU_AL/MUTLAK_AL
                     # gelse bile otomatik alim YAPILMAZ (2026-11-09'da eklendi, bkz. CLAUDE.md
                     # "Hisse isaretleri" - kullanicinin acik istegi). Manuel alim bundan ETKILENMEZ -
-                    # kullanici isterse "Sikintili" isaretli bir hisseyi yine de elle alabilir.
+                    # kullanici isterse "Sorunlu" isaretli bir hisseyi yine de elle alabilir.
                 if row.get("swing_stop") is None or row.get("swing_target") is None:
                     continue  # ATR verisi yetersiz - guvenli bir stop/hedef yok
                 vol20 = row.get("vol20")

@@ -633,14 +633,14 @@ def api_rows():
 @app.route("/api/ticker-flag/<ticker>", methods=["POST"])
 @_login_required
 def api_set_ticker_flag(ticker: str):
-    """Bir hisseyi "Güvenilir"/"Sıkıntılı" olarak işaretler + istege bagli
+    """Bir hisseyi "Güvenilir"/"Sorunlu" olarak işaretler + istege bagli
     bir not ekler (2026-11-09'da eklendi, bkz. CLAUDE.md "Hisse işaretleri") -
     kullanıcının "bazı hisselerde sıkıntılar var, listede sıkıntılı ya da
     güvenilir olan hisseleri bilmem gerekiyor" isteği. body: {flag, note}.
     flag gecersizse (TICKER_FLAG_OPTIONS disinda) 400 - scanner.set_ticker_flag()'in
     sessiz elemesinden FARKLI olarak burada sıkı doğrulama var (kullanıcı
     yazım/entegrasyon hatasını fark etsin diye, settings.py'deki AYNI
-    desen). note 250 karakteri asarsa 400. "Sıkıntılı" işareti
+    desen). note 250 karakteri asarsa 400. "Sorunlu" işareti
     run_paper_trading_cycle()'ın otomatik alımını DOĞRUDAN etkiler (bkz.
     orada) - bu endpoint'in KENDİSİ paper trading'e dokunmaz, sadece veriyi
     yazar."""
