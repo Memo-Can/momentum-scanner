@@ -38,6 +38,38 @@ frontend/
 mobile/                  → Expo/React Native Android uygulaması
 ```
 
+## Kullanılan Teknolojiler
+
+### Backend — Python 3
+
+| Paket | Ne işe yarıyor |
+|---|---|
+| **Flask** (`flask>=3.1,<4.0`) | Web framework — HTTP route'ları (`/`, `/api/*`), Jinja2 şablon motoru (server-side HTML render), çerez-imzalı `session` (login) burada geliyor. |
+| **gunicorn** (`gunicorn>=26.2,<27.0`) | Production WSGI sunucusu — VPS'te Flask'ın kendi geliştirme sunucusu yerine bunu çalıştırıyoruz (`-w 1 --worker-class gthread --threads 4`, tek process + çok thread'li, bkz. `CLAUDE.md`). |
+| **yfinance** (`yfinance>=1.7,<2.0`) | Yahoo Finance'in resmi olmayan API'sine istemci — hisse fiyat/geçmiş veri/temel bilgi çekimi. Projenin tek dış veri kaynağı. |
+| **pandas** (`pandas>=3.0,<4.0`) | Zaman serisi işleme — kapanış fiyatlarından EMA/MACD/RSI/Bollinger/ADX gibi indikatörlerin hesaplanması, `rolling()`/`pct_change()` gibi fonksiyonlarla. |
+| **sqlite3** (Python stdlib, pip bağımlılığı değil) | Dosya tabanlı veritabanı — skor geçmişi, sinyal logu, Sanal Al-Sat tabloları, kullanıcı ayarları. WAL (Write-Ahead Log) modunda, çoklu okuyucu + tek yazarın birbirini bloklamadan çalışması için. |
+| **werkzeug** (Flask'ın bağımlılığı, ayrı pip paketi değil) | `ProxyFix` middleware (nginx arkasında gerçek istemci IP'sini görmek için) ve `generate_password_hash`/`check_password_hash` (admin şifresi) buradan geliyor. |
+| **urllib** (stdlib) | Telegram Bot API'ye mesaj göndermek için — ekstra bir HTTP kütüphanesi (örn. `requests`) kullanılmadı, stdlib yeterli görüldü. |
+
+### Frontend — sunucu taraflı render + sade JavaScript
+
+| Teknoloji | Ne işe yarıyor |
+|---|---|
+| **Jinja2** (Flask ile birlikte gelir) | HTML şablon motoru — `{% if %}`/`{% include %}` ile sunucu tarafında koşullu/parçalı render (örn. login olmayana bazı sütun/panellerin HTML'de hiç gönderilmemesi). Build adımı/derleme YOK. |
+| **Vanilla JavaScript (ES6+)** | Hiçbir framework (React/Vue/Angular) veya bundler (Webpack/Vite) kullanılmıyor — tüm etkileşim (tablo sıralama/arama/sayfalama, grafik, Sanal Al-Sat, Ayarlar popup'ları) HTML şablonlarının içine gömülü `<script>` blokları ile yazılıyor. Tercih nedeni: proje küçük/orta ölçekli, bir SPA'nın karmaşıklığına gerek görülmedi (bkz. `CLAUDE.md`'deki ilgili karar notu). |
+| **CSS3 (düz, framework'süz)** | Tüm görsel tasarım tek bir `style.css` dosyasında — Bootstrap/Tailwind gibi bir CSS framework'ü yok, CSS custom properties (`:root` değişkenleri) ile karanlık tema renkleri yönetiliyor. |
+| **lightweight-charts** (TradingView, v4.1.3) | Tek harici JS kütüphanesi — mum grafiği + EMA/Bollinger/MACD/RSI çizimi, crosshair senkronizasyonu. Projenin kendi `static/` klasöründen servis ediliyor (CDN'den değil, bkz. `CLAUDE.md`). |
+
+### Mobil uygulama — TypeScript
+
+| Teknoloji | Ne işe yarıyor |
+|---|---|
+| **React Native** (0.86) + **React** (19.2) | Android için native köprü — ama bu projede native ekranlar YOK, tek bir `WebView` bileşeni web sitesini sarmalıyor. |
+| **Expo** (SDK 57, managed workflow) | React Native uygulamasını derleme/build/dağıtım altyapısı (EAS Build) — native Android/iOS proje dosyalarıyla elle uğraşmadan APK/AAB üretimi. |
+| **react-native-webview** | Web sitesini (`momentumscanner.com.tr`) uygulama içinde gösteren WebView bileşeni + Android geri tuşu davranışı (WebView geçmişinde gezinme). |
+| **TypeScript** | Tip güvenliği — `App.tsx` ve yapılandırma dosyaları (`app.config.js`) TS ile yazılı, `tsc --noEmit` ile derleme hatası kontrolü yapılıyor. |
+
 ## Altyapı
 
 - **VPS:** DigitalOcean (77.245.146.216), nginx reverse proxy + Let's Encrypt SSL, Flask `systemd` servisi (`web-bist.service`).
