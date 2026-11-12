@@ -893,6 +893,15 @@ Kullanıcı isteği: "herşeyi sıfırla butonuna basıldığında hata olayın�
 
 - **Doğrulama:** İzole test DB'siyle: `amount=None` iken bakiye DEĞİŞMEDİ (açık pozisyon/equity/watchlist yine SİLİNDİ), `amount` verilince eski davranış aynen çalıştı - `test_client()` ile `/api/paper/reset`: amount yok (200, cash=null, bakiye korunur), amount var (200, bakiye güncellenir), negatif/geçersiz amount (400), boş string amount (None gibi davranır, 200) senaryoları doğrulandı. `python3 -m py_compile`, Flask `test_client()` ile render edilen `index.html`'in script bloklarının (login/guest) `node --check`'ten geçtiği doğrulandı, mevcut 25 birim test regresyonsuz geçti. **VPS'e henüz deploy edilmedi.**
 
+## BIST30/BIST100 listeleri Midas'tan yeniden doğrulandı (2026-11-12'de güncellendi)
+
+Kullanıcı "BIST30/100'ü neye göre belirliyorsun, Midas'tan bu bilgiyi çekip çekemediğini dener misin" diye sordu - `_check_index_lists_freshness()` uyarısının eşiğine (95 gün) yaklaşılmıştı (son doğrulama 2026-09-01, 72 gün geçmişti). Midas'ın kendi sayfaları (`getmidas.com/canli-borsa/xu030-bist-30-hisseleri` / `xu100-bist-100-hisseleri`) WebFetch ile çekilip mevcut listelerle karşılaştırıldı.
+
+- **BIST30: TEK bir takas** - `DSTKF` çıktı, `TRMET` girdi. Diğer 29 hisse aynı kaldı.
+- **BIST100: BEKLENENDEN BÜYÜK bir fark - 27 hisse çıktı, 27 yeni hisse girdi** (tam liste `scanner_bist.py`'deki yorumda) - normal çeyreklik rebalans'tan (genelde birkaç hisse) çok daha büyük bir oynama. **Bu WebFetch'in HTML'i bir AI modeliyle özetlemesi üzerinden geldiği için** (doğrudan bir CSV/API değil) teorik bir hata riski var, ama sayı tam 30/100'e denk geldiği ve BIST30⊆BIST100 ilişkisi hem Midas'ın kendi listelerinde hem bizim güncellenmiş listemizde doğrulandığı için (test edildi) güvenilir kabul edildi - kullanıcı onayıyla (`"ikisini de uygula"`) direkt uygulandı, ikinci bir kaynakla çapraz kontrol YAPILMADI.
+- `BIST_INDEX_LISTS_VERIFIED_ON` **2026-11-12**'ye güncellendi.
+- **Doğrulama:** `python3 -m py_compile`, yeni listelerde BIST30/BIST100 sayıları (30/100), tekrar YOK, BIST30⊆BIST100 hâlâ geçerli - hepsi programatik olarak kontrol edildi. Mevcut 25 birim test regresyonsuz geçti. **VPS'e henüz deploy edilmedi** - bu değişiklik canlı tarama havuzunu/skor hesaplamasını etkiliyor, kullanıcı commit/push edip "vps pull yap" dediğinde deploy edilecek.
+
 ## Bilinen tuzaklar / dersler (tekrar düşmemek için)
 
 - **Yahoo rate-limit:** Tam piyasa (~628 hisse × 3 istek/hisse) taraması art arda/sık yapılınca `YFRateLimitError` ve "Invalid Crumb" hatalarına yol açıyor. Hem yerel sandbox hem VPS bunu yaşadı. Büyük hacimli canlı test yapmadan önce düşün; gerçekten gerekliyse VPS'in kendi (genelde daha "temiz") IP'sinden doğal 5 dakikalık döngülerle gözlemle, art arda patlamalar yapma.

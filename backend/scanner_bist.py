@@ -92,35 +92,45 @@ def is_market_open(now=None) -> bool:
     close_t = now.replace(hour=BIST_MARKET_CLOSE_HOUR, minute=BIST_MARKET_CLOSE_MINUTE, second=0, microsecond=0)
     return open_t <= now <= close_t
 
-# Resmi BIST 30 Endeksi'nin (XU030) sabit uye listesi - 2026-09 itibariyla
-# dogrulanmis (Midas + Yahoo region=tr evreniyle capraz kontrol edildi).
+# Resmi BIST 30 Endeksi'nin (XU030) sabit uye listesi - 2026-11-12'de Midas'in
+# (getmidas.com/canli-borsa/xu030-bist-30-hisseleri) kendi sayfasi WebFetch ile
+# cekilip tekrar dogrulandi (onceki dogrulama 2026-09-01'di) - TEK fark DSTKF
+# cikip TRMET girmis oldu, diger 29 hisse aynen kaldi.
 # BIST30, BIST100_TICKERS'in bir ALT KUMESIDIR (dogrulandi) - bu yuzden
 # BIST100 taramasi otomatik olarak BIST30'u da kapsar, ayri bir istek
 # gerekmez.
 BIST30_TICKERS = [
-    "AEFES", "AKBNK", "ASELS", "ASTOR", "BIMAS", "DSTKF", "EKGYO", "ENKAI",
-    "EREGL", "FROTO", "GARAN", "GUBRF", "ISCTR", "KCHOL", "KRDMD", "MGROS",
-    "PETKM", "PGSUS", "SAHOL", "SASA", "SISE", "TAVHL", "TCELL", "THYAO",
-    "TOASO", "TRALT", "TTKOM", "TUPRS", "VAKBN", "YKBNK",
+    "AEFES", "AKBNK", "ASELS", "ASTOR", "BIMAS", "EKGYO", "ENKAI", "EREGL",
+    "FROTO", "GARAN", "GUBRF", "ISCTR", "KCHOL", "KRDMD", "MGROS", "PETKM",
+    "PGSUS", "SAHOL", "SASA", "SISE", "TAVHL", "TCELL", "THYAO", "TOASO",
+    "TRALT", "TRMET", "TTKOM", "TUPRS", "VAKBN", "YKBNK",
 ]
 BIST30_TICKERS = [f"{t}.IS" for t in BIST30_TICKERS]
 
-# Resmi BIST 100 Endeksi'nin (XU100) sabit uye listesi - 2026-09 itibariyla
-# dogrulanmis (Midas + Yahoo region=tr evreniyle capraz kontrol edildi);
+# Resmi BIST 100 Endeksi'nin (XU100) sabit uye listesi - 2026-11-12'de Midas'in
+# (getmidas.com/canli-borsa/xu100-bist-100-hisseleri) kendi sayfasi WebFetch ile
+# cekilip tekrar dogrulandi (onceki dogrulama 2026-09-01'di) - BEKLENENDEN BUYUK
+# bir degisim cikti: 27 hisse cikti (BALSU/BSOKE/DAPGM/DSTKF/EFOR/ESEN/EUPWR/
+# GENIL/GESAN/GRTHO/GSRAY/IEYHO/IZENR/KLRHO/KTLEV/KUYAS/MAGEN/MIATK/ODINE/
+# PASEU/PATEK/PSGYO/QUAGR/RALYH/REEDR/SARKY/SKBNK), 27 yeni hisse girdi
+# (AGHOL/AHGAZ/AKCNS/AKFYE/ALBRK/ANHYT/AYGAZ/BINHO/ECZYT/EGEEN/EGGUB/ENTRA/
+# GLYHO/GWIND/ISDMR/KARSN/KATMR/KCAER/KORDS/LMKDC/RGYAS/RYSAS/SNGYO/TABGD/
+# TCKRC/TRGYO/TTRAK) - normal ceyreklik rebalans'tan (genelde birkac hisse)
+# COK daha buyuk bir oynama, muhtemelen bir endeks kurali/agirlik degisikligi.
 # endeks ceyreklik yeniden dengelendigi icin zamanla guncellenmesi gerekebilir.
 BIST100_TICKERS = [
-    "AEFES", "AKBNK", "AKSA", "AKSEN", "ALARK", "ALTNY", "ANSGR", "ARCLK",
-    "ASELS", "ASTOR", "BALSU", "BERA", "BIMAS", "BRSAN", "BRYAT", "BSOKE",
-    "BTCIM", "CANTE", "CCOLA", "CIMSA", "CVKMD", "CWENE", "DAPGM", "DOAS",
-    "DOHOL", "DSTKF", "ECILC", "EFOR", "EKGYO", "ENERY", "ENJSA", "ENKAI",
-    "EREGL", "ESEN", "EUPWR", "EUREN", "FENER", "FROTO", "GARAN", "GENIL",
-    "GESAN", "GLRMK", "GRSEL", "GRTHO", "GSRAY", "GUBRF", "HALKB", "HEKTS",
-    "IEYHO", "ISCTR", "ISMEN", "IZENR", "KCHOL", "KLRHO", "KRDMD", "KTLEV",
-    "KUYAS", "MAGEN", "MAVI", "MGROS", "MIATK", "MPARK", "OBAMS", "ODAS",
-    "ODINE", "OTKAR", "OYAKC", "PAHOL", "PASEU", "PATEK", "PETKM", "PGSUS",
-    "PSGYO", "QUAGR", "RALYH", "REEDR", "SAHOL", "SARKY", "SASA", "SISE",
-    "SKBNK", "SOKM", "TAVHL", "TCELL", "THYAO", "TKFEN", "TOASO", "TRALT",
-    "TRENJ", "TRMET", "TSKB", "TTKOM", "TUKAS", "TUPRS", "TURSG", "ULKER",
+    "AEFES", "AGHOL", "AHGAZ", "AKBNK", "AKCNS", "AKFYE", "AKSA", "AKSEN",
+    "ALARK", "ALBRK", "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ASELS", "ASTOR",
+    "AYGAZ", "BERA", "BIMAS", "BINHO", "BRSAN", "BRYAT", "BTCIM", "CANTE",
+    "CCOLA", "CIMSA", "CVKMD", "CWENE", "DOAS", "DOHOL", "ECILC", "ECZYT",
+    "EGEEN", "EGGUB", "EKGYO", "ENERY", "ENJSA", "ENKAI", "ENTRA", "EREGL",
+    "EUREN", "FENER", "FROTO", "GARAN", "GLRMK", "GLYHO", "GRSEL", "GUBRF",
+    "GWIND", "HALKB", "HEKTS", "ISCTR", "ISDMR", "ISMEN", "KARSN", "KATMR",
+    "KCAER", "KCHOL", "KORDS", "KRDMD", "LMKDC", "MAVI", "MGROS", "MPARK",
+    "OBAMS", "ODAS", "OTKAR", "OYAKC", "PAHOL", "PETKM", "PGSUS", "RGYAS",
+    "RYSAS", "SAHOL", "SASA", "SISE", "SNGYO", "SOKM", "TABGD", "TAVHL",
+    "TCELL", "TCKRC", "THYAO", "TKFEN", "TOASO", "TRALT", "TRENJ", "TRGYO",
+    "TRMET", "TSKB", "TTKOM", "TTRAK", "TUKAS", "TUPRS", "TURSG", "ULKER",
     "VAKBN", "VESTL", "YKBNK", "ZOREN",
 ]
 BIST100_TICKERS = [f"{t}.IS" for t in BIST100_TICKERS]
@@ -132,7 +142,7 @@ BIST100_TICKERS = [f"{t}.IS" for t in BIST100_TICKERS]
 # elle girilmis - bkz. yukaridaki yorumlar), bu yuzden otomatik
 # GUNCELLENEMEZ; asagidaki kontrol SADECE servis her baslatildiginda bir
 # konsol/journalctl hatirlatmasi basar.
-BIST_INDEX_LISTS_VERIFIED_ON = "2026-09-01"
+BIST_INDEX_LISTS_VERIFIED_ON = "2026-11-12"
 
 
 def _check_index_lists_freshness() -> None:
