@@ -505,13 +505,24 @@
      sutunlar sikismaz/okunmaz hale gelmez --- */
   @media (max-width: 720px) {
     body { font-size: 13px; }
-    header { padding: 10px 14px; }
-    header h1 { font-size: 16px; }
+    /* Admin/Giris Yap butonu mobilde basligin ALTINA kayiyordu - kok sebep:
+       #header-controls'a asagida ESKIDEN verilen "width:100%" header'in
+       (flex-wrap:wrap) satiri ikiye bolup butonu BASLIGIN ALTINDA kendi
+       satirina atiyordu. Duzeltme: header "flex-wrap: nowrap" ile TEK
+       satirda tutuluyor, .header-title-group kuculebilir (min-width:0 +
+       h1'de ellipsis) yapiliyor, #header-controls da artik kendi dogal
+       (kucuk) genisliginde - boylece buton HER ZAMAN basligin AYNI
+       satirinda, basligin HEMEN yaninda/solunda kaliyor (justify-content:
+       flex-start ile sag kenara degil, basliga yakin konumda duruyor). */
+    header { padding: 10px 14px; flex-wrap: nowrap; justify-content: flex-start; gap: 10px; }
+    header h1 { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     header .meta, .warning { font-size: 11px; }
+    .header-title-group { min-width: 0; flex: 1 1 auto; }
+    .header-title-group > div { min-width: 0; }
     #market-tabs { padding: 8px 14px; flex-wrap: wrap; row-gap: 8px; }
     .market-tab-btn { flex: 1; padding: 6px 4px; font-size: 12px; }
     #market-ticker { flex: 1 1 100%; margin-left: 0; padding-left: 0; border-left: none; }
-    #header-controls { width: 100%; }
+    #header-controls { width: auto; flex: 0 0 auto; }
     #search-wrap { width: 100%; margin-left: 0; flex: 1 1 100%; }
     #search-input { width: 100%; }
     .layout {
