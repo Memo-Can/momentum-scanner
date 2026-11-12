@@ -2145,16 +2145,21 @@ def set_paper_cash(amount: float) -> None:
             conn.close()
 
 
-def reset_paper_trading(starting_balance: float) -> None:
+def reset_paper_trading(starting_balance: float | None = None) -> None:
     """Sanal al-sat'i sifirlar: ACIK islemler, equity gecmisi ve manuel
-    takip listesi SILINIR. Nakit VE starting_balance (toplam K/Z'nin
-    olculdugu baz) verilen starting_balance'a esitlenir - sabit
-    PAPER_STARTING_BALANCE kullanilmaz, kullanici her sifirlamada kendi
-    baslangic tutarini seciyor. Frontend'de bu, "emin misin" onayi
-    SONRASINDA cagrilir. _paper_last_score (hangi ticker'in GUCLU_AL'a
-    yeni gectigini takip eden hafiza) KASITLI olarak DOKUNULMAZ - yoksa
-    sifirlama hemen ardindan, zaten GUCLU_AL'da olan tum hisseleri 'yeni
-    gecis' sayip ayni restart-hatasini (bkz. CLAUDE.md) tekrar tetikler.
+    takip listesi SILINIR. starting_balance VERILIRSE nakit VE
+    starting_balance (toplam K/Z'nin olculdugu baz) o degere esitlenir -
+    sabit PAPER_STARTING_BALANCE kullanilmaz, kullanici kendi baslangic
+    tutarini secebilir. starting_balance VERILMEZSE (None, varsayilan,
+    2026-11-12'de eklendi - kullanici istegi: "herseyi sifirladigimizda
+    otomatik olarak nakit girmesine gerek yok") mevcut cash/starting_balance'a
+    HIC DOKUNULMAZ - kullanici artik her sifirlamada yeni bir tutar girmek
+    ZORUNDA degil, sadece ACIK pozisyonlar/gecmis/takip listesi temizlenir.
+    Frontend'de bu, "emin misin" onayi SONRASINDA cagrilir. _paper_last_score
+    (hangi ticker'in GUCLU_AL'a yeni gectigini takip eden hafiza) KASITLI
+    olarak DOKUNULMAZ - yoksa sifirlama hemen ardindan, zaten GUCLU_AL'da
+    olan tum hisseleri 'yeni gecis' sayip ayni restart-hatasini (bkz.
+    CLAUDE.md) tekrar tetikler.
 
     ⚠️ KAPANAN (status='closed') islemler ARTIK SILINMIYOR (2026-11-05'te
     kullanici istegiyle degistirildi - "nakit sifirlanirken kapanan
@@ -2168,10 +2173,11 @@ def reset_paper_trading(starting_balance: float) -> None:
             conn.execute("DELETE FROM paper_trades WHERE status = 'open'")
             conn.execute("DELETE FROM paper_equity_history")
             conn.execute("DELETE FROM paper_watchlist")
-            conn.execute(
-                "UPDATE paper_account SET cash = ?, starting_balance = ? WHERE id = 1",
-                (starting_balance, starting_balance),
-            )
+            if starting_balance is not None:
+                conn.execute(
+                    "UPDATE paper_account SET cash = ?, starting_balance = ? WHERE id = 1",
+                    (starting_balance, starting_balance),
+                )
             conn.commit()
         finally:
             conn.close()
@@ -2586,7 +2592,8 @@ def get_paper_summary():
         # TAKIP EDILDIGI tum sure boyunca (equity_history'nin en eski satiri)
         # "sadece BIST100'u al-ve-tut yapsaydim ne olurdu" sorusunun cevabi +
         # alfa (hesabin kendi getirisi EKSI bu getiri). starting_balance 0/None
-        # olamaz (reset_paper_trading() her zaman pozitif bir deger yazar) ama
+        # olamaz (_init_paper_trading() hep pozitif bir deger yazar, reset_paper_trading()
+        # starting_balance=None iken DOKUNMAZ - yani hep ONCEKI pozitif deger kalir) ama
         # savunmacı kontrol yine de eklendi.
         first_equity = conn.execute(
             "SELECT timestamp FROM paper_equity_history ORDER BY id ASC LIMIT 1"

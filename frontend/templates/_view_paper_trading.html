@@ -669,26 +669,46 @@ if (LOGGED_IN) {
   });
 
   document.getElementById('paper-reset').addEventListener('click', async () => {
-    // Baslangic tutari sabit 1.000.000 degil - "Yeni nakit (TL)" kutusuna
-    // zaten bir deger yazilmissa onu kullanir, yazilmamissa sorar.
+    // "Yeni nakit (TL)" kutusu ARTIK OPSIYONEL (2026-11-12'de degisti,
+    // kullanici istegi: "herseyi sifirladigimizda otomatik olarak nakit
+    // girmesine gerek yok") - eskiden bos birakilinca prompt() ile tutar
+    // SORULUYORDU, gecersiz/bos girilince "Gecerli bir tutar gir" hatasi
+    // cikip sifirlamayi tamamlamayi zorlastiriyordu (kullanicinin "hata
+    // olayini aza indirelim" istegi). Simdi bos birakilirsa mevcut nakit/
+    // baslangic bakiyesi HIC DEGISMEZ, sadece deger varsa kullanilir.
     const cashInput = document.getElementById('paper-cash-input');
-    let amountStr = cashInput.value;
-    if (!amountStr) {
-      amountStr = prompt('Sıfırlama sonrası başlangıç nakti (TL) ne olsun?', '1000000');
-      if (amountStr === null) return;
+    const amountStr = cashInput.value;
+    let amount = null;
+    if (amountStr) {
+      amount = parseTLAmount(amountStr);
+      if (!(amount > 0)) {
+        alert('Geçerli bir tutar gir.');
+        return;
+      }
     }
-    const amount = parseTLAmount(amountStr);
-    if (!(amount > 0)) {
-      alert('Geçerli bir tutar gir.');
-      return;
-    }
+    const cashLine = amount
+      ? `nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanır`
+      : `nakit/başlangıç bakiyesi DEĞİŞMEZ (mevcut tutar korunur)`;
     const ok = confirm(
-      `Bu işlem Sanal Al-Sat'ı sıfırlar: açık pozisyonlar, equity geçmişi ve manuel takip ` +
-      `listesi SİLİNİR, nakit ${amount.toLocaleString('tr-TR')} TL'ye ayarlanır. ` +
+      `Sıfırlama yapmak istediğinize emin misiniz? Bu işlem Sanal Al-Sat'ı sıfırlar: ` +
+      `açık pozisyonlar, equity geçmişi ve manuel takip listesi SİLİNİR, ${cashLine}. ` +
       `Kapanan işlemler geçmişi (ve açıklamaları) KORUNUR, silinmez. ` +
-      `Bu işlem GERİ ALINAMAZ. Emin misin?`
+      `Bu işlem GERİ ALINAMAZ.`
     );
     if (!ok) return;
+
+    // Guvenlik icin EK bir yazili onay katmani (2026-11-12'de eklendi,
+    // kullanici istegi: "butona basildiginda emin misiniz sorusunu yine
+    // sorsun" + altinda yazili onay) - yukaridaki confirm()'un YANINDA,
+    // onu DEGISTIRMEDEN - yanlislikla tek bir tiklama/Enter ile butun
+    // Sanal Al-Sat gecmisinin sifirlanmasini zorlastirmak icin.
+    const typed = prompt('Onaylamak için aşağıya "sıfırlama yap" yazın:');
+    if (typed === null) return;
+    if (typed.trim().toLocaleLowerCase('tr-TR') !== 'sıfırlama yap') {
+      alert('Onay metni eşleşmedi, sıfırlama iptal edildi.');
+      return;
+    }
+
     try {
       const res = await fetch('/api/paper/reset', {
         method: 'POST',

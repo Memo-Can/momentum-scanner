@@ -1086,16 +1086,24 @@ def api_settings_criteria():
 @app.route("/api/paper/reset", methods=["POST"])
 @_login_required
 def api_paper_reset():
-    """Sanal al-sat'i tamamen sifirlar - body {amount} ile baslangic nakti
-    kullanici tarafindan belirlenir (sabit 1.000.000 degil). Onay (emin
-    misin) frontend'de zaten alinmis olmali, bu endpoint dogrudan uygular."""
+    """Sanal al-sat'i tamamen sifirlar - body {amount} ARTIK OPSIYONEL
+    (2026-11-12'de degisti, kullanici istegi: "herseyi sifirladigimizda
+    otomatik olarak nakit girmesine gerek yok"): verilirse (gecerli,
+    sifirdan buyuk bir sayi olmak sartiyla) baslangic nakti o degere
+    ayarlanir; verilmezse/bossa MEVCUT cash/starting_balance'a HIC
+    DOKUNULMAZ (bkz. scanner.reset_paper_trading). Onay (emin misin +
+    yazili onay metni) frontend'de zaten alinmis olmali, bu endpoint
+    dogrudan uygular."""
     data = request.get_json(silent=True) or {}
-    try:
-        amount = float(data.get("amount"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "geçerli bir başlangıç tutarı (amount) gerekli"}), 400
-    if amount <= 0:
-        return jsonify({"error": "tutar sıfırdan büyük olmalı"}), 400
+    raw_amount = data.get("amount")
+    amount = None
+    if raw_amount not in (None, ""):
+        try:
+            amount = float(raw_amount)
+        except (TypeError, ValueError):
+            return jsonify({"error": "geçerli bir başlangıç tutarı (amount) gerekli"}), 400
+        if amount <= 0:
+            return jsonify({"error": "tutar sıfırdan büyük olmalı"}), 400
     scanner.reset_paper_trading(amount)
     return jsonify({"status": "ok", "cash": amount})
 
