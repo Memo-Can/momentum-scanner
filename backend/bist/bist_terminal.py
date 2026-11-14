@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""scanner_bist.py'nin urettigi veriyi terminalde renkli bir tablo
+"""bist_scanner.py'nin urettigi veriyi terminalde renkli bir tablo
 olarak gosterir - is katmani (veri cekme/indikator/skorlama) OLDUGU GIBI
 kullanilir, bu dosya sadece terminale ozel sunum (render/renk/ses/dongu)
-katmanidir. web_bist.py'nin ayni is katmanini web icin nasil
+katmanidir. bist_web.py'nin ayni is katmanini web icin nasil
 sundugunun terminal karsiligidir.
 
-Calistirmak icin (proje kok dizininden):
-    python3 terminal_bist.py
+Calistirmak icin (backend/bist/ dizininden, 2026-11-14'te buraya tasindi -
+bkz. CLAUDE.md "Dosyalar bist/ klasorune tasindi"):
+    python3 bist_terminal.py
 
 Her BIST_REFRESH_SECONDS (300sn / 5dk) saniyede bir hem tarayici listesi hem de
 getiriler Yahoo Finance'ten yeniden cekilip terminal yenilenir.
@@ -65,9 +66,13 @@ import sys
 import time
 from datetime import datetime
 
-import scanner_bist as scanner
+import bist_indicators as indicators
+import bist_market_data as market_data
+import bist_scanner as scanner
 
-SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
+# sounds/ backend/'de KALDI (bist/'e tasinmadi) - bu dosya artik backend/bist/
+# icinde oldugu icin yol bir ust dizine cikiyor.
+SOUND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sounds")
 BEEP_SOUND = os.path.join(SOUND_DIR, "al_beep.wav")
 
 GREEN = "\033[32m"
@@ -80,7 +85,7 @@ RESET = "\033[0m"
 SIGNAL_SYMBOLS = {"AL": "▲", "SAT": "▼", "NOTR": "–"}
 SIGNAL_COLORS = {"AL": GREEN, "SAT": RED, "NOTR": YELLOW}
 
-# GUCLU_SAT artik canli taramada hic uretilmiyor (bkz. scanner.confluence_label,
+# GUCLU_SAT artik canli taramada hic uretilmiyor (bkz. indicators.confluence_label,
 # 2026-11-01'de MUTLAK_AL/MUTLAK_SAT eklendi) ama gecmis veriyle uyumluluk icin
 # burada duruyor.
 SCORE_SYMBOLS = {
@@ -150,21 +155,21 @@ def render(rows, missing_count: int = 0):
     def _sort_key(row):
         daily = row["daily"]
         daily_sort = -daily if daily == daily else float("inf")  # NaN'lari sona at
-        return (scanner.SCORE_ORDER.get(row["score"], 3), daily_sort)
+        return (indicators.SCORE_ORDER.get(row["score"], 3), daily_sort)
 
     rows_sorted = sorted(rows, key=_sort_key)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"BIST 100 - Getiri Tablosu ({len(rows)} hisse)   (güncelleme: {now})")
     print(
-        f"Kaynak: Resmi BIST 100 Endeksi'nin (XU100) {len(scanner.BIST100_TICKERS)} sabit üyesi "
+        f"Kaynak: Resmi BIST 100 Endeksi'nin (XU100) {len(market_data.BIST100_TICKERS)} sabit üyesi "
         f"(web arayüzünde ayrıca BIST 30/BIST 300 sekmeleri de var)   |  "
         f"Sıralama: Önce Skor gücü (GÜÇLÜ AL->AL->NOTR->SAT->GÜÇLÜ SAT), aynı grup içinde günlük % (yüksekten düşüğe)"
     )
     print(
-        f"Sinyal: EMA{scanner.EMA_FAST}/EMA{scanner.EMA_SLOW} (günlük) + "
-        f"MACD({scanner.MACD_FAST},{scanner.MACD_SLOW},{scanner.MACD_SIGNAL}) + RSI({scanner.RSI_PERIOD}) + "
-        f"BB({scanner.BB_PERIOD},{scanner.BB_STD}sigma)   |  her {scanner.BIST_REFRESH_SECONDS} sn'de bir yenilenir"
+        f"Sinyal: EMA{indicators.EMA_FAST}/EMA{indicators.EMA_SLOW} (günlük) + "
+        f"MACD({indicators.MACD_FAST},{indicators.MACD_SLOW},{indicators.MACD_SIGNAL}) + RSI({indicators.RSI_PERIOD}) + "
+        f"BB({indicators.BB_PERIOD},{indicators.BB_STD}sigma)   |  her {scanner.BIST_REFRESH_SECONDS} sn'de bir yenilenir"
     )
     if missing_count:
         total_attempted = len(rows) + missing_count
@@ -207,14 +212,14 @@ def render(rows, missing_count: int = 0):
 
 def main():
     """Web arayuzundeki BIST 30/100/300 sekmelerinin ayni ortak havuzunu
-    kullanir (bkz. scanner_bist.py modul aciklamasi) - sinyal/skor
+    kullanir (bkz. bist_scanner.py modul aciklamasi) - sinyal/skor
     gecmisi loglari boylece web ile tutarli kalir. Terminalde sekme olmadigi
     icin varsayilan gorunum olarak sadece BIST 100 gosterilir."""
-    bist100_symbols = {t.removesuffix(".IS") for t in scanner.BIST100_TICKERS}
+    bist100_symbols = {t.removesuffix(".IS") for t in market_data.BIST100_TICKERS}
     while True:
-        top_gainers = scanner.fetch_top_gainers(scanner.TOP300_SIZE)
-        all_tickers = list(dict.fromkeys(scanner.BIST100_TICKERS + top_gainers))
-        rows_by_ticker, _still_missing = scanner.fetch_with_retry(all_tickers) if all_tickers else ({}, [])
+        top_gainers = market_data.fetch_top_gainers(market_data.TOP300_SIZE)
+        all_tickers = list(dict.fromkeys(market_data.BIST100_TICKERS + top_gainers))
+        rows_by_ticker, _still_missing = market_data.fetch_with_retry(all_tickers) if all_tickers else ({}, [])
 
         def _daily_sort_key(row):
             daily = row["daily"]
@@ -226,7 +231,7 @@ def main():
             scanner.log_score_history(all_rows)
 
         display_rows = [r for r in all_rows if r["ticker"] in bist100_symbols]
-        missing_count = max(0, len(scanner.BIST100_TICKERS) - len(display_rows))
+        missing_count = max(0, len(market_data.BIST100_TICKERS) - len(display_rows))
 
         if display_rows:
             render(display_rows, missing_count=missing_count)

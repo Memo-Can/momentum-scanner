@@ -2,32 +2,40 @@
 kullanicinin elle sectigi otomatik al/sat kriterleri VE Telegram SKOR
 sinyali bildirim kriterini okur/yazar. Dogrudan calistirilmaz.
 
-Bu dosya BILINCLI olarak scanner_bist.py'den AYRI - kullanici "otomatik
+Bu dosya BILINCLI olarak bist_scanner.py'den AYRI - kullanici "otomatik
 alim satim kriterleriyle telegram mesaj kriterlerini birbirinden ayiralim,
-bu akisi isleyen backend dosyasi settings.py olmali" dedi. scanner_bist.py'nin
+bu akisi isleyen backend dosyasi settings.py olmali" dedi. bist_scanner.py'nin
 get_db_connection()/_DB_LOCK'unu kullanmak icin BU dosyayi import eder - ters
-yonde bir import (scanner_bist.py'nin bunu import etmesi) DAIRESEL
-olurdu, bu yuzden scanner_bist.py bu dosyayi HIC import ETMEZ (kriter
-okuyan 3 yer - run_paper_trading_cycle()/_send_push_notifications()/
-get_paper_summary() - paper_account sutunlarini DOGRUDAN SQL ile okur,
-buradaki fonksiyonlari CAGIRMAZ).
+yonde bir import (bist_scanner.py'nin bunu import etmesi) DAIRESEL
+olurdu, bu yuzden bist_scanner.py bu dosyayi HIC import ETMEZ (kriter
+okuyan 2 yer - bist_paper_trading.py: run_paper_trading_cycle()/bist_scanner.py:
+_send_push_notifications() - paper_account sutunlarini DOGRUDAN SQL ile
+okur, buradaki fonksiyonlari CAGIRMAZ).
 
-web_bist.py bu modulu import edip /api/settings/criteria route'unu
-buradaki fonksiyonlara delege eder (web_bist.py "WEB sunum katmani",
-bu dosya "is katmani" - scanner_bist.py/web_bist.py ayrimiyla
+bist_web.py bu modulu import edip /api/settings/criteria route'unu
+buradaki fonksiyonlara delege eder (bist_web.py "WEB sunum katmani",
+bu dosya "is katmani" - bist_scanner.py/bist_web.py ayrimiyla
 AYNI mimari ilke, SADECE Ayarlar ekranina ozel/daha kucuk olceginde)."""
 
-import scanner_bist as scanner
+import os
+import sys
+
+# bist_scanner.py artik backend/bist/ icinde (2026-11-14'te tasindi, bkz.
+# CLAUDE.md "Dosyalar bist/ klasorune tasindi") - bu dosya backend/'de
+# KALDIGI icin onu bulabilmek icin backend/bist/ sys.path'e eklenir.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bist"))
+
+import bist_scanner as scanner  # noqa: E402
 
 # Kullanicinin secebilecegi TEK gecerli etiket kumeleri - AL tarafinda SAT
 # etiketlerinin secilmesi anlamsiz oldugu icin (otomatik alim SADECE bu yone
 # ozgu bir strateji) kasitli olarak sinirlandirildi. "STOP"/"TARGET" GERCEK
 # skor etiketleri DEGIL - fiyat-bazli stop-loss/hedef kontrolunu
-# (scanner.run_paper_trading_cycle()) ac/kapa yapan birer SAHTE ("pseudo")
+# (paper_trading.run_paper_trading_cycle()) ac/kapa yapan birer SAHTE ("pseudo")
 # etiket. "NOTR" SAT tarafina 2026-11-10'da eklendi (kullanici istegi:
 # "ayarlarda otomatik sat kriterine notr kriterini de ekleyelim") - secilirse
 # skoru NOTR'e DONEN (GUCLU_AL/AL'dan dusen) bir pozisyon da otomatik
-# satilir. VARSAYILAN olarak (_DEFAULT_SELL_ZONE, scanner_bist.py)
+# satilir. VARSAYILAN olarak (_DEFAULT_SELL_ZONE, bist_scanner.py)
 # SECILI DEGIL - bu DAVRANIS DEGISIKLIGI mevcut hesaplari ETKILEMEZ, kullanici
 # Ayarlar'dan ELLE isaretlerse devreye girer.
 PAPER_BUY_CRITERIA_OPTIONS = ("AL", "GUCLU_AL", "MUTLAK_AL")
@@ -41,7 +49,7 @@ PAPER_NOTIFY_CRITERIA_OPTIONS = ("GUCLU_AL", "MUTLAK_AL", "GUCLU_SAT", "MUTLAK_S
 
 def get_paper_criteria() -> dict:
     """Kullanicinin elle sectigi UC AYRI kriter kumesini DB'den okur:
-    "buy"/"sell" (otomatik alim/satimi tetikler, scanner.run_paper_trading_cycle()
+    "buy"/"sell" (otomatik alim/satimi tetikler, paper_trading.run_paper_trading_cycle()
     kullanir) ve "notify" (SADECE Telegram SKOR sinyali bildirimini
     tetikler, scanner._send_push_notifications() kullanir - buy/sell'den
     BILINCLI olarak AYRI). Bos liste (kullanici bir grubun TUMUNU bilerek
@@ -84,7 +92,7 @@ def _clean_criteria_labels(labels, allowed) -> str:
 def set_paper_buy_criteria(labels) -> None:
     """Otomatik ALIM'i tetikleyen skor etiket kumesini degistirir -
     PAPER_BUY_CRITERIA_OPTIONS disindaki degerler sessizce elenir. Mevcut
-    ACIK pozisyonlara dokunmaz, sadece scanner.run_paper_trading_cycle()'in
+    ACIK pozisyonlara dokunmaz, sadece paper_trading.run_paper_trading_cycle()'in
     bundan sonraki dongulerde hangi YENI gecisleri alim adayi sayacagini
     degistirir."""
     value = _clean_criteria_labels(labels, PAPER_BUY_CRITERIA_OPTIONS)

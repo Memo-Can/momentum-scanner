@@ -26,10 +26,17 @@ Her 5 dakikada bir Yahoo Finance'ten BIST hisse verisi çekilip; EMA(9/21), MACD
 
 ```
 backend/
-  scanner_bist.py  → iş katmanı: veri çekme, indikatör/skor hesaplama, loglama
-  web_bist.py      → Flask web arayüzü (AKTİF deploy edilen)
-  terminal_bist.py → terminal arayüzü
-  backfill_daily_bist.py → geçmişe dönük günlük skor backfill (elle, tek seferlik)
+  bist/                  → BIST tarayıcısının tüm dosyaları (hepsi bist_ önekli)
+    bist_scanner.py        → DB/skor geçmişi/sinyal bildirimi (iş katmanı)
+    bist_web.py            → Flask web arayüzü (AKTİF deploy edilen)
+    bist_terminal.py       → terminal arayüzü
+    bist_backfill_daily.py → geçmişe dönük günlük skor backfill (elle, tek seferlik)
+    bist_market_data.py    → Yahoo Finance veri çekme katmanı
+    bist_paper_trading.py  → Sanal Al-Sat mantığı
+    bist_indicators.py     → saf indikator matematiği (EMA/RSI/MACD/ADX/vb.)
+  notification.py        → Telegram bildirim gönderimi
+  settings.py            → Ayarlar ekranının iş katmanı
+  admin.py               → Yönetici Paneli'nin iş katmanı
   data/                  → momentum_scanner.db (SQLite) — "veritabanı"
   diger-piyasalar/       → US/Crypto scanner'lar (KAPSAM DIŞI, artık geliştirilmiyor)
 frontend/

@@ -1,4 +1,4 @@
-"""scanner_bist.py'deki saf (yan etkisiz) fonksiyonlar icin birim
+"""bist_scanner.py'deki saf (yan etkisiz) fonksiyonlar icin birim
 testler - Yahoo/ag/DB erismesi gerektirmeyen mantik (skor esikleri, yuzde
 degisim, piyasa saati) hedeflenir. Amac: confluence_label/SCORE_ORDER gibi
 CLAUDE.md'de "tutarlilik kontrolu yapilan TUM yerler" diye tek tek elle
@@ -13,9 +13,14 @@ import os
 import sys
 import unittest
 
+# backend/tests/'den backend/bist/'deki (2026-11-14'te tasindi, bkz.
+# CLAUDE.md) bist_scanner.py/bist_indicators.py'ye erismek icin - ".."
+# backend/'i, "../bist" backend/bist/'i ekler.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bist"))
 
-import scanner_bist as scanner  # noqa: E402
+import bist_indicators as indicators  # noqa: E402
+import bist_scanner as scanner  # noqa: E402
 
 
 class ConfluenceLabelBoundaryTests(unittest.TestCase):
@@ -50,9 +55,9 @@ class ConfluenceLabelBoundaryTests(unittest.TestCase):
         rsi_val = 60.0 if slots[2] > 0 else (40.0 if slots[2] < 0 else 50.0)
         rel_strength = 1.0 if slots[3] > 0 else (-1.0 if slots[3] < 0 else 0.0)
         bb_percent = 60.0 if bb_contrib > 0 else 40.0
-        raw = scanner.confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
+        raw = indicators.confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
         self.assertEqual(raw, score, "test helper'in uretilen skoru beklenenle uyusmuyor")
-        return scanner.confluence_label(signal_1d, signal_macd, rsi_val, bb_percent, adx, rel_strength)
+        return indicators.confluence_label(signal_1d, signal_macd, rsi_val, bb_percent, adx, rel_strength)
 
     def test_mutlak_al_requires_full_consensus(self):
         self.assertEqual(self.label_for_score(5, self.STRONG_ADX), "MUTLAK_AL")
@@ -104,21 +109,21 @@ class ScoreOrderConsistencyTests(unittest.TestCase):
     EXPECTED_LABELS = {"MUTLAK_AL", "GUCLU_AL", "AL", "NOTR", "SAT", "GUCLU_SAT", "MUTLAK_SAT"}
 
     def test_all_seven_labels_present_with_unique_ranks(self):
-        self.assertEqual(set(scanner.SCORE_ORDER.keys()), self.EXPECTED_LABELS)
-        ranks = list(scanner.SCORE_ORDER.values())
+        self.assertEqual(set(indicators.SCORE_ORDER.keys()), self.EXPECTED_LABELS)
+        ranks = list(indicators.SCORE_ORDER.values())
         self.assertEqual(len(ranks), len(set(ranks)), "SCORE_ORDER'da cakisan rank var")
 
     def test_rank_order_matches_al_to_sat_direction(self):
-        self.assertLess(scanner.SCORE_ORDER["MUTLAK_AL"], scanner.SCORE_ORDER["GUCLU_AL"])
-        self.assertLess(scanner.SCORE_ORDER["GUCLU_AL"], scanner.SCORE_ORDER["AL"])
-        self.assertLess(scanner.SCORE_ORDER["AL"], scanner.SCORE_ORDER["NOTR"])
-        self.assertLess(scanner.SCORE_ORDER["NOTR"], scanner.SCORE_ORDER["SAT"])
-        self.assertLess(scanner.SCORE_ORDER["SAT"], scanner.SCORE_ORDER["GUCLU_SAT"])
-        self.assertLess(scanner.SCORE_ORDER["GUCLU_SAT"], scanner.SCORE_ORDER["MUTLAK_SAT"])
+        self.assertLess(indicators.SCORE_ORDER["MUTLAK_AL"], indicators.SCORE_ORDER["GUCLU_AL"])
+        self.assertLess(indicators.SCORE_ORDER["GUCLU_AL"], indicators.SCORE_ORDER["AL"])
+        self.assertLess(indicators.SCORE_ORDER["AL"], indicators.SCORE_ORDER["NOTR"])
+        self.assertLess(indicators.SCORE_ORDER["NOTR"], indicators.SCORE_ORDER["SAT"])
+        self.assertLess(indicators.SCORE_ORDER["SAT"], indicators.SCORE_ORDER["GUCLU_SAT"])
+        self.assertLess(indicators.SCORE_ORDER["GUCLU_SAT"], indicators.SCORE_ORDER["MUTLAK_SAT"])
 
     def test_strong_buy_zone_is_subset_of_score_order(self):
         for label in scanner._STRONG_BUY_ZONE:
-            self.assertIn(label, scanner.SCORE_ORDER)
+            self.assertIn(label, indicators.SCORE_ORDER)
 
     def test_strong_signal_labels_cover_both_mutlak_variants(self):
         for label in ("MUTLAK_AL", "GUCLU_AL", "MUTLAK_SAT", "GUCLU_SAT"):
@@ -129,37 +134,37 @@ class RollingPctChangeTests(unittest.TestCase):
     def test_insufficient_history_returns_nan(self):
         import pandas as pd
         closes = pd.Series([10.0, 11.0, 12.0])
-        result = scanner.rolling_pct_change(closes, 13.0, periods=5)
+        result = indicators.rolling_pct_change(closes, 13.0, periods=5)
         self.assertNotEqual(result, result)  # NaN != NaN
 
     def test_normal_window_computes_pct_change(self):
         import pandas as pd
         closes = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0, 105.0])
         # periods=5 -> 5 islem gunu once = closes.iloc[-6] = 100.0
-        result = scanner.rolling_pct_change(closes, 110.0, periods=5)
+        result = indicators.rolling_pct_change(closes, 110.0, periods=5)
         self.assertAlmostEqual(result, 10.0)
 
     def test_none_closes_returns_nan(self):
-        result = scanner.rolling_pct_change(None, 100.0, periods=5)
+        result = indicators.rolling_pct_change(None, 100.0, periods=5)
         self.assertNotEqual(result, result)
 
 
 class StopTargetLevelsTests(unittest.TestCase):
     def test_al_direction_stop_below_target_above(self):
-        stop, target = scanner.stop_target_levels(100.0, atr_val=2.0, direction="AL", stop_mult=1.5, target_r=3.0)
+        stop, target = indicators.stop_target_levels(100.0, atr_val=2.0, direction="AL", stop_mult=1.5, target_r=3.0)
         self.assertAlmostEqual(stop, 97.0)
         self.assertAlmostEqual(target, 109.0)
 
     def test_sat_direction_is_mirrored(self):
-        stop, target = scanner.stop_target_levels(100.0, atr_val=2.0, direction="SAT", stop_mult=1.5, target_r=3.0)
+        stop, target = indicators.stop_target_levels(100.0, atr_val=2.0, direction="SAT", stop_mult=1.5, target_r=3.0)
         self.assertAlmostEqual(stop, 103.0)
         self.assertAlmostEqual(target, 91.0)
 
     def test_notr_direction_returns_none(self):
-        self.assertEqual(scanner.stop_target_levels(100.0, 2.0, "NOTR", 1.5, 3.0), (None, None))
+        self.assertEqual(indicators.stop_target_levels(100.0, 2.0, "NOTR", 1.5, 3.0), (None, None))
 
     def test_nan_price_returns_none(self):
-        self.assertEqual(scanner.stop_target_levels(float("nan"), 2.0, "AL", 1.5, 3.0), (None, None))
+        self.assertEqual(indicators.stop_target_levels(float("nan"), 2.0, "AL", 1.5, 3.0), (None, None))
 
 
 class IsMarketOpenTests(unittest.TestCase):

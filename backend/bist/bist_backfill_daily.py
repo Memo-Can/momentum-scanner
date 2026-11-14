@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """BIST evrenindeki (region=tr, filtresiz) TUM hisseler icin GUNLUK bazda
 GECMISE DONUK Skor gecmisi olusturan TEK SEFERLIK bir backfill script'i.
-Canli tarama dongusunun (web_bist.py/terminal_bist.py) bir
-parcasi degildir, elle calistirilir - scanner_bist.py'deki mevcut
+Canli tarama dongusunun (bist_web.py/bist_terminal.py) bir
+parcasi degildir, elle calistirilir - bist_scanner.py'deki mevcut
 indikator/skor fonksiyonlarini (OLDUGU GIBI) yeniden kullanir.
 
 NOT (2026-10-31): Confluence skoru artik 5 bilesenden olusuyor (signal_5m
@@ -22,14 +22,15 @@ bir calistirma yapilmissa, sonra 365 gunle calistirinca SADECE aradaki eksik
 ~100 gun (+ varsa yeni islem gunleri) eklenir, 265 gunluk kisim YENIDEN
 hesaplanip YAZILMAZ.
 
-Yazilan hedef (backend/data/momentum_scanner.db, scanner_bist.py'nin
+Yazilan hedef (backend/data/momentum_scanner.db, bist_scanner.py'nin
 SQLite veritabani - eskiden iki ayri backfill CSV'si idi):
   score_history tablosu, source='backfill'  - eksik olan her (tarih, ticker) icin bir skor satiri
   signal_log tablosu, source='backfill'     - yeni eklenen gunler icindeki GUCLU_AL/SAT/MUTLAK
                                                gecisleri (log_signal_changes'in gecmise donuk hali)
 
-Calistirmak icin:
-    python3 backfill_daily_bist.py [GERIYE_GIDILECEK_GUN_SAYISI]
+Calistirmak icin (backend/bist/ dizininden, 2026-11-14'te buraya tasindi -
+bkz. CLAUDE.md "Dosyalar bist/ klasorune tasindi"):
+    python3 bist_backfill_daily.py [GERIYE_GIDILECEK_GUN_SAYISI]
 Varsayilan: bugunden geriye 365 gun (son bir yil).
 """
 
@@ -39,7 +40,9 @@ from datetime import datetime, timedelta
 
 import yfinance as yf
 
-import scanner_bist as scanner
+import bist_indicators as indicators
+import bist_market_data as market_data
+import bist_scanner as scanner
 
 BACKFILL_DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 365
 BACKFILL_START = (datetime.now() - timedelta(days=BACKFILL_DAYS)).strftime("%Y-%m-%d")
@@ -78,11 +81,11 @@ def compute_daily_rows(ticker: str, benchmark_pct, existing_dates: set):
         return []
 
     closes = hist["Close"]
-    ema9, ema21 = scanner.ema_series_pair(closes)
-    rsi_vals = scanner.rsi_series(closes)
-    _, _, macd_hist = scanner.macd_series(closes)
-    bb_upper, _, bb_lower = scanner.bollinger_bands_series(closes)
-    adx_vals = scanner.adx_series(hist)
+    ema9, ema21 = indicators.ema_series_pair(closes)
+    rsi_vals = indicators.rsi_series(closes)
+    _, _, macd_hist = indicators.macd_series(closes)
+    bb_upper, _, bb_lower = indicators.bollinger_bands_series(closes)
+    adx_vals = indicators.adx_series(hist)
     daily_pct = closes.pct_change() * 100
 
     rows = []
@@ -112,8 +115,8 @@ def compute_daily_rows(ticker: str, benchmark_pct, existing_dates: set):
         bench = benchmark_pct.get(ts, float("nan"))
         rel_strength = (d_pct - bench) if d_pct == d_pct and bench == bench else float("nan")
 
-        score_raw = scanner.confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
-        score = scanner.confluence_label(signal_1d, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
+        score_raw = indicators.confluence_score_raw(signal_1d, signal_macd, rsi_val, bb_percent, rel_strength)
+        score = indicators.confluence_label(signal_1d, signal_macd, rsi_val, bb_percent, adx_val, rel_strength)
 
         rows.append({
             "date": date_str,
@@ -145,12 +148,12 @@ def signal_transitions(rows):
 
 def main():
     print(f"BIST evreni cekiliyor (region=tr, filtresiz)...")
-    tickers = scanner.fetch_all_bist_tickers()
+    tickers = market_data.fetch_all_bist_tickers()
     print(f"{len(tickers)} hisse bulundu. Mevcut score_history tarihleri yukleniyor...")
     existing_by_ticker = load_existing_dates()
 
     print(f"Gecmis veri cekiliyor ({WARMUP_START} -> bugun, {BACKFILL_START}'tan itibaren yazilacak, sadece eksik gunler)...")
-    bench_hist = yf.Ticker(scanner.BENCHMARK_TICKER).history(start=WARMUP_START, interval="1d", auto_adjust=False)
+    bench_hist = yf.Ticker(market_data.BENCHMARK_TICKER).history(start=WARMUP_START, interval="1d", auto_adjust=False)
     benchmark_pct = bench_hist["Close"].pct_change() * 100
 
     all_score_rows = []

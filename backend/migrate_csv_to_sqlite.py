@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """TEK SEFERLIK migrasyon script'i: backend/data/ altindaki eski CSV
 dosyalarini (score_history_bist[_backfill].csv, signal_log_bist[_backfill].csv)
-scanner_bist.py'nin SQLite veritabanina (backend/data/momentum_scanner.db)
+bist_scanner.py'nin SQLite veritabanina (backend/data/momentum_scanner.db)
 aktarir. Her iki ortamda (yerel + VPS) BIR KEZ calistirilir.
 
 Ne yapar:
-  1. scanner_bist import edilir (DB/tablolar otomatik olusur).
+  1. bist_scanner import edilir (DB/tablolar otomatik olusur).
   2. Hedef tablolarda zaten satir varsa DURUR (--force verilmeden tekrar
      calistirip veri cakismasini/duplikasyonunu onlemek icin).
   3. 4 CSV dosyasini okur, source='live'/'backfill' etiketiyle DB'ye yazar.
@@ -22,7 +22,12 @@ import csv
 import os
 import sys
 
-import scanner_bist as scanner
+# bist_scanner.py artik backend/bist/ icinde (2026-11-14'te tasindi, bkz.
+# CLAUDE.md) - bu dosya backend/'de KALDIGI icin onu bulabilmek icin
+# backend/bist/ sys.path'e eklenir.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bist"))
+
+import bist_scanner as scanner  # noqa: E402
 
 FORCE = "--force" in sys.argv
 

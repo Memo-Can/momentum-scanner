@@ -3,7 +3,7 @@
 SELECT sonuclarini tablo olarak yazdirir, INSERT/UPDATE/DELETE'i commit edip
 kac satirin etkilendigini yazdirir. VS Code SQLite eklentisi calismadiginda
 (ya da VPS'te SSH uzerinden rapor/duzeltme gerektiginde) sqlite3 CLI'a
-alternatif olarak kullanilir - scanner_bist.get_db_connection() ile
+alternatif olarak kullanilir - bist_scanner.get_db_connection() ile
 AYNI DB/WAL ayarlarini kullanir, elle bir DB yolu tanimlamaz.
 
 Kullanim:
@@ -14,9 +14,15 @@ DIKKAT: INSERT/UPDATE/DELETE hemen commit edilir, geri alma yoktur - onemli
 bir degisiklikten once ilgili satirlari SELECT ile once gorup onaylayin.
 """
 
+import os
 import sys
 
-import scanner_bist as scanner
+# bist_scanner.py artik backend/bist/ icinde (2026-11-14'te tasindi, bkz.
+# CLAUDE.md) - bu dosya backend/'de KALDIGI icin onu bulabilmek icin
+# backend/bist/ sys.path'e eklenir.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bist"))
+
+import bist_scanner as scanner  # noqa: E402
 
 
 def main():
