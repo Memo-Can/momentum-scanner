@@ -38,7 +38,6 @@ backend/
   settings.py            → Ayarlar ekranının iş katmanı
   admin.py               → Yönetici Paneli'nin iş katmanı
   data/                  → momentum_scanner.db (SQLite) — "veritabanı"
-  diger-piyasalar/       → US/Crypto scanner'lar (KAPSAM DIŞI, artık geliştirilmiyor)
 frontend/
   templates/index.html   → tek sayfalık web UI
   static/                → favicon + bildirim sesleri
@@ -86,7 +85,7 @@ mobile/                  → Expo/React Native Android uygulaması
 
 ## Proje geçmişi (özet)
 
-Proje `usd-info` adıyla başlayıp `momentum-scanner`'a taşındı ve kapsamı BIST'e daraltıldı (US/Crypto scanner'lar `diger-piyasalar/`'a ayrıldı). Başlıca gelişim adımları:
+Proje `usd-info` adıyla başlayıp `momentum-scanner`'a taşındı ve kapsamı BIST'e daraltıldı (US/Crypto scanner'lar önce `diger-piyasalar/`'a ayrıldı, 2026-11-14'te hiçbir yerden kullanılmadığı doğrulanıp tamamen silindi). Başlıca gelişim adımları:
 
 1. Terminal tabanlı BIST tarayıcı + konfluens skor sistemi
 2. Web arayüzüne taşıma (Flask), responsive tasarım, arama/sıralama

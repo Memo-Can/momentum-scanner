@@ -33,7 +33,6 @@ backend/                 → Flask API + tarama/indikator/skor mantığı + term
   settings.py            Ayarlar ekranının iş katmanı
   admin.py               Yönetici Paneli'nin iş katmanı
   data/                  momentum_scanner.db (SQLite, git'e dahil değil)
-  diger-piyasalar/       kapsam dışı (US/Crypto scanner denemeleri)
 frontend/
   templates/index.html     tek sayfalık web UI
   static/                  favicon + bildirim sesleri

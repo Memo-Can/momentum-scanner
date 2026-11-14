@@ -75,7 +75,6 @@ backend/
     _backup/                → migrate_csv_to_sqlite.py'nin tasidigi eski CSV'ler (rollback
                             yedeği, aktif kodun okuduğu/yazdığı bir yer DEĞİL).
   device_tokens_bist.json → data/ İÇİNDE DEĞİL, backend/ kökünde (SQLite'a taşınmadı, ayrı tutuldu).
-  diger-piyasalar/        → KAPSAM DIŞI (aşağıda ayrıca bahsedilir), sadece klasör düzeni.
 frontend/
   templates/index.html    → KABUK (shell) şablonu: <head>, header, market-tabs, layout
                             iskeleti, modal (#modal-overlay), footer. Yan panel (#side,
@@ -125,7 +124,7 @@ frontend/
 
 VPS de bu yapıya göçürüldü (2026-10-23): `/root/momentum-scanner/backend/` (+ `data/`) ve `/root/momentum-scanner/frontend/` artık yerelle aynı düzende. `systemd` servis dosyası (`/etc/systemd/system/web-bist.service`) `WorkingDirectory=/root/momentum-scanner/backend`, `ExecStart=/root/momentum-scanner/venv/bin/python3 /root/momentum-scanner/backend/bist_web.py`, (Firebase kullanılırken `Environment=FIREBASE_CREDENTIALS_PATH=...` vardı, 2026-10'da Telegram'a geçişle KALDIRILDI — bkz. aşağıda "Bildirimler", artık `Environment=TELEGRAM_BOT_TOKEN=...` ve `Environment=TELEGRAM_CHAT_ID=...` var). Venv (`/root/momentum-scanner/venv/`) kasıtlı olarak `backend/`'in İÇİNE taşınmadı — dışarıda kalması sorun değil, yol zaten mutlak. Göç sırasında canlı CSV'ler (`score_history_bist.csv`, `signal_log_bist.csv`) checksum ile doğrulanarak taşındı, veri kaybı olmadı.
 
-**`backend/diger-piyasalar/` klasörü (US/Crypto scanner'lar) KAPSAM DIŞI.** Kullanıcı sadece BIST'e odaklanmaya karar verdi, bu dosyalara dokunma, aktif geliştirme orada yapılmıyor. Sadece klasör düzeni için `backend/` altına taşındı (2026-10-23) — içindeki `web_usTop100.py`'nin `templates`/`static` yolu halihazırda eski/kullanılmayan bir referans (BIST tarafının `frontend/`'e taşınmasından önce de iki üst dizine göre hesaplanıyordu), bu dosya çalıştırılmadığı için düzeltilmedi.
+**`backend/diger-piyasalar/` klasörü (US/Crypto scanner'lar) 2026-11-14'te TAMAMEN SİLİNDİ.** Kullanıcı "kullanılıyor mu, kullanılmıyorsa sil" dedi — grep ile projenin hiçbir yerinde (BIST kodu, frontend, mobile, dokümantasyon dışında) import/çağrı EDİLMEDİĞİ doğrulandıktan sonra `backend/diger-piyasalar/`'ın TAMAMI (3 `.py` + 3 gitignored CSV) silindi (`git rm -r` + kalan CSV'ler için düz `rm`). Daha önce (2026-10-23) sadece klasör düzeni için `backend/` altına taşınmıştı, aktif geliştirme hiç yapılmamıştı - bu yüzden silinmesi BİLİNÇLİ bir "artık hiç lazım değil" kararıydı, kazara kaybolmuş bir özellik DEĞİL.
 
 ## Hisse evreni: BIST 30 / BIST 100 / BIST 300 havuzu (artık sekme YOK — "Endeks" sütunu, 2026-11-03)
 
