@@ -565,13 +565,23 @@ function updateChartMarkers() {
   // grafikte GERCEKTEN bir mum varsa (candleTimeMap'te) eklenir.
   // Aksi halde lightweight-charts, grafigin disinda kalan (cok eski) tum
   // isaretleri ilk muma yigip orada bir sembol yiginina donusturuyordu.
+  // ⚠️ Mumu OLMAYAN gunler (hafta sonu/tatil, ya da sadece araya giren eksik
+  // bir gun) TAMAMEN ATLANIR - sadece ISARETLEME degil, prevZone TAKIBI de
+  // bu gunlerde GUNCELLENMEZ. Aksi halde (2026-11-15'te canli test sirasinda
+  // GERCEKTEN yakalandi, bkz. CLAUDE.md): bolge degisimi TAM OLARAK mumu
+  // olmayan bir gune denk gelirse (orn. Cumartesi), prevZone o gune ragmen
+  // "degismis" sayilip SESSIZCE guncellenir, sonraki (mumu olan) gunlerde
+  // ayni bolge zaten "eski" sayildigi icin bir daha ASLA isaretlenmez -
+  // sinyal grafikten kalici olarak kaybolur. Mumu olmayan gunu tamamen
+  // atlamak, degisimin isaretini ilk mumu OLAN gune oteliyor.
   const daily = aggregateBy(scoreHistoryRaw, dayKey).slice().reverse(); // kronolojik (eskiden -> yeniye)
   const markers = [];
   let prevZone = null;
   daily.forEach(d => {
+    if (!candleTimeMap.has(d.label)) return;
     const label = scoreLabelFromAvg(d.avg);
     const zone = markerZone(label);
-    if (zone !== prevZone && MARKER_STYLES[label] && candleTimeMap.has(d.label)) {
+    if (zone !== prevZone && MARKER_STYLES[label]) {
       markers.push({ time: d.label, ...MARKER_STYLES[label] });
     }
     prevZone = zone;
