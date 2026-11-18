@@ -1066,15 +1066,18 @@ def api_settings_criteria():
     BILEREK AYRI).
 
     GET: settings.get_paper_criteria()'yi dondurur.
-    POST: Body {"buy": [...], "sell": [...], "notify": [...]} - her liste
-    kendi gecerli kumesine (settings.PAPER_*_CRITERIA_OPTIONS) gore
+    POST: Body {"buy": [...], "sell": [...], "notify": [...], "index_scope": "..."} -
+    her liste kendi gecerli kumesine (settings.PAPER_*_CRITERIA_OPTIONS) gore
     dogrulanir, gecersiz bir etiket iceren liste 400 doner (settings.py'nin
     kendi SESSIZCE elemesinden farkli olarak burada SIKI dogrulama -
-    kullanici yazim hatasini fark etsin). "notify" ALANI OPSIYONEL - hic
-    gonderilmezse (None) notify_criteria'ya dokunulmaz, SADECE buy/sell
-    guncellenir. Bos liste (hicbir etiket secilmemis) HER UCU icin GECERLI
-    bir secim - o yonde otomatik islem/bildirim tamamen durur, bu
-    kullanicinin kendi karari."""
+    kullanici yazim hatasini fark etsin). "notify"/"index_scope" ALANLARI
+    OPSIYONEL - hic gonderilmezse (None) ilgili DB sutununa dokunulmaz,
+    SADECE gonderilenler guncellenir. Bos liste (hicbir etiket secilmemis)
+    buy/sell/notify icin GECERLI bir secim - o yonde otomatik islem/bildirim
+    tamamen durur, bu kullanicinin kendi karari. "index_scope" (BIST30/
+    BIST100/ALL, 2026-11-18'de eklendi, bkz. CLAUDE.md "Endeks kapsami")
+    HEM Telegram SKOR sinyali bildirimini HEM otomatik YENI alim adayligini
+    filtreler - zaten acik bir pozisyonun satisini ETKILEMEZ."""
     if request.method == "GET":
         return jsonify(settings.get_paper_criteria())
 
@@ -1082,6 +1085,7 @@ def api_settings_criteria():
     buy = data.get("buy")
     sell = data.get("sell")
     notify = data.get("notify")
+    index_scope = data.get("index_scope")
     if not isinstance(buy, list) or not isinstance(sell, list):
         return jsonify({"error": "buy ve sell alanları liste olmalı"}), 400
     if notify is not None and not isinstance(notify, list):
@@ -1098,11 +1102,17 @@ def api_settings_criteria():
         return jsonify({
             "error": f"notify için geçerli değerler: {', '.join(settings.PAPER_NOTIFY_CRITERIA_OPTIONS)}"
         }), 400
+    if index_scope is not None and index_scope not in settings.PAPER_INDEX_SCOPE_OPTIONS:
+        return jsonify({
+            "error": f"index_scope için geçerli değerler: {', '.join(settings.PAPER_INDEX_SCOPE_OPTIONS)}"
+        }), 400
     settings.set_paper_buy_criteria(buy)
     settings.set_paper_sell_criteria(sell)
     if notify is not None:
         settings.set_paper_notify_criteria(notify)
-    return jsonify({"status": "ok", "buy": buy, "sell": sell, "notify": notify})
+    if index_scope is not None:
+        settings.set_index_scope(index_scope)
+    return jsonify({"status": "ok", "buy": buy, "sell": sell, "notify": notify, "index_scope": index_scope})
 
 
 @app.route("/api/paper/reset", methods=["POST"])

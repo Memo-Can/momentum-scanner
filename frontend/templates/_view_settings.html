@@ -26,6 +26,13 @@
       </div>
       <div class="sub">Not: Telegram Sinyal Bildirimi Kriteri, yukarıdaki alım/satış kriterlerinden BAĞIMSIZ - sadece hangi skor geçişlerinde genel Telegram sinyal mesajı (🟢/🔴) gelsin onu belirler, otomatik alım/satımı etkilemez.</div>
       <div class="criteria-group">
+        <span class="criteria-label">Endeks Kapsamı:</span>
+        <label><input type="radio" name="index-scope-radio" class="criteria-index-scope" value="BIST30"> BIST 30</label>
+        <label><input type="radio" name="index-scope-radio" class="criteria-index-scope" value="BIST100"> BIST 100</label>
+        <label><input type="radio" name="index-scope-radio" class="criteria-index-scope" value="ALL"> Hepsi</label>
+      </div>
+      <div class="sub">Not: Endeks Kapsamı, Telegram sinyal bildirimi İLE otomatik YENİ alımı AYNI anda etkiler (yukarıdaki kriterlerle birlikte çalışır - ikisi de seçili endeks dışındaki hisseler için devre dışı kalır). Zaten açık bir pozisyonun satışını ETKİLEMEZ.</div>
+      <div class="criteria-group">
         <button class="paper-action-btn" id="criteria-save" type="button">Kriterleri Kaydet</button>
         <span id="criteria-msg"></span>
       </div>
@@ -48,6 +55,10 @@ const CRITERIA_LABELS = {
   NOTR: 'NÖTR', SAT: 'SAT', GUCLU_SAT: 'GÜÇLÜ SAT', MUTLAK_SAT: 'MUTLAK SAT',
   STOP: 'Stop', TARGET: 'Hedef',
 };
+// Endeks kapsami (2026-11-18'de eklendi, bkz. CLAUDE.md "Endeks kapsami") -
+// CRITERIA_LABELS'tan AYRI tutuldu, farkli bir deger kumesi (skor etiketi
+// DEGIL, endeks adi).
+const INDEX_SCOPE_LABELS = { BIST30: 'BIST 30', BIST100: 'BIST 100', ALL: 'Hepsi' };
 let criteriaDirty = false;
 
 // Checkbox'lari DB'deki guncel secimle senkronlar - kullanici kaydetmeden
@@ -66,12 +77,16 @@ function renderCriteria(c) {
   document.querySelectorAll('.criteria-notify').forEach(cb => {
     cb.checked = (c.notify || []).includes(cb.value);
   });
+  document.querySelectorAll('.criteria-index-scope').forEach(radio => {
+    radio.checked = radio.value === (c.index_scope || 'ALL');
+  });
   const buyText = (c.buy || []).map(v => CRITERIA_LABELS[v] || v).join(', ') || 'YOK (otomatik alım tamamen kapalı)';
   const sellText = (c.sell || []).map(v => CRITERIA_LABELS[v] || v).join(', ') || 'YOK (sinyal tersiyle otomatik satış kapalı)';
   const notifyText = (c.notify || []).map(v => CRITERIA_LABELS[v] || v).join(', ') || 'YOK (genel Telegram sinyal bildirimi kapalı)';
+  const indexScopeText = INDEX_SCOPE_LABELS[c.index_scope] || INDEX_SCOPE_LABELS.ALL;
   const currentEl = document.getElementById('criteria-current');
   if (currentEl) {
-    currentEl.textContent = `Şu an aktif — Alım: ${buyText} | Satış: ${sellText} | Telegram Bildirimi: ${notifyText}`;
+    currentEl.textContent = `Şu an aktif — Alım: ${buyText} | Satış: ${sellText} | Telegram Bildirimi: ${notifyText} | Endeks Kapsamı: ${indexScopeText}`;
   }
 }
 
@@ -98,7 +113,7 @@ function openSettingsPanel() {
 }
 
 if (LOGGED_IN) {
-  document.querySelectorAll('.criteria-buy, .criteria-sell, .criteria-notify').forEach(cb => {
+  document.querySelectorAll('.criteria-buy, .criteria-sell, .criteria-notify, .criteria-index-scope').forEach(cb => {
     cb.addEventListener('change', () => { criteriaDirty = true; });
   });
 
@@ -107,11 +122,13 @@ if (LOGGED_IN) {
     const buy = Array.from(document.querySelectorAll('.criteria-buy:checked')).map(cb => cb.value);
     const sell = Array.from(document.querySelectorAll('.criteria-sell:checked')).map(cb => cb.value);
     const notify = Array.from(document.querySelectorAll('.criteria-notify:checked')).map(cb => cb.value);
+    const indexScopeChecked = document.querySelector('.criteria-index-scope:checked');
+    const index_scope = indexScopeChecked ? indexScopeChecked.value : 'ALL';
     try {
       const res = await fetch('/api/settings/criteria', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buy, sell, notify }),
+        body: JSON.stringify({ buy, sell, notify, index_scope }),
       });
       if (!res.ok) { msg.textContent = 'Güncellenemedi.'; return; }
       criteriaDirty = false;

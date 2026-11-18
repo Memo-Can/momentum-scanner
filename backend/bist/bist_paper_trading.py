@@ -139,7 +139,7 @@ def run_paper_trading_cycle(rows) -> None:
         conn = scanner.get_db_connection()
         try:
             account_row = conn.execute(
-                "SELECT cash, max_positions, buy_criteria, sell_criteria FROM paper_account WHERE id = 1"
+                "SELECT cash, max_positions, buy_criteria, sell_criteria, index_scope FROM paper_account WHERE id = 1"
             ).fetchone()
             cash = account_row["cash"]
             max_positions = account_row["max_positions"]
@@ -148,6 +148,13 @@ def run_paper_trading_cycle(rows) -> None:
             # bos set'e donusur, "in" kontrolu dogal olarak hep False olur.
             buy_zone = set(account_row["buy_criteria"].split(",")) if account_row["buy_criteria"] else set()
             sell_zone = set(account_row["sell_criteria"].split(",")) if account_row["sell_criteria"] else set()
+            # Endeks kapsami (BIST30/BIST100/ALL, 2026-11-18'de eklendi, bkz.
+            # CLAUDE.md "Endeks kapsami") - SADECE asagidaki candidate
+            # dongusunde (YENI alim adayligi) kullanilir, mevcut acik
+            # pozisyonlarin SATISINI (yukaridaki cikis kontrolleri) HIC
+            # ETKILEMEZ - bir hisse ceyreklik rebalans'ta endeks disina
+            # cikabilir, elde tutulan bir pozisyonu satamamak mantiksiz olur.
+            index_scope = account_row["index_scope"]
             # 'auto' pozisyonlar icin stop/hedef/sure asimi/sinyal tersi
             # (4 kural, oncelik sirasi: stop > hedef > sure asimi > sinyal) -
             # 2026-11-02'de kaldirilip 2026-11-06'da kullanici istegiyle GERI
@@ -316,6 +323,10 @@ def run_paper_trading_cycle(rows) -> None:
                     # gelse bile otomatik alim YAPILMAZ (2026-11-09'da eklendi, bkz. CLAUDE.md
                     # "Hisse isaretleri" - kullanicinin acik istegi). Manuel alim bundan ETKILENMEZ -
                     # kullanici isterse "Sorunlu" isaretli bir hisseyi yine de elle alabilir.
+                if index_scope == "BIST30" and not row.get("bist30"):
+                    continue  # kullanici kapsami BIST30'a daraltmis - bu hisse BIST30'da degil
+                if index_scope == "BIST100" and not row.get("bist100"):
+                    continue  # BIST100 secimi BIST30'u zaten kapsar (BIST30 ⊆ BIST100)
                 if row.get("swing_stop") is None or row.get("swing_target") is None:
                     continue  # ATR verisi yetersiz - guvenli bir stop/hedef yok
                 vol20 = row.get("vol20")

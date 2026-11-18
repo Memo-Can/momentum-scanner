@@ -136,6 +136,10 @@ PAPER_MAX_POSITIONS = 5
 _STRONG_BUY_ZONE = ("GUCLU_AL", "MUTLAK_AL")
 _DEFAULT_SELL_ZONE = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "STOP", "TARGET")
 _DEFAULT_NOTIFY_ZONE = ("GUCLU_AL", "MUTLAK_AL")
+# Endeks kapsami (BIST30/BIST100/ALL) - settings.py: PAPER_INDEX_SCOPE_OPTIONS
+# ile AYNI gecerli kumeyi temsil eder, SADECE paper_account'un CREATE/ALTER
+# TABLE varsayilan degeri icin burada (2026-11-18'de eklendi, bkz. CLAUDE.md).
+_DEFAULT_INDEX_SCOPE = "ALL"
 
 # SQLite tek-yazarli oldugu icin tum INSERT/DELETE'ler bu kilit altinda
 # yapilir - WAL modu zaten coklu OKUYUCUYA izin veriyor (Flask'in threaded=True
@@ -210,7 +214,8 @@ def _init_db() -> None:
                     max_positions INTEGER NOT NULL DEFAULT {PAPER_MAX_POSITIONS},
                     buy_criteria TEXT NOT NULL DEFAULT '{",".join(_STRONG_BUY_ZONE)}',
                     sell_criteria TEXT NOT NULL DEFAULT '{",".join(_DEFAULT_SELL_ZONE)}',
-                    notify_criteria TEXT NOT NULL DEFAULT '{",".join(_DEFAULT_NOTIFY_ZONE)}'
+                    notify_criteria TEXT NOT NULL DEFAULT '{",".join(_DEFAULT_NOTIFY_ZONE)}',
+                    index_scope TEXT NOT NULL DEFAULT '{_DEFAULT_INDEX_SCOPE}'
                 );
 
                 CREATE TABLE IF NOT EXISTS paper_trades (
@@ -311,6 +316,16 @@ def _init_db() -> None:
             if "notify_criteria" not in account_cols:
                 conn.execute(
                     f"ALTER TABLE paper_account ADD COLUMN notify_criteria TEXT NOT NULL DEFAULT '{','.join(_DEFAULT_NOTIFY_ZONE)}'"
+                )
+                conn.commit()
+            # 'index_scope' - kullanicinin elle sectigi endeks kapsami
+            # (BIST30/BIST100/ALL, 2026-11-18'de eklendi, bkz. CLAUDE.md) -
+            # HEM Telegram SKOR sinyali bildirimini HEM otomatik YENI alim
+            # adayligini filtreler. Varsayilan 'ALL' - mevcut deploy'larda
+            # davranis DEGISMEZ (hic kisitlama yoktu, simdi de yok).
+            if "index_scope" not in account_cols:
+                conn.execute(
+                    f"ALTER TABLE paper_account ADD COLUMN index_scope TEXT NOT NULL DEFAULT '{_DEFAULT_INDEX_SCOPE}'"
                 )
                 conn.commit()
         finally:
@@ -571,12 +586,23 @@ def _send_push_notifications(entries) -> None:
         held_tickers = {
             r["ticker"] for r in conn.execute("SELECT DISTINCT ticker FROM paper_trades WHERE status = 'open'")
         }
-        row = conn.execute("SELECT notify_criteria FROM paper_account WHERE id = 1").fetchone()
+        row = conn.execute("SELECT notify_criteria, index_scope FROM paper_account WHERE id = 1").fetchone()
         notify_zone = set(row["notify_criteria"].split(",")) if row and row["notify_criteria"] else set()
+        index_scope = row["index_scope"] if row else _DEFAULT_INDEX_SCOPE
     finally:
         conn.close()
     for entry in entries:
         if entry["score"] not in notify_zone:
+            continue
+        # Endeks kapsami filtresi (2026-11-18'de eklendi, bkz. CLAUDE.md
+        # "Endeks kapsami") - kullanicinin settings.PAPER_INDEX_SCOPE_OPTIONS'tan
+        # sectigi TEK kapsam, buy/sell/notify kriterinden BAGIMSIZ bir BOYUT.
+        # BIST100 secimi BIST30'u DISLAMAZ (BIST30 ⊆ BIST100 garantisi, bkz.
+        # bist_market_data.py) - entry["bist100"] zaten BIST30 uyeleri icin de
+        # True geliyor.
+        if index_scope == "BIST30" and not entry.get("bist30"):
+            continue
+        if index_scope == "BIST100" and not entry.get("bist100"):
             continue
         if entry["ticker"] in held_tickers:
             continue
@@ -619,6 +645,10 @@ def log_signal_changes(rows):
                     "rsi": row["rsi"],
                     "adx": row["adx"],
                     "rel_strength": row["rel_strength"],
+                    # Endeks kapsami filtresi (_send_push_notifications) icin -
+                    # bkz. 2026-11-18 "Endeks kapsami" bolumu, CLAUDE.md.
+                    "bist30": row.get("bist30"),
+                    "bist100": row.get("bist100"),
                 }
             )
         _last_logged_score[ticker] = score

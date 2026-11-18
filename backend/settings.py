@@ -45,31 +45,52 @@ PAPER_SELL_CRITERIA_OPTIONS = ("SAT", "GUCLU_SAT", "MUTLAK_SAT", "NOTR", "STOP",
 # otomatik alim/satim kriterinden (PAPER_BUY_CRITERIA_OPTIONS/PAPER_SELL_CRITERIA_OPTIONS)
 # TAMAMEN BAGIMSIZ, kendi DB sutunu (notify_criteria) var.
 PAPER_NOTIFY_CRITERIA_OPTIONS = ("GUCLU_AL", "MUTLAK_AL", "GUCLU_SAT", "MUTLAK_SAT")
+# Endeks kapsami (2026-11-18'de eklendi, kullanici istegi: "otomatik sinyal
+# gonderiminde ve otomatik satin alma tarafinda hangi hisselerde mesaj
+# gonderecegini secebilmeli... bist 30 bist 100 ve hepsi olarak secimlerinden
+# sadece biri yapilmali") - TEK bir ortak ayar, HEM Telegram SKOR sinyali
+# bildirimini (scanner._send_push_notifications) HEM otomatik alim adayligini
+# (paper_trading.run_paper_trading_cycle()'daki candidate dongusu) AYNI anda
+# etkiler - buy/sell/notify kriterlerinden (HANGI SKOR etiketleri) TAMAMEN
+# BAGIMSIZ bir BOYUT, onlarla CARPIMSAL calisir (orn. "GUCLU_AL" secili VE
+# kapsam "BIST30" ise, SADECE BIST30 icindeki GUCLU_AL gecisleri bildirilir/
+# alinir). SADECE otomatik YENI alimi ve bildirimi etkiler - zaten ACIK bir
+# pozisyonun SATISI (sinyal tersi/stop/hedef/sure asimi) kapsamdan BAGIMSIZ,
+# her zaman normal kurallarina gore calisir (bir hisse ceyreklik rebalans'ta
+# endeks disina cikabilir, elde tutulan bir pozisyonu bu yuzden satamamak
+# mantiksiz olurdu - "Sorunlu" isaretinin SADECE alimi durdurup satisi
+# etkilememesiyle AYNI ilke).
+PAPER_INDEX_SCOPE_OPTIONS = ("BIST30", "BIST100", "ALL")
 
 
 def get_paper_criteria() -> dict:
-    """Kullanicinin elle sectigi UC AYRI kriter kumesini DB'den okur:
-    "buy"/"sell" (otomatik alim/satimi tetikler, paper_trading.run_paper_trading_cycle()
-    kullanir) ve "notify" (SADECE Telegram SKOR sinyali bildirimini
-    tetikler, scanner._send_push_notifications() kullanir - buy/sell'den
-    BILINCLI olarak AYRI). Bos liste (kullanici bir grubun TUMUNU bilerek
-    secmemis) o yonde (alim/satim/bildirim) hic islem yapilmadigi anlamina
-    gelir, bu KASITLI (kullanicinin kendi secimi)."""
+    """Kullanicinin elle sectigi UC AYRI kriter kumesini + endeks kapsamini
+    DB'den okur: "buy"/"sell" (otomatik alim/satimi tetikler,
+    paper_trading.run_paper_trading_cycle() kullanir), "notify" (SADECE
+    Telegram SKOR sinyali bildirimini tetikler, scanner._send_push_notifications()
+    kullanir - buy/sell'den BILINCLI olarak AYRI) ve "index_scope"
+    (BIST30/BIST100/ALL - hem notify hem otomatik YENI alimi filtreler,
+    bkz. yukaridaki PAPER_INDEX_SCOPE_OPTIONS). Bos liste (kullanici bir
+    grubun TUMUNU bilerek secmemis) o yonde (alim/satim/bildirim) hic
+    islem yapilmadigi anlamina gelir, bu KASITLI (kullanicinin kendi
+    secimi)."""
     conn = scanner.get_db_connection()
     try:
         row = conn.execute(
-            "SELECT buy_criteria, sell_criteria, notify_criteria FROM paper_account WHERE id = 1"
+            "SELECT buy_criteria, sell_criteria, notify_criteria, index_scope FROM paper_account WHERE id = 1"
         ).fetchone()
         if row is None:
             return {
                 "buy": list(scanner._STRONG_BUY_ZONE),
                 "sell": list(scanner._DEFAULT_SELL_ZONE),
                 "notify": list(scanner._DEFAULT_NOTIFY_ZONE),
+                "index_scope": scanner._DEFAULT_INDEX_SCOPE,
             }
         return {
             "buy": [s for s in row["buy_criteria"].split(",") if s],
             "sell": [s for s in row["sell_criteria"].split(",") if s],
             "notify": [s for s in row["notify_criteria"].split(",") if s],
+            "index_scope": row["index_scope"],
         }
     finally:
         conn.close()
@@ -137,3 +158,21 @@ def set_paper_notify_criteria(labels) -> None:
             conn.commit()
         finally:
             conn.close()
+
+
+def set_index_scope(scope) -> bool:
+    """Endeks kapsamini (BIST30/BIST100/ALL) degistirir - gecersiz bir deger
+    sessizce REDDEDILIR (DB'ye hic yazilmaz, API tarafi zaten kendi SIKI
+    dogrulamasini yapar), False doner. Gecerliyse yazilir, True doner.
+    buy_criteria/sell_criteria/notify_criteria'nin HICBIRINE dokunmaz -
+    bu AYRI bir boyut (HANGI skor etiketleri DEGIL, HANGI endeks)."""
+    if scope not in PAPER_INDEX_SCOPE_OPTIONS:
+        return False
+    with scanner._DB_LOCK:
+        conn = scanner.get_db_connection()
+        try:
+            conn.execute("UPDATE paper_account SET index_scope = ? WHERE id = 1", (scope,))
+            conn.commit()
+        finally:
+            conn.close()
+    return True
