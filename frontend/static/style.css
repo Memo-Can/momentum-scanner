@@ -37,6 +37,20 @@
   header .meta { color: var(--muted); font-size: 12px; }
   .warning { color: var(--yellow); font-size: 12px; margin-top: 4px; }
   #header-controls { display: flex; align-items: center; gap: 10px; }
+  /* Endeks filtresi dropdown'u (2026-11-18'de eklendi, buton grubu YERINE -
+     kullanici istegi: arama kutusunun HEMEN SOLUNDA bir dropdown olsun) -
+     #search-input ile GORSEL olarak tutarli (ayni panel/border/renk). */
+  #index-filter-select {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    outline: none;
+    flex-shrink: 0;
+  }
+  #index-filter-select:focus { border-color: var(--yellow); }
   #search-wrap { position: relative; flex-shrink: 0; margin-left: 8px; }
   #search-input {
     width: 176px;
@@ -525,6 +539,7 @@
     #header-controls { width: auto; flex: 0 0 auto; }
     #search-wrap { width: 100%; margin-left: 0; flex: 1 1 100%; }
     #search-input { width: 100%; }
+    #index-filter-select { font-size: 12px; padding: 6px 8px; }
     .layout {
       flex-direction: column;
       flex: 0 0 auto;

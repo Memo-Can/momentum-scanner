@@ -50,6 +50,11 @@ const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
   {% if logged_in %}
   <button id="paper-view-toggle" class="market-tab-btn" type="button">Sanal Al-Sat</button>
   {% endif %}
+  <select id="index-filter-select" title="Endeks filtresi">
+    <option value="ALL">Hepsi</option>
+    <option value="BIST30">BIST 30</option>
+    <option value="BIST100">BIST 100</option>
+  </select>
   <div id="search-wrap">
     <input type="text" id="search-input" placeholder="Ara..." autocomplete="off">
     <span id="search-clear">&times;</span>

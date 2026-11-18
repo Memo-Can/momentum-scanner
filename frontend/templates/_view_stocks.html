@@ -63,8 +63,20 @@
 // tek bir tabloda HER ZAMAN tum hisseler gosterilsin, hangi endekse ait
 // olduklari ayri bir "Endeks" sutununda (bkz. asagidaki renderRows()) belli
 // olsun. Backend zaten her satiri bist30/bist100 bayraklariyla etiketliyor
-// (bkz. scanner_bist.py), bu bayraklar artik FILTRELEME icin degil
-// SADECE goruntuleme icin kullaniliyor.
+// (bkz. bist_scanner.py), bu bayraklar o zaman FILTRELEME icin degil
+// SADECE goruntuleme icin kullaniliyordu.
+//
+// 2026-11-18'de "#index-filter-select" (index.html'deki #market-tabs'ta,
+// arama kutusunun HEMEN SOLUNDA bir dropdown - kullanici istegi) ile
+// FILTRELEME GERI eklendi - AMA o zamanki kaldirma kararini bozmuyor:
+// o zamanki sorun hangi hissenin hangi endekste oldugunun sekme ARKASINDA
+// GIZLI olmasiydi, Endeks sutunu (seffaflik) HALA duruyor/kaldirilmadi. Bu
+// YENI filtre kullanicinin KENDI tercihiyle (localStorage'da kalici) GORUNEN
+// alt kumeyi secmesine yariyor - "gizli mantik" geri gelmedi, SADECE
+// "goster + istege bagli daralt" ikisi birlikte var. Dropdown HTML'i
+// index.html'de (arama kutusuyla AYNI #market-tabs konteyneri icinde,
+// "solunda" yerlesim icin) - event listener'i ise (search-input/search-clear
+// ile AYNI desen) burada, bu dosyanin script'inde.
 
 // Sembolik sutunlarin sayisal karsiligi - sirala derken "en guclu" once/sonra
 // gelsin diye. Skor icin cift ok, sinyal icin tek ok daha "guclu" sayilir.
@@ -85,6 +97,22 @@ let lastMissingCount = 0;
 // ilgili event listener'larda currentPage = 1 satirlarina bak).
 let pageSize = 30;
 let currentPage = 1;
+
+// Endeks filtresi (2026-11-18'de eklendi, kullanici istegi: "listeye filtre
+// ayari ekleyelim... secili olan ayar kayitli kalsin") - localStorage'da
+// KALICI (per-viewer, chartRange/paperEquityRange ile AYNI desen), 2026-11-03'te
+// kaldirilan BIST30/100/300 SEKMELERINDEN kasitli olarak FARKLI bir sey:
+// o zamanki sorun hangi hissenin hangi endekste oldugunun sekme arkasinda
+// GIZLI olmasiydi (Endeks sutunu yoktu) - artik Endeks sutunu HER ZAMAN
+// gorunur/seffaf, bu filtre SADECE kullanicinin gormek istedigi alt kumeyi
+// SECMESINE yariyor, eski "gizli mantik" sorunu geri gelmiyor.
+let indexFilter = localStorage.getItem('stockIndexFilter') || 'ALL';
+
+function applyIndexFilter(rows) {
+  if (indexFilter === 'BIST30') return rows.filter(r => r.bist30);
+  if (indexFilter === 'BIST100') return rows.filter(r => r.bist100);
+  return rows;
+}
 
 // Endeks sutununda GORUNEN kisa etiket - '30' (BIST30) / '100' (BIST100,
 // BIST30 HARIC) / '-' (hicbiri). BIST30, BIST100'un alt kumesi oldugu icin
@@ -259,18 +287,33 @@ function paginate(rows) {
 }
 
 function renderTable() {
-  const filtered = applySearch(latestRows);
+  const filtered = applySearch(applyIndexFilter(latestRows));
   const sorted = applySort(filtered);
   renderRows(paginate(sorted));
   updateHeaderIndicators();
 
-  const countText = searchQuery
+  const countText = (searchQuery || indexFilter !== 'ALL')
     ? `${filtered.length}/${latestRows.length} hisse (filtrelendi)`
     : `${latestRows.length} hisse`;
   document.getElementById('meta').textContent =
     `${countText} | güncelleme: ${lastUpdatedAt || '-'} | her ${REFRESH_SECONDS} sn'de yenilenir`;
   document.getElementById('warning').textContent =
     lastMissingCount ? `Uyarı: ${lastMissingCount} hisse için veri alınamadı, hedeflenen sayıya ulaşılamadı.` : '';
+}
+
+// localStorage'dan okunan indexFilter, dropdown'un HTML'deki varsayilan
+// secili secenegi (Hepsi) ile FARKLI olabilir (kullanici onceki ziyarette
+// baska bir filtre secmisse) - sayfa ilk acilirken dropdown'u dogru degere
+// getirmek icin bu senkronizasyon GEREKLI.
+const indexFilterSelect = document.getElementById('index-filter-select');
+if (indexFilterSelect) {
+  indexFilterSelect.value = indexFilter;
+  indexFilterSelect.addEventListener('change', () => {
+    indexFilter = indexFilterSelect.value;
+    localStorage.setItem('stockIndexFilter', indexFilter);
+    currentPage = 1;
+    renderTable();
+  });
 }
 
 document.querySelectorAll('#pager-controls [data-size]').forEach(btn => {
